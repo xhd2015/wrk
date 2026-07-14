@@ -1,0 +1,13 @@
+.DS_Store
+
+node_modules
+wrk-react/dist
+wrk-react/dist-ssr
+**/dist-ssr
+*.local
+
+.env
+.env.local
+.env.*.local
+
+Thumbs.db

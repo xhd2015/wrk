@@ -1,0 +1,544 @@
+package wrkcli
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	gitcmd "github.com/xhd2015/dot-pkgs/go-pkgs/git/cmd"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/git/checkout"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/git/scan_repo"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/git/status"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
+	"github.com/xhd2015/wrk/wrkcli/storage"
+	"github.com/xhd2015/gitops/git"
+)
+
+var wrkCheckoutOpts = checkout.Options{
+	StatusStyle:        status.StyleWrk,
+	PorcelainUntracked: true,
+}
+
+type statusBlockPrintOpts struct {
+	forceRel   string
+	showMaster *bool
+}
+
+func runStatus(workDir string, colorEnabled bool, fetchEnabled bool) error {
+	cwd, err := filepath.Abs(workDir)
+	if err != nil {
+		return fmt.Errorf("resolve cwd: %w", err)
+	}
+
+	if !worktree.IsInsideWorkTree(cwd) {
+		return fmt.Errorf("%s is not a git repository", cwd)
+	}
+
+	checkoutRoot, err := worktree.ShowToplevel(cwd)
+	if err != nil {
+		return err
+	}
+
+	if mainRepo, ok := linkedInTreeMainRepo(cwd); ok {
+		return runStatusLinkedInTreeCwd(cwd, mainRepo, colorEnabled)
+	}
+
+	repos, err := discoverStatusRepos(context.Background(), checkoutRoot)
+	if err != nil {
+		return err
+	}
+
+	scanPaths := make(map[string]struct{}, len(repos))
+	for _, repo := range repos {
+		scanPaths[storage.NormalizePath(repo.Path)] = struct{}{}
+	}
+
+	var appendEntries []worktree.Entry
+	if worktree.IsMainRepo(checkoutRoot) {
+		linked, err := worktree.ListLinked(checkoutRoot)
+		if err != nil {
+			return err
+		}
+		for _, entry := range linked {
+			if _, ok := scanPaths[storage.NormalizePath(entry.Path)]; ok {
+				continue
+			}
+			appendEntries = append(appendEntries, entry)
+		}
+	}
+
+	scanColorEnabled := colorEnabled && len(appendEntries) == 0
+	showRemote := worktree.IsMainRepo(checkoutRoot)
+	effectiveFetch := fetchEnabled && showRemote
+
+	blocksPrinted := 0
+	for _, repo := range repos {
+		if blocksPrinted > 0 {
+			fmt.Println()
+		}
+		if err := printStatusBlock(checkoutRoot, repo.Path, colorEnabled, scanColorEnabled, showRemote, effectiveFetch, statusBlockPrintOpts{}); err != nil {
+			return err
+		}
+		blocksPrinted++
+	}
+
+	for _, entry := range appendEntries {
+		if blocksPrinted > 0 {
+			fmt.Println()
+		}
+		printAppendedLinkedBlock(checkoutRoot, entry.Path, colorEnabled)
+		blocksPrinted++
+	}
+	return nil
+}
+
+func linkedInTreeMainRepo(cwd string) (string, bool) {
+	if !worktree.IsLinked(cwd) {
+		return "", false
+	}
+	mainRepo, err := worktree.ReadMainRepo(cwd)
+	if err != nil {
+		return "", false
+	}
+	cleanMain := filepath.Clean(mainRepo)
+	cleanCwd := filepath.Clean(cwd)
+	if cleanCwd == cleanMain {
+		return "", false
+	}
+	rel, err := filepath.Rel(cleanMain, cleanCwd)
+	if err != nil {
+		return "", false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return mainRepo, true
+}
+
+func runStatusLinkedInTreeCwd(cwd, mainRepo string, colorEnabled bool) error {
+	repos, err := discoverStatusRepos(context.Background(), mainRepo)
+	if err != nil {
+		return err
+	}
+
+	blocksPrinted := 0
+	printBlock := func(repoPath string, opts statusBlockPrintOpts) error {
+		if blocksPrinted > 0 {
+			fmt.Println()
+		}
+		blocksPrinted++
+		return printStatusBlock(mainRepo, repoPath, colorEnabled, colorEnabled, false, false, opts)
+	}
+
+	showMasterFalse := false
+	if err := printBlock(cwd, statusBlockPrintOpts{forceRel: ".", showMaster: &showMasterFalse}); err != nil {
+		return err
+	}
+
+	showMasterTrue := true
+	for _, repo := range repos {
+		if worktree.IsMainRepo(repo.Path) || !worktree.IsLinked(repo.Path) {
+			continue
+		}
+		if err := printBlock(repo.Path, statusBlockPrintOpts{showMaster: &showMasterTrue}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runRepos(workDir string) error {
+	cwd, err := filepath.Abs(workDir)
+	if err != nil {
+		return fmt.Errorf("resolve cwd: %w", err)
+	}
+
+	if !worktree.IsInsideWorkTree(cwd) {
+		return fmt.Errorf("%s is not a git repository", cwd)
+	}
+
+	checkoutRoot, err := worktree.ShowToplevel(cwd)
+	if err != nil {
+		return err
+	}
+
+	repos, err := discoverStatusRepos(context.Background(), checkoutRoot)
+	if err != nil {
+		return err
+	}
+	for _, repo := range repos {
+		rel, err := filepath.Rel(checkoutRoot, repo.Path)
+		if err != nil {
+			return fmt.Errorf("resolve relative repo path: %w", err)
+		}
+		fmt.Println(filepath.ToSlash(rel))
+	}
+	return nil
+}
+
+func discoverStatusRepos(ctx context.Context, root string) ([]scan_repo.Repo, error) {
+	result, err := scan_repo.Scan(ctx, scan_repo.Options{Roots: []string{root}})
+	return result.Repos, err
+}
+
+func printAppendedLinkedBlock(mainRepo, repoPath string, colorEnabled bool) {
+	dirLine := storage.NormalizePath(repoPath)
+
+	if worktree.IsDead(repoPath) {
+		fmt.Printf("Dir:          %s\n", dirLine)
+		fmt.Printf("Status:       prunable\n")
+		return
+	}
+
+	meta := checkout.Enrich(context.Background(), repoPath, wrkCheckoutOpts)
+	if meta.Error != "" {
+		printBrokenStatusBlock(dirLine, brokenStatusMessage(meta, repoPath), colorEnabled)
+		return
+	}
+	applyWrkStatusWithLinkedSkip(repoPath, &meta)
+	masterBrief, _, err := masterBriefForRepo(repoPath, meta.Branch, colorEnabled)
+	if err != nil {
+		printBrokenStatusBlock(dirLine, gitCombinedOutputError(repoPath, "status", "--porcelain"), colorEnabled)
+		return
+	}
+
+	fmt.Printf("Dir:          %s\n", dirLine)
+	fmt.Printf("Branch:       %s\n", meta.Branch)
+	fmt.Printf("Commit:       %s  %s\n", meta.CommitSHA, meta.CommitMsg)
+	fmt.Printf("Status:       %s\n", formatStatusText(meta.Status, colorEnabled, true))
+	fmt.Printf("Master:       %s\n", masterBrief)
+}
+
+func printBrokenStatusBlock(dirLine, msg string, colorEnabled bool) {
+	statusVal := "error: " + msg
+	if colorEnabled {
+		statusVal = colorize(statusVal, ansiRed)
+	}
+	fmt.Printf("Dir:          %s\n", dirLine)
+	fmt.Printf("Status:       %s\n", statusVal)
+}
+
+func brokenStatusMessage(meta checkout.Meta, repoPath string) string {
+	if meta.Error != "" {
+		return meta.Error
+	}
+	return gitCombinedOutputError(repoPath, "status", "--porcelain")
+}
+
+func printStatusBlock(root, repoPath string, colorEnabled, scanColorEnabled bool, showRemote bool, fetchEnabled bool, opts statusBlockPrintOpts) error {
+	rel := opts.forceRel
+	if rel == "" {
+		var err error
+		rel, err = filepath.Rel(root, repoPath)
+		if err != nil {
+			return fmt.Errorf("resolve relative repo path: %w", err)
+		}
+		if rel == "." {
+			rel = "."
+		}
+	}
+
+	meta := checkout.Enrich(context.Background(), repoPath, wrkCheckoutOpts)
+	if meta.Error != "" {
+		printBrokenStatusBlock(filepath.ToSlash(rel), brokenStatusMessage(meta, repoPath), colorEnabled)
+		return nil
+	}
+	applyWrkStatusWithLinkedSkip(repoPath, &meta)
+
+	hasMaster := worktree.IsLinked(repoPath)
+	if opts.showMaster != nil {
+		hasMaster = *opts.showMaster
+	}
+	var masterBrief string
+	if hasMaster {
+		var err error
+		masterBrief, _, err = masterBriefForRepo(repoPath, meta.Branch, scanColorEnabled)
+		if err != nil {
+			printBrokenStatusBlock(filepath.ToSlash(rel), gitCombinedOutputError(repoPath, "status", "--porcelain"), colorEnabled)
+			return nil
+		}
+	}
+
+	fmt.Printf("Dir:          %s\n", filepath.ToSlash(rel))
+	fmt.Printf("Branch:       %s\n", meta.Branch)
+	fmt.Printf("Commit:       %s  %s\n", meta.CommitSHA, meta.CommitMsg)
+
+	statusLine := formatStatusText(meta.Status, scanColorEnabled, true)
+	fmt.Printf("Status:       %s\n", statusLine)
+	if hasMaster {
+		fmt.Printf("Master:       %s\n", masterBrief)
+	} else if showRemote && rel == "." {
+		remoteLine, err := formatStatusRemoteLine(repoPath, meta.Branch, scanColorEnabled, fetchEnabled, meta.Status == "clean")
+		if err != nil {
+			return err
+		}
+		fmt.Println(remoteLine)
+	}
+	return nil
+}
+
+// applyWrkStatusWithLinkedSkip recomputes Meta.Status including untracked files
+// but excluding in-tree linked worktree paths (same skip as wrk --projects).
+// Git reports those checkouts as ?? under the main tree; they must not mark
+// the parent dirty when they are reported as their own status blocks.
+func applyWrkStatusWithLinkedSkip(repoPath string, meta *checkout.Meta) {
+	if meta == nil || meta.Error != "" {
+		return
+	}
+	var skip map[string]struct{}
+	if worktree.IsMainRepo(repoPath) {
+		if linked, err := worktree.ListLinked(repoPath); err == nil && len(linked) > 0 {
+			skip = skipUntrackedRelPaths(repoPath, linked)
+		}
+	}
+	if len(skip) == 0 {
+		// No linked paths to exclude; Enrich status already includes untracked.
+		return
+	}
+	counts, err := gitProjectStatusCountsWithSkip(repoPath, skip)
+	if err != nil {
+		return
+	}
+	meta.Status = status.FormatWrk(counts)
+}
+
+func formatStatusRemoteLine(mainRepoPath, currentBranch string, colorEnabled bool, fetchEnabled bool, isClean bool) (string, error) {
+	upstream, err := gitUpstreamRef(mainRepoPath)
+	if err != nil {
+		return "", err
+	}
+	if upstream == "" {
+		return "Remote:       (no upstream)", nil
+	}
+	if fetchEnabled {
+		if err := gitFetchUpstreamQuietNoOptionalLocks(mainRepoPath, upstream); err != nil {
+			return "Remote:       error: " + err.Error(), nil
+		}
+	}
+	remoteColor := colorEnabled && isClean
+	result, err := git.CompareBranches(mainRepoPath, upstream, currentBranch)
+	if err != nil {
+		return "Remote:       error: " + err.Error(), nil
+	}
+	return "Remote:       " + FormatRemoteBrief(result, remoteColor), nil
+}
+
+func projectBlockUsesColor(colorEnabled bool, counts status.WrkCounts, remoteRelation git.BranchRelation, dirtyWorktrees, worktreeErrors int) bool {
+	if !colorEnabled {
+		return false
+	}
+	if counts.Added != 0 || counts.Changed != 0 || counts.Renamed != 0 || counts.Deleted != 0 {
+		return true
+	}
+	if dirtyWorktrees > 0 {
+		return true
+	}
+	if worktreeErrors > 0 {
+		return true
+	}
+	switch remoteRelation {
+	case git.BranchRelationAIsAncestorOfB, git.BranchRelationBIsAncestorOfA, git.BranchRelationDiverged:
+		return true
+	default:
+		return false
+	}
+}
+
+func statusBlockUsesColor(colorEnabled bool, counts status.WrkCounts, hasMaster bool, masterRelation git.BranchRelation) bool {
+	if !colorEnabled {
+		return false
+	}
+	if counts.Added != 0 || counts.Changed != 0 || counts.Renamed != 0 || counts.Deleted != 0 {
+		return true
+	}
+	if counts.Added == 0 && counts.Changed == 0 && counts.Renamed == 0 && counts.Deleted == 0 {
+		return true
+	}
+	if hasMaster {
+		switch masterRelation {
+		case git.BranchRelationSame, git.BranchRelationAIsAncestorOfB, git.BranchRelationBIsAncestorOfA, git.BranchRelationDiverged:
+			return true
+		}
+	}
+	return false
+}
+
+func masterBriefForRepo(repoPath, wtBranch string, colorEnabled bool) (string, git.BranchRelation, error) {
+	mainRepo, err := worktree.ReadMainRepo(repoPath)
+	if err != nil {
+		return "", 0, err
+	}
+	mainBranch, err := gitcmd.Run(context.Background(), mainRepo, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", 0, err
+	}
+	result, err := git.CompareBranches(mainRepo, mainBranch, wtBranch)
+	if err != nil {
+		return "", 0, err
+	}
+	return FormatMasterBrief(result, colorEnabled), result.Relation, nil
+}
+
+func formatCompareWithRemote(mainRepoPath, currentBranch string, colorEnabled bool, fetchEnabled bool) (string, error) {
+	upstream, err := gitUpstreamRef(mainRepoPath)
+	if err != nil {
+		return "", err
+	}
+	if upstream == "" {
+		return "Remote:       (no upstream)", nil
+	}
+	if fetchEnabled {
+		if err := gitFetchUpstreamQuietNoOptionalLocks(mainRepoPath, upstream); err != nil {
+			return "", err
+		}
+	}
+	result, err := git.CompareBranches(mainRepoPath, upstream, currentBranch)
+	if err != nil {
+		return "", err
+	}
+	return "Remote:       " + FormatRemoteBrief(result, colorEnabled), nil
+}
+
+func gitUpstreamRef(repoPath string) (string, error) {
+	upstream, ok, err := gitcmd.RunOptional(context.Background(), repoPath, "rev-parse", "--abbrev-ref", "@{upstream}")
+	if err != nil || !ok {
+		// Match legacy gitOutput behavior: missing upstream is not an error.
+		return "", nil
+	}
+	return upstream, nil
+}
+
+func gitWorktreeIsClean(repoPath string) (bool, error) {
+	return worktree.IsCleanWrk(repoPath)
+}
+
+func gitCombinedOutput(repoPath string, args ...string) ([]byte, error) {
+	cmd := gitCommandDir(repoPath, args...)
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	return cmd.CombinedOutput()
+}
+
+func gitCombinedOutputError(repoPath string, args ...string) string {
+	out, err := gitCombinedOutput(repoPath, args...)
+	if err == nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func gitOutputNoOptionalLocks(repoPath string, args ...string) (string, error) {
+	return gitcmd.Run(context.Background(), repoPath, args...)
+}
+
+func parseProjectStatusCounts(out string, skipUntracked map[string]struct{}) status.WrkCounts {
+	if len(skipUntracked) == 0 {
+		return status.ParsePorcelainWrk(out)
+	}
+	var filtered strings.Builder
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "??") {
+			path := strings.TrimSpace(line[3:])
+			path = strings.TrimSuffix(path, "/")
+			if _, ok := skipUntracked[path]; ok {
+				continue
+			}
+		}
+		if filtered.Len() > 0 {
+			filtered.WriteByte('\n')
+		}
+		filtered.WriteString(line)
+	}
+	return status.ParsePorcelainWrk(filtered.String())
+}
+
+func gitFetchQuiet(repoPath string) error {
+	cmd := gitCommand("-C", repoPath, "fetch", "--quiet")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if len(out) > 0 {
+			return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+		}
+		return fmt.Errorf("git fetch: %w", err)
+	}
+	return nil
+}
+
+func gitFetchQuietNoOptionalLocks(repoPath string) error {
+	cmd := gitCommandWithEnv(repoPath, []string{"GIT_OPTIONAL_LOCKS=0"}, "fetch", "--quiet")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if len(out) > 0 {
+			return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+		}
+		return fmt.Errorf("git fetch: %w", err)
+	}
+	return nil
+}
+
+func gitFetchUpstreamQuietNoOptionalLocks(repoPath, upstream string) error {
+	remote, branch, ok := strings.Cut(upstream, "/")
+	if !ok || remote == "" || branch == "" {
+		return gitFetchQuietNoOptionalLocks(repoPath)
+	}
+	cmd := gitCommandWithEnv(repoPath, []string{"GIT_OPTIONAL_LOCKS=0"}, "fetch", "--quiet", remote, branch)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if len(out) > 0 {
+			return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+		}
+		return fmt.Errorf("git fetch: %w", err)
+	}
+	return nil
+}
+
+func formatStatusCounts(counts status.WrkCounts, colorEnabled bool, greenClean bool) string {
+	return formatStatusText(status.FormatWrk(counts), colorEnabled, greenClean)
+}
+
+func formatStatusText(plain string, colorEnabled bool, greenClean bool) string {
+	if plain == "clean" {
+		if colorEnabled && greenClean {
+			return colorize("clean", ansiGreen)
+		}
+		return "clean"
+	}
+	if !colorEnabled {
+		return plain
+	}
+	if !strings.HasPrefix(plain, "dirty (") || !strings.HasSuffix(plain, ")") {
+		return plain
+	}
+	inner := strings.TrimSuffix(strings.TrimPrefix(plain, "dirty ("), ")")
+	return colorize("dirty", ansiRed) + " (" + colorizeStatusSegments(inner) + ")"
+}
+
+func colorizeStatusSegments(inner string) string {
+	parts := strings.Split(inner, ", ")
+	for i, part := range parts {
+		fields := strings.SplitN(part, " ", 2)
+		if len(fields) != 2 {
+			continue
+		}
+		n, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		if n > 0 {
+			parts[i] = formatStatusCountSegment(n, fields[1])
+		} else {
+			parts[i] = colorize(part, ansiGrey)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatStatusCountSegment(n int, kind string) string {
+	s := fmt.Sprintf("%d %s", n, kind)
+	if n > 0 {
+		return colorize(s, ansiRed)
+	}
+	return colorize(s, ansiGrey)
+}

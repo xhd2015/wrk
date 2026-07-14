@@ -1,0 +1,40 @@
+# Scenario
+
+**Feature**: wrk --status reports every git directory discovered under the checkout root
+
+```
+# checkout root contains another independent git checkout
+myrepo + myrepo/tools/child -> wrk --status -> blocks for "." and "tools/child"
+```
+
+## Steps
+
+1. Initialize `{WorkRoot}/myrepo` as a git repo on branch `main`.
+2. Commit a root `.gitignore` containing `tools/` so the nested independent checkout is not
+   counted as untracked on the parent (parent porcelain stays clean when untracked is included).
+3. Initialize `{WorkRoot}/myrepo/tools/child` as an independent git repo on branch `main`.
+4. Run `wrk --status` from `{WorkRoot}/myrepo`.
+
+```go
+import "path/filepath"
+
+func Setup(t *testing.T, req *Request) error {
+	repo := filepath.Join(req.WorkRoot, "myrepo")
+	child := filepath.Join(repo, "tools", "child")
+
+	statusInitRepoWithSubject(t, repo, "root status repo")
+	// Nested independent git dirs appear as ?? on the parent when untracked files are
+	// included. Ignore tools/ so the root block stays clean while the child is still
+	// discovered by scan_repo and reports its own status.
+	writeFile(t, filepath.Join(repo, ".gitignore"), "tools/\n")
+	runGitIsolated(t, repo, "add", ".gitignore")
+	runGitIsolated(t, repo, "commit", "-m", "ignore nested tools")
+
+	statusInitRepoWithSubject(t, child, "child status repo")
+
+	req.RepoDir = repo
+	req.MainRepo = repo
+	req.DepPath = child
+	return nil
+}
+```

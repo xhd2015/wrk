@@ -1,0 +1,23 @@
+# Scenario
+
+**Feature**: --done follow-up after successful worktree remove
+
+```
+linked wt + WRK_FOLLOWUP_FILE
+wrk --done -> follow-up: cd <main-repo-abs>
+
+# --force-cd bypasses cwd-missing gate from surviving sibling
+sibling A (cwd); wrk --done B --force-cd + env -> cd <main>
+sibling A; wrk --done B --force-cd (no channel) -> shell @ main
+```
+
+## Steps
+
+1. Descendants create linked worktree then run --done.
+
+```go
+func Setup(t *testing.T, req *Request) error {
+	requireMode(t, req, "binary")
+	return nil
+}
+```
