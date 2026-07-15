@@ -151,6 +151,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	var webDev bool
 	// *int target: nil = --port absent; non-nil = present (0 allowed → auto later).
 	var portFlag *int
+	var scanGitRepos bool
+	var noCache bool
 	// *string targets: nil = flag absent; non-nil empty = present but empty.
 	// Cut("--exec") must be registered so tokens after --exec are never re-parsed as flags.
 	remaining, err := lessflags.Bool("--done", &done).
@@ -165,6 +167,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		Bool("--web", &webFlag).
 		Bool("--dev", &webDev).
 		Int("--port", &portFlag).
+		Bool("--scan-git-repos", &scanGitRepos).
+		Bool("--no-cache", &noCache).
 		String("--add", &addPath).
 		String("--rm", &removePath).
 		Bool("--confirm-from-stdin", &confirmFromStdin).
@@ -221,6 +225,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	if webFlag {
 		ctx.command = "web"
+	} else if scanGitRepos {
+		ctx.command = "scan-git-repos"
 	} else {
 		ctx.command = resolveCommand(projects, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, depPath, bringPath, allDeps, tagNext, syncFlag, cd, mainFlag)
 	}
@@ -233,15 +239,20 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		worktree.GitVerboseLogger = nil
 	}()
 
+	// --no-cache is only valid with --scan-git-repos.
+	if noCache && !scanGitRepos {
+		return fmt.Errorf("wrk: --no-cache is only valid with --scan-git-repos")
+	}
+
 	if fetchFlag && !projects && !status && !webFlag {
 		return fmt.Errorf("wrk: --fetch is only valid with --projects or --status")
 	}
 
-	// remaining holds 0, 1, or 2 positionals:
+	// remaining holds 0, 1, or 2 positionals for most modes:
 	//   remaining[0] = sourceDir (valid for ALL modes — cwd when absent)
 	//   remaining[1] = spawnTarget (create-only, was targetDir)
-	// More than two positionals is an error.
-	if len(remaining) > 2 {
+	// --scan-git-repos treats all remaining args as scan roots (any count).
+	if !scanGitRepos && len(remaining) > 2 {
 		return fmt.Errorf("wrk: unexpected arguments")
 	}
 	var sourceDir string
@@ -280,7 +291,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		otherMode := done || mergeBack || list || status || repos || projects ||
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || allDeps || tagNext || syncFlag ||
 			dryRun || pushFlag || jsonFlag || taskFlagSet || setTaskFlagSet || fetchFlag || noCd || forceCd ||
-			cd || mainFlag || confirmFromStdin || noInModuleReplace ||
+			cd || mainFlag || confirmFromStdin || noInModuleReplace || scanGitRepos ||
 			newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
 			noNewTerminal || openInAgent || noOpenInAgent || len(execArgs) > 0
 		ctx.workDir = origWd
@@ -298,6 +309,28 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			port = *portFlag
 		}
 		return runWeb(WebServeOptions{WrkHome: wrkHome, Port: port, Dev: webDev})
+	}
+
+	// --scan-git-repos discovers main repos under roots and records them.
+	if scanGitRepos {
+		otherMode := done || mergeBack || list || status || repos || projects ||
+			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" ||
+			allDeps || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || taskFlagSet ||
+			setTaskFlagSet || fetchFlag || noCd || forceCd || cd || mainFlag ||
+			confirmFromStdin || noInModuleReplace || webFlag ||
+			newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
+			noNewTerminal || openInAgent || noOpenInAgent || noConfig || len(execArgs) > 0
+		ctx.workDir = origWd
+		if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
+			return err
+		}
+		if otherMode {
+			return fmt.Errorf("wrk: --scan-git-repos is mutually exclusive with other modes")
+		}
+		if err := ctx.autoRecord(); err != nil {
+			return err
+		}
+		return runScanGitRepos(wrkHome, remaining, noCache)
 	}
 
 	// --cd requires exactly one path positional before defaulting workDir to cwd.
@@ -686,6 +719,8 @@ Flags:
   --status                        show status for git repos under this checkout
   --repos                         list git repos under this checkout
   --projects                      list recorded main repository paths
+  --scan-git-repos [ROOT...]      discover main git repos under roots and record them
+  --no-cache                      with --scan-git-repos: disable scan cache read/write
   --fetch                         with --projects or --status: fetch upstream before Remote: compare
   -v, --verbose                   log major git commands to stderr
   --add <dir>                     manually record a main repository path
@@ -795,6 +830,69 @@ func runProjects(wrkHome string, colorEnabled bool, fetchEnabled bool) error {
 	}
 	wg.Wait()
 
+	return nil
+}
+
+// runScanGitRepos discovers main git repositories under roots and records
+// newly seen paths in projects.json with source "scan". Already-known paths
+// are not re-printed. Empty CacheRoot uses the scan_repo library default.
+func runScanGitRepos(wrkHome string, roots []string, noCache bool) error {
+	if len(roots) == 0 {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return fmt.Errorf("wrk: --scan-git-repos requires at least one root (or ~/Projects)")
+		}
+		defaultRoot := filepath.Join(home, "Projects")
+		if st, err := os.Stat(defaultRoot); err != nil || !st.IsDir() {
+			return fmt.Errorf("wrk: --scan-git-repos requires at least one root (or ~/Projects)")
+		}
+		roots = []string{defaultRoot}
+	}
+
+	result, err := scan_repo.Scan(context.Background(), scan_repo.Options{
+		Roots:   roots,
+		NoCache: noCache,
+		// CacheRoot empty → product default when cache is enabled.
+	})
+	if err != nil {
+		return err
+	}
+	for _, re := range result.RootErrors {
+		fmt.Fprintf(os.Stderr, "warning: scan root %s: %s\n", re.Root, re.Error)
+	}
+
+	pf, err := storage.LoadProjects(wrkHome)
+	if err != nil {
+		return err
+	}
+	known := make(map[string]bool, len(pf.Projects))
+	for _, p := range pf.Projects {
+		known[storage.NormalizePath(p.Path)] = true
+	}
+
+	var newly []string
+	for _, repo := range result.Repos {
+		if repo.RepoType != scan_repo.RepoTypeMain {
+			continue
+		}
+		if repo.Error != "" {
+			continue
+		}
+		path := storage.NormalizePath(repo.Path)
+		if known[path] {
+			continue
+		}
+		if err := storage.RecordProject(wrkHome, path, storage.SourceScan); err != nil {
+			return err
+		}
+		known[path] = true
+		newly = append(newly, path)
+	}
+	// Stable order for multi-root discoveries.
+	sort.Strings(newly)
+	for _, path := range newly {
+		fmt.Println(path)
+	}
 	return nil
 }
 

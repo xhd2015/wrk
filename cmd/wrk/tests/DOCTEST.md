@@ -10,11 +10,11 @@ plus one-shot flags and `wrk --set-config --create …`), `wrk --dep` external d
 worktrees, `wrk --bring` best-effort local dep replacement (always worktree; soft SKIP
 when not a module/dependency), `wrk --done` merge-back (including external cascade),
 `wrk --list`, `wrk --status`, project persistence (`wrk --projects`, `wrk --add`,
-`wrk --rm`, auto-record, events.jsonl), `wrk --cd` directory jump (in-place follow-up
-or fallback interactive shell), `wrk --exec` cut-flag (run a trailing command in
-the mode target directory after successful create / `--cd` / `--dep` / `--bring` /
-`--set-task` / `--done`), and `wrk --web [--port PORT]` standalone HTTP workflow page
-(under `wrkcli`).
+`wrk --rm`, `wrk --scan-git-repos`, auto-record, events.jsonl), `wrk --cd` directory
+jump (in-place follow-up or fallback interactive shell), `wrk --exec` cut-flag (run a
+trailing command in the mode target directory after successful create / `--cd` /
+`--dep` / `--bring` / `--set-task` / `--done`), and `wrk --web [--port PORT]` standalone
+HTTP workflow page (under `wrkcli`).
 
 # DSN (Domain Specific Notion)
 
@@ -62,8 +62,9 @@ the mode target directory after successful create / `--cd` / `--dep` / `--bring`
 - **wrk --set-config** — management mode for `config.json` (v1: `--create` section and recommended `--show`). Mutually exclusive with create, all other modes, and **`--no-config`**. Merge-only keys implied by flags; `--new-window` also persists `terminal.mode=new`; negatives clear/disable axes; preserve unknown top-level keys. No git required. Successful write: empty stdout preferred; `--show` prints JSON + trailing `
 `. Event `command: "set-config"` when implemented.
 - **Request.PathPrepend / ExtraEnv / InterceptorLog** — shared harness fields: `PathPrepend` prepends a bin dir to `PATH` (fake `agent-run` for create-ux; historically fake interceptor tools); `ExtraEnv` adds `KEY=VAL` for the wrk process (create-ux mocks: `WRK_SPACE_INVOKE_LOG`, `DOT_PKGS_SPACE_GOOS`, `KOOL_ITERM2_*`, `FAKE_AGENT_RUN_LOG` / `FAKE_AGENT_RUN_CWD`); `InterceptorLog` remains for any leaf that records fake argv logs (create-ux prefers WorkRoot paths via helpers).
-- **Project record** — absolute path to the **main repo** (never a linked worktree path); deduplicated by normalized absolute `path`; fields `path`, `added_at` (ISO-8601 UTC), `source` (`auto` or `manual`); re-adding is idempotent (no duplicate entries; first `source` wins).
+- **Project record** — absolute path to the **main repo** (never a linked worktree path); deduplicated by normalized absolute `path`; fields `path`, `added_at` (ISO-8601 UTC), `source` (`auto`, `manual`, or `scan`); re-adding is idempotent (no duplicate entries; first `source` wins).
 - **Auto-record** — on **every** `wrk` invocation, after resolving the effective work directory: if dir missing → no record; if not inside git → no record; otherwise resolve to main repo via `worktree.ResolveMainRepo()` and append to `projects.json` with `source: "auto"` if not already present. Auto-record runs even when the command fails later; failed commands still append an event.
+- **wrk --scan-git-repos [ROOT...]** — standalone mode; mutually exclusive with other modes (`--projects`, `--add`, `--list`, create, etc.). Discovers git directories under each root via `scan_repo.Scan` (default product CacheRoot unless overridden), filters **`RepoTypeMain` only** (skips linked worktrees), and records each main with `storage.RecordProject(wrkHome, path, source)` where source is **`scan`** (`storage.SourceScan = "scan"`). **Roots**: remaining positionals after flags; when no roots are given, prefer `$HOME/Projects` if that directory exists, else clear error or empty with message. **Stdout**: each **newly** recorded absolute main path on its own line (trailing `\n`); already-known paths silent on stdout (optional summary on stderr). Exit 0 on success; partial root errors may warn on stderr. **`--no-cache`**: bool flag valid **only** with `--scan-git-repos`; passes `NoCache: true` to `scan_repo.Scan` (no cache read/write); bare `wrk --no-cache` → non-zero, stderr `wrk: --no-cache is only valid with --scan-git-repos`. Help documents `--scan-git-repos` and `--no-cache`.
 - **WRK_PROJECTS_PERF_LOG** — when set to a file path, `wrk --projects` appends JSONL latency events (`run_start`, `project_start`, `phase`, `worktree_status`, `phase_total`, `project_end`, `run_end`) without changing stdout/stderr; zero overhead when unset.
 - **Request.ProjectsPerfLog** — perf-profile tests: path written to `WRK_PROJECTS_PERF_LOG`.
 - **wrk --projects** — standalone mode; mutually exclusive with all other modes; prints one **detailed status block** per recorded main repo, sorted lexicographically by absolute path, with blank lines between blocks. **Never aborts** the run due to per-project or per-worktree git failures (exit 0 unless `projects.json` is unreadable); errors surface inline in stdout blocks; stderr stays empty for these cases (unless `-v` is set). **Default (no `--fetch`)**: skip `git fetch`; `Remote:` uses `git.CompareBranches` against local upstream tracking refs. **With `--fetch`**: run scoped upstream fetch (`gitFetchUpstreamQuietNoOptionalLocks`) before `Remote:` comparison per project. **Healthy main repo** blocks include absolute `Dir`, `Branch`, `Commit`, `Status` (same fields as `--status` for the main repo), plus `Remote:` (brief upstream sync summary via `git.CompareBranches`: `identical`, `needs push(+N commit(s))`, `needs pull(N commit(s) behind)`, `diverged(N commit(s))`, `(no upstream)` when the branch has no upstream, or `error: ...` inline when fetch/compare fails), and `Worktrees:` (four spaces after colon, aligned with other fields) with composable summary segments: `N total` and `M dirty` always; `K error` only when K > 0 (alive linked worktree path exists but `git status` fails); `P prune` only when P > 0 (registered in `git worktree list` but checkout directory missing per `worktree.IsDead`). After the `Worktrees:` line, each broken (alive, git-fails) worktree emits `  <absolute-path>  error: <full git stderr message>` (two-space indent); no per-path lines for prunable/dead worktrees. **Broken main repo** blocks omit Branch, Commit, Remote, and Worktrees entirely — only `Dir:` and `Status:       error: <full git stderr message>`. When stdout is a TTY or `--color` is set, highlights attention-worthy **value** portions only: red for the word `dirty`, each dirty count segment with N > 0, `Remote: diverged(...)`, `N dirty` when N > 0, `K error` when K > 0, broken-main `Status: error: ...` value, and per-worktree `error: ...` detail values; grey (`#90`) for dirty count segments with N = 0; orange (`#33`) for `needs push(...)` and `needs pull(...)`; separators `(`, `, `, `)` in dirty status lines stay uncolored; `clean`/`identical`/no-upstream/zero-dirty stay plain (no green on `--projects`). No `<dir>` required; exit 0 when empty (no output). Note: `needs merge back(+N commit(s))` and `needs fast forward(+N commit(s))` apply only to `--status` `Master:` (not `Remote:`).
@@ -632,16 +633,26 @@ wrk tests
     │   └── with-where/
     └── events/
         └── command-cd/           # events.jsonl command "cd"
-└── web/                          # wrk --web React SPA (wrk-react)
-    ├── mutual-exclusion/         # --web + other modes
-    │   ├── with-list/            # --web --list → mutually exclusive
-    │   └── with-status/          # --web --status → mutually exclusive
-    ├── port-without-web/         # --port without --web → only valid with --web
-    ├── unexpected-args/          # --web some-dir → unexpected arguments
-    ├── help-mentions-web/        # wrk -h documents --web and --port
-    ├── serves-page/              # WebProbe GET / → SPA shell + markers + listen URL
-    ├── mockup-repo-view/         # WebProbe GET /mockup/repo-view → SPA client-route 200
-    └── api-projects-empty/       # WebProbe GET /api/wrk/projects → {"projects":[]}
+├── web/                          # wrk --web React SPA (wrk-react)
+│   ├── mutual-exclusion/         # --web + other modes
+│   │   ├── with-list/            # --web --list → mutually exclusive
+│   │   └── with-status/          # --web --status → mutually exclusive
+│   ├── port-without-web/         # --port without --web → only valid with --web
+│   ├── unexpected-args/          # --web some-dir → unexpected arguments
+│   ├── help-mentions-web/        # wrk -h documents --web and --port
+│   ├── serves-page/              # WebProbe GET / → SPA shell + markers + listen URL
+│   ├── mockup-repo-view/         # WebProbe GET /mockup/repo-view → SPA client-route 200
+│   └── api-projects-empty/       # WebProbe GET /api/wrk/projects → {"projects":[]}
+└── scan-git-repos/               # wrk --scan-git-repos discover + RecordProject source=scan
+    ├── record/                   # success: discover mains under explicit roots
+    │   ├── basic-add/            # one main → projects.json source=scan + stdout path
+    │   ├── idempotent/           # already recorded → exit 0; no dup; empty stdout
+    │   ├── main-only/            # main + linked wt under root → only main recorded
+    │   └── with-no-cache/        # --scan-git-repos --no-cache ROOT still records
+    ├── mutual-exclusion/
+    │   └── with-projects/        # --scan-git-repos --projects → mutually exclusive
+    ├── no-cache-without-scan/    # bare --no-cache → only valid with --scan-git-repos
+    └── help-mentions-scan-git-repos/  # wrk -h documents --scan-git-repos and --no-cache
 ```
 
 ## Test Case Index
@@ -994,6 +1005,13 @@ wrk tests
 | 204 | web/serves-page | `wrk --web --port <free>`; GET `/` → 200 HTML markers; stdout listen URL + `\n` |
 | 205 | web/api-projects-empty | same server; GET `/api/wrk/projects` empty WRK_HOME → 200 `{"projects":[]}` |
 | 206 | web/mockup-repo-view | same server; GET `/mockup/repo-view` → 200 SPA shell (client route fallback) |
+| 207 | scan-git-repos/record/basic-add | one main under root; `source=scan`; stdout abs path |
+| 208 | scan-git-repos/record/idempotent | pre-seeded scan entry; second scan → no dup; empty stdout |
+| 209 | scan-git-repos/record/main-only | main + linked wt under root; only main recorded |
+| 210 | scan-git-repos/record/with-no-cache | `--scan-git-repos --no-cache ROOT` still discovers + records |
+| 211 | scan-git-repos/mutual-exclusion/with-projects | `--scan-git-repos --projects` → mutually exclusive |
+| 212 | scan-git-repos/no-cache-without-scan | bare `--no-cache` → only valid with `--scan-git-repos` |
+| 213 | scan-git-repos/help-mentions-scan-git-repos | `wrk -h` → mentions `--scan-git-repos` and `--no-cache` |
 
 ## How to Run
 
@@ -1232,6 +1250,17 @@ doctest test ./tests/web/mutual-exclusion/with-list
 doctest test ./tests/web/serves-page
 doctest test ./tests/web/mockup-repo-view
 doctest test ./tests/web/api-projects-empty
+
+# Run --scan-git-repos leaves (expect RED until wrk --scan-git-repos + SourceScan is implemented)
+doctest vet ./tests/scan-git-repos
+doctest test ./tests/scan-git-repos
+doctest test ./tests/scan-git-repos/record/basic-add
+doctest test ./tests/scan-git-repos/record/idempotent
+doctest test ./tests/scan-git-repos/record/main-only
+doctest test ./tests/scan-git-repos/record/with-no-cache
+doctest test ./tests/scan-git-repos/mutual-exclusion/with-projects
+doctest test ./tests/scan-git-repos/no-cache-without-scan
+doctest test ./tests/scan-git-repos/help-mentions-scan-git-repos
 ```
 
 

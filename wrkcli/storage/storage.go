@@ -14,6 +14,7 @@ import (
 const (
 	SourceAuto   = "auto"
 	SourceManual = "manual"
+	SourceScan   = "scan"
 )
 
 // Project is one recorded main repository entry.

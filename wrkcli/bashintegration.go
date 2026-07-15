@@ -111,6 +111,8 @@ var wrkCompletionFlags = []string{
 	"--status",
 	"--repos",
 	"--projects",
+	"--scan-git-repos",
+	"--no-cache",
 	"--fetch",
 	"-v", "--verbose",
 	"--color",
@@ -152,6 +154,7 @@ var wrkCompletionFlags = []string{
 
 var bashIntegrationDisallowedFlags = []string{
 	"--done", "--merge-back", "-l", "--list", "--repos", "--projects",
+	"--scan-git-repos", "--no-cache",
 	"--fetch", "-v", "--verbose", "--color", "--add", "--rm", "--where",
 	"--cd",
 	"--main",
