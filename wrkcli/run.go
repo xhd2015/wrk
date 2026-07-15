@@ -1884,16 +1884,28 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 	} else if len(existing) > 0 {
 		primary := existing[0]
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
-			return fmt.Errorf("wrk: %s already exists in %s; refusing non-interactive create (default is skip; re-run in a TTY)", basename, primary)
+			return fmt.Errorf("wrk: %s already has a linked worktree at %s; refusing non-interactive create (default is skip; re-run in a TTY)", basename, primary)
+		}
+		// Color on stderr only when interactive terminal and NO_COLOR is unset.
+		colorOn := term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == ""
+		warnTok := "warning:"
+		if colorOn {
+			warnTok = colorize("warning:", ansiOrange)
+		}
+		pathDisp := func(p string) string {
+			if colorOn {
+				return colorize(p, ansiGrey)
+			}
+			return p
 		}
 		if len(existing) > 1 {
-			fmt.Fprintf(os.Stderr, "wrk: warning: %s already has %d linked worktrees; reusing candidate %s\n", basename, len(existing), primary)
+			fmt.Fprintf(os.Stderr, "wrk: %s %s already has %d linked worktrees; reusing candidate %s\n", warnTok, basename, len(existing), pathDisp(primary))
 			for _, p := range existing[1:] {
-				fmt.Fprintf(os.Stderr, "wrk: warning: also present: %s\n", p)
+				fmt.Fprintf(os.Stderr, "wrk: %s also present: %s\n", warnTok, pathDisp(p))
 			}
 		}
-		// Prompt on stderr; default is skip (Y/empty).
-		fmt.Fprintf(os.Stderr, "%s already exists in %s, skip? [Y/n] ", basename, primary)
+		// Prompt on stderr; default is skip (Y/empty). No trailing newline before read.
+		fmt.Fprintf(os.Stderr, "wrk: %s %s already has a linked worktree at %s, skip creating another? [Y/n] ", warnTok, basename, pathDisp(primary))
 		line, err := readStdinLineForPrompt()
 		if err != nil {
 			return fmt.Errorf("wrk: read skip confirmation: %w", err)

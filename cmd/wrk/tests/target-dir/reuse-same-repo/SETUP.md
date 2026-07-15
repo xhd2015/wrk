@@ -5,7 +5,7 @@
 ```
 # Policy B: any live linked worktree of source mainRepo (not only under target / external/)
 # none -> create as today
-# some + TTY -> prompt "<basename> already exists in <path>, skip? [Y/n] "
+# some + TTY -> prompt "wrk: warning: <basename> already has a linked worktree at <path>, skip creating another? [Y/n]"
 #   Y/y/empty -> skip create; stdout = lex-smallest existing path
 #   n/N -> create as today under/at target-dir
 # some + non-TTY -> hard error; empty stdout; no new WT

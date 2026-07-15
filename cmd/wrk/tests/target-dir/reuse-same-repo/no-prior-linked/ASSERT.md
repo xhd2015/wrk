@@ -3,7 +3,7 @@
 - Exit code 0.
 - Stdout is `{WorkRoot}/target/myrepo-main-{WRK_DATE}`.
 - New linked worktree exists at that path with branch `main-{date}`.
-- Stderr does **not** contain `already exists` or `skip?`.
+- Stderr does **not** contain Policy B skip prompt tokens: `already has a linked worktree`, `skip creating`, or legacy `already exists` / `skip?`.
 
 ## Exit Code
 
@@ -23,6 +23,9 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertBranchCheckedOutInWorktree(t, wantPath, branchName("main", wrkDate, 0))
 	assertWorktreeListContains(t, req.TargetDir, wantPath)
 
+	// Policy B must not fire when source has no prior linked worktree.
+	assertNotContains(t, resp.Stderr, "already has a linked worktree")
+	assertNotContains(t, resp.Stderr, "skip creating")
 	assertNotContains(t, resp.Stderr, "already exists")
 	assertNotContains(t, resp.Stderr, "skip?")
 }

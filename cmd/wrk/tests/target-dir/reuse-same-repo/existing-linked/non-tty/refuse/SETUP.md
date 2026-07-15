@@ -4,7 +4,7 @@
 
 ```
 # existing WRK_HOME worktree + non-TTY
-# stderr: wrk: <basename> already exists in <path>; refusing non-interactive create …
+# stderr: wrk: <basename> already has a linked worktree at <path>; refusing non-interactive create (default is skip; re-run in a TTY)
 # empty stdout; no new worktree under target
 ```
 

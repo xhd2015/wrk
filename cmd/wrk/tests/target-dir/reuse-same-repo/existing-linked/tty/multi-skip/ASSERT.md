@@ -9,7 +9,7 @@ explanation: requires `script` fake TTY for skip prompt; platform-specific
 - Stdout refers to the lex-smallest existing path (`…/myrepo-main-{date}`, not `…-1`).
 - No new worktree under `{WorkRoot}/target/`.
 - Both prior worktrees remain.
-- Combined output mentions skip prompt; multi case may include "and N more" / also-present style text listing the other path.
+- Combined output mentions Policy B skip prompt (`already has a linked worktree`, `skip creating`) and primary (lex-smallest) path; multi case may include also-present / "more" style text listing the other path.
 
 ## Exit Code
 
@@ -45,8 +45,9 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertFileNotExists(t, filepath.Join(req.WorkRoot, "target", "myrepo-main-"+wrkDate+"-2"))
 
 	combined := resp.Stdout + resp.Stderr
-	assertContains(t, combined, "already exists")
-	assertContains(t, combined, "skip?")
+	assertContains(t, combined, "already has a linked worktree")
+	assertContains(t, combined, "skip creating")
+	assertContains(t, combined, "wrk: warning:")
 	assertContains(t, combined, smallest)
 	// Multi awareness: either explicit also-present / "more" wording, or at least other path mentioned.
 	if !strings.Contains(combined, other) && !strings.Contains(combined, "more") && !strings.Contains(combined, "also") {

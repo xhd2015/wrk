@@ -2,10 +2,11 @@
 
 - Non-zero exit.
 - Stdout empty.
-- Stderr contains refuse wording: basename, existing path, non-interactive / TTY, and that default is skip.
-- Suggested shape: `wrk: myrepo already exists in <absPath>; refusing non-interactive create (default is skip; re-run in a TTY)`
+- Stderr contains refuse wording: `already has a linked worktree`, basename, existing path, non-interactive / TTY, and that default is skip.
+- Shape: `wrk: myrepo already has a linked worktree at <absPath>; refusing non-interactive create (default is skip; re-run in a TTY)`
 - No new worktree under `{WorkRoot}/target/`.
 - Prior worktree unchanged.
+- No ANSI color required (non-TTY harness; plain refuse string).
 
 ## Exit Code
 
@@ -21,7 +22,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("stdout must be empty, got %q", resp.Stdout)
 	}
 
-	assertContains(t, resp.Stderr, "already exists")
+	assertContains(t, resp.Stderr, "already has a linked worktree")
 	assertContains(t, resp.Stderr, req.WtDir)
 	assertContains(t, resp.Stderr, "myrepo")
 	// Non-interactive refuse (stable substrings from design).

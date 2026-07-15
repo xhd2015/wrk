@@ -9,7 +9,7 @@ explanation: requires `script` fake TTY for skip prompt; platform-specific
 - A **new** worktree is created under `{WorkRoot}/target/myrepo-main-{date}` (or collides to `-1` if naming collides with branch — preferred path free except WRK_HOME prior uses branch `main-{date}`).
 - Because preferred branch `main-{date}` is already checked out in the prior WRK_HOME worktree, create under target uses joint path+branch suffix: path `…/target/myrepo-main-{date}-1` and branch `main-{date}-1` (same rules as today).
 - Prior WRK_HOME worktree still exists.
-- Combined output showed the skip prompt before create.
+- Combined output showed the Policy B skip prompt before create (`already has a linked worktree`, `skip creating`).
 
 ## Exit Code
 
@@ -41,7 +41,10 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertBranchCheckedOutInWorktree(t, wantNew, branchName("main", wrkDate, 1))
 
 	combined := resp.Stdout + resp.Stderr
-	assertContains(t, combined, "already exists")
-	assertContains(t, combined, "skip?")
+	assertContains(t, combined, "already has a linked worktree")
+	assertContains(t, combined, "skip creating")
+	assertContains(t, combined, "wrk: warning:")
+	assertContains(t, combined, req.WtDir)
+	assertContains(t, combined, "myrepo")
 }
 ```

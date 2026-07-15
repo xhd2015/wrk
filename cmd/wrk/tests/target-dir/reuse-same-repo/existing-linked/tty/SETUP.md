@@ -5,7 +5,7 @@
 ```
 # UseScriptTTY + StdinInput drives Y/n prompt on stderr
 existing linked WT of myrepo + TTY
-  -> prompt: <basename> already exists in <path>, skip? [Y/n]
+  -> prompt: wrk: warning: <basename> already has a linked worktree at <path>, skip creating another? [Y/n]
   -> answer Y/empty -> skip; answer n -> create under target
 ```
 

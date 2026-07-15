@@ -4,7 +4,7 @@
 
 ```
 # no live linked WT of myrepo -> wrk myrepo <target> creates new WT under target
-# no "already exists" / skip prompt on stderr
+# no Policy B prompt: no "already has a linked worktree" / "skip creating" on stderr
 myrepo (main only) -> wrk myrepo {WorkRoot}/target -> {WorkRoot}/target/myrepo-main-{date}
 ```
 
