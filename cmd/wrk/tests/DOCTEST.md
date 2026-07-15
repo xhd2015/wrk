@@ -47,8 +47,10 @@ the mode target directory after successful create / `--cd` / `--dep` / `--bring`
 - **--all-deps mutual exclusion** — `--all-deps` is mutually exclusive with `--dep`, `--done`, `--list`, and no-args create; `--all-deps --dep <x>` → non-zero exit, stderr mentions "mutually exclusive"; no positional args allowed.
 - **wrk --all-deps --dry-run** — runs the full read-only discovery/planning of `--all-deps` but writes nothing. Same cwd/git/go.mod validation, same `required`/`alreadyReplaced`/`consumerModule` sets, same registered-project discovery (`storage.ListProjects` + `modscan.Scan` per project), same self / not-required / already-replaced / seen / missing-path / non-git skips, and the SAME external-path naming + collision logic as the real run — but it does NOT `MkdirAll(external/)`, does NOT `ensureGitignoreExternal`, does NOT `createExternalWorktree` (no `git worktree add`/branch/remote/fetch), does NOT `GoModEditReplace`, and does NOT `GoModTidy`. stdout: one line per planned module in registered project path order `would: wrk <module-path> at ./external/<name>[/<subdir>]`, then a final `would: wrked <N> deps` (empty projects → single `would: wrked 0 deps`). Core guarantee: after a dry run `{consumerTop}/external/` does NOT exist, consumer `go.mod` is unchanged (no new replaces), and `.gitignore` is unchanged (no `/external` line). Errors that occur during planning (non-git cwd, unreadable go.mod) still surface as errors — the process "actually runs".
 - **--dry-run** — bool flag (no value); valid ONLY with `--all-deps`. Bare `wrk --dry-run`, or `--dry-run` with any other mode (`--dep`/`--done`/`--list`/no-args create) → non-zero exit, stderr `wrk: --dry-run is only valid with --all-deps`. It does NOT relax `--all-deps`'s mutual exclusion with `--dep`/`--done`/`--list` — `--dry-run --all-deps --dep <x>` still errors as mutually exclusive (the `--all-deps` mutual-exclusion check runs first).
-- **wrk --task <desc>** / **wrk -t <desc>** — `-t` and `--task` are equivalent (like `-l,--list`); `hasArg` / `taskFlagSet` detect both forms. Event `args` record whichever form was passed (e.g. `["-t", "desc"]` when `-t` is used). Flag valid only in create mode (no `--done`/`--list`/`--dep`/`--all-deps`). Derives a sanitized slug from `<desc>` (lowercase, non-letter-digit → `-`, collapse, trim, truncate 64 runes). Appends slug after the date in both dir and branch names: `{basename}-{token}-{date}-{slug}[-N]` for dir, `{token}-{date}-{slug}[-N]` for branch (token = sanitize(currentBranch); no `/`). Empty `<desc>` or slug → non-zero exit. No metadata file stored — the slug is embedded in the name.
-- **wrk --set-task <desc>** — flag valid alone (mutually exclusive with all other flags). When run from inside a linked worktree (no `<dir>`), renames that worktree. When run as `wrk <dir> --set-task <desc>`, renames the worktree at `<dir>`. Requires a **linked** worktree whose **directory basename** is wrk-shaped (contains a `YYYY-MM-DD` date segment); fixed user paths / non-wrk dir names → clear error. Parses the worktree's branch name to extract `branchBase` and `date` (branch must match wrk pattern `{branchBase}-{YYYY-MM-DD}[-slug][-N]`; non-wrk branches → error). New path/branch names use **sanitized** token (`/` → `-`) so legacy slash branches migrate on rename. If path or branch would collide, **suffix-walk** `-1`, `-2`, … (joint, keeping path/branch invariant) rather than hard-fail only. If nothing changes → `task unchanged` + trailing `\n`. Before `git worktree move`, checks stdout: TTY → warns (old→new path + branch) and prompts `Proceed? [Y/n]`; confirmation executes move + `git branch -m`. Non-TTY → non-zero exit `wrk: --set-task requires a terminal (tty)`. When run with `WRK_SET_TASK_CONFIRM=1` env → auto-confirms without TTY (test escape hatch). `<dir>` resolves to the effective working directory; empty `<dir>` (or absent) defaults to cwd.
+- **wrk --task <desc>** / **wrk -t <desc>** — `-t` and `--task` are equivalent (like `-l,--list`); `hasArg` / `taskFlagSet` detect both forms. Event `args` record whichever form was passed (e.g. `["-t", "desc"]` when `-t` is used). Flag valid only in create mode (no `--done`/`--list`/`--dep`/`--all-deps`). Derives a sanitized slug from `<desc>` (lowercase, non-letter-digit → `-`, collapse, trim, truncate 64 runes soft cap). Appends slug after the date in both dir and branch names: `{basename}-{token}-{date}-{slug}[-N]` for dir, `{token}-{date}-{slug}[-N]` for branch (token = sanitize(currentBranch); no `/`). Empty `<desc>` or slug → non-zero exit. No metadata file stored — the slug is embedded in the name. **Name budget**: after soft cap, further shorten slug so path last component and branch stay ≤ **255 bytes** (reserve **3** for `-99` suffix → fit target 252); never silently chop basename/token — if prefix alone exceeds budget → clear non-zero error. Wrk-managed invariant remains `filepath.Base(path) == basename + "-" + branch`. Agent `${task}` / create-UX prompt always receives the **full original** task text (`taskDesc`), never the fitted slug alone.
+- **Forgot `-t` / task-like positionals** — when the user omits `-t`/`--task`, create-mode positionals may still be **task-like**. Heuristic (any): contains ASCII whitespace (after trim non-empty); **or** length **> 120** bytes; **or** single path component would exceed **255** bytes / ENAMETOOLONG class. **Never** task-like when path-like (`/`, `\`, leading `~`/`./`/`../`), resolves to an **existing directory**, or single-arg **source resolve** (cwd path / projects basename) succeeds. **Two-arg** `wrk <dir> <arg2>` without `-t`: task-like arg2 → TTY (or `WRK_TASK_LIKE_CONFIRM=1` + piped stdin) prompts `Treat as --task? [Y/n]` (empty/`Y`/`y` → promote to `--task arg2` under default `WRK_HOME` naming; `n`/`N` → keep target-dir semantics); **non-TTY** without `-y` → hard error (looks like task / not a target directory) + hint with `-t`; **`-y`** auto-promotes without interactive prompt. Path-like / short tokens / existing dirs stay target-dir. When **`-t` already set**, second positional remains target-dir (no treat-as-task prompt). **One-arg** `wrk <arg1>`: task-like and not a resolvable source → same confirm/`-y`/non-TTY rules; promote creates from **cwd** with task; non-TTY error says not a source directory + `wrk -t '…'` hint. Existing source path/basename → normal create, no prompt.
+- **WRK_TASK_LIKE_CONFIRM** — when set to `1` with piped `StdinInput`, bypasses TTY detection for the treat-as-task Y/n prompt (same escape-hatch pattern as `WRK_BASENAME_CONFIRM` / `WRK_SET_TASK_CONFIRM`). Prefer `Request.ExtraEnv` entry `WRK_TASK_LIKE_CONFIRM=1` over `UseScriptTTY` when both work.
+- **wrk --set-task <desc>** — flag valid alone (mutually exclusive with all other flags). When run from inside a linked worktree (no `<dir>`), renames that worktree. When run as `wrk <dir> --set-task <desc>`, renames the worktree at `<dir>`. Requires a **linked** worktree whose **directory basename** is wrk-shaped (contains a `YYYY-MM-DD` date segment); fixed user paths / non-wrk dir names → clear error. Parses the worktree's branch name to extract `branchBase` and `date` (branch must match wrk pattern `{branchBase}-{YYYY-MM-DD}[-slug][-N]`; non-wrk branches → error). New path/branch names use **sanitized** token (`/` → `-`) so legacy slash branches migrate on rename. Same **name budget fit** as create (slug soft-cap 64 then fit ≤255 with `-99` reserve). If path or branch would collide, **suffix-walk** `-1`, `-2`, … (joint, keeping path/branch invariant) rather than hard-fail only. If nothing changes → `task unchanged` + trailing `\n`. Before `git worktree move`, checks stdout: TTY → warns (old→new path + branch) and prompts `Proceed? [Y/n]`; confirmation executes move + `git branch -m`. Non-TTY → non-zero exit `wrk: --set-task requires a terminal (tty)`. When run with `WRK_SET_TASK_CONFIRM=1` env → auto-confirms without TTY (test escape hatch). `<dir>` resolves to the effective working directory; empty `<dir>` (or absent) defaults to cwd.
 - **Request.TaskDesc** — when set, task description passed to wrk (with `Request.TaskFlag`, default `--task`).
 - **Request.TaskFlag** — task tests: CLI flag form for task description (`-t` or `--task`; default `--task` when `TaskDesc` is set).
 - **Request.SetTaskDesc** — when set, tests pass `--set-task <desc>` to wrk; test assertions verify rename side effects.
@@ -162,6 +164,8 @@ wrk tests
 │   ├── agent-quoting/
 │   │   ├── adversarial-task-quotes/      # argv-safe prompt for agent-in-process
 │   │   └── terminal-followup-quotes/     # shell-safe prompt in iterm follow-up
+│   ├── agent-full-task/                  # agent always gets full taskDesc
+│   │   └── name-budget-trim/             # long basename+task fitted; agent prompt = full text
 │   ├── target-dir-config-skipped/ # SpawnDir set → config create.* not applied
 │   │   ├── config-ignored/        # full config; no CLI UX → no space/iterm/agent
 │   │   ├── flags-still-apply/     # empty config; full CLI UX flags still run
@@ -404,38 +408,63 @@ wrk tests
 │           └── non-tty/
 │               └── refuse/       # hard error; empty stdout; no new WT
 ├── task/                          # wrk --task and wrk --set-task
-        ├── spawn/                     # --task when creating worktree
-        │   ├── basic/                 # wrk --task "fix login bug" → slug in name
-        │   ├── t-alias/               # wrk -t "fix login bug" → slug in name; event args use -t
-        │   ├── special-chars/         # capitals, symbols → sanitized slug
-        │   ├── long-task/             # >64 runes → truncated
-        │   ├── empty-task/            # --task "" → error
-        │   ├── empty-slug/            # --task "!!!" → error (slug empty)
-        │   ├── with-done/             # --task + --done → mutually exclusive
-        │   ├── sequence/              # two --task "same" calls → -N suffix
-        │   ├── branch-collision/      # pre-existing branch blocks → suffix
-        │   └── target-dir/            # wrk <dir> <target> --task → branch has slug
-        └── set-task/                  # --set-task inside linked worktree
-            ├── non-tty/               # non-TTY → "requires terminal" error
-            ├── empty-desc/            # --set-task "" → error
-            ├── empty-slug/            # --set-task "!!!" → error
-            ├── not-linked/            # from main repo → error
-            ├── not-wrk-worktree/      # custom branch → cannot parse → error
-            ├── fixed-path-unsupported/ # fixed spawn path dir name → error
-            ├── path-collision-suffix/ # target path exists → suffix walk
-            ├── branch-collision-suffix/ # target branch exists → suffix walk
-            ├── legacy-slash-migrate/  # feature/foo-{date} → sanitized rename
-            ├── rename-succeeds/       # TTY-confirmed rename via WRK_SET_TASK_CONFIRM=1
-            ├── slug-unchanged/        # same slug → no-op "task unchanged"
-            ├── propagate/             # --set-task updates gitdir for nested repos
-            │   ├── single-external-dep/ # external dep's gitdir updated to new path
-            │   ├── non-external-linked-dep/ # manual deps/foo linked wt gitdir updated to new path
-            │   └── abs-replace-rewritten/ # go.mod abs replace rewritten after consumer rename
-            └── with-dir/              # wrk <dir> --set-task (target via argument)
-                ├── rename-succeeds/   # rename worktree at given <dir>
-                ├── empty-desc/        # empty description → error
-                ├── mutually-exclusive/# with --list → mutual exclusion error
-                └── missing-dir/       # non-existent dir → "does not exist"
+│   ├── spawn/                     # --task when creating worktree
+│   │   ├── basic/                 # wrk --task "fix login bug" → slug in name
+│   │   ├── t-alias/               # wrk -t "fix login bug" → slug in name; event args use -t
+│   │   ├── special-chars/         # capitals, symbols → sanitized slug
+│   │   ├── long-task/             # >64 runes → truncated (soft cap regression)
+│   │   ├── name-budget/           # fit path/branch ≤255 bytes (reserve 3 for -99)
+│   │   │   ├── long-prefix-fit/   # long basename + long task → create; Base/branch ≤255
+│   │   │   └── prefix-alone-too-long/ # prefix exceeds budget → clear error
+│   │   ├── empty-task/            # --task "" → error
+│   │   ├── empty-slug/            # --task "!!!" → error (slug empty)
+│   │   ├── with-done/             # --task + --done → mutually exclusive
+│   │   ├── sequence/              # two --task "same" calls → -N suffix
+│   │   ├── branch-collision/      # pre-existing branch blocks → suffix
+│   │   └── target-dir/            # wrk <dir> <target> --task → branch has slug
+│   └── set-task/                  # --set-task inside linked worktree
+│       ├── non-tty/               # non-TTY → "requires terminal" error
+│       ├── empty-desc/            # --set-task "" → error
+│       ├── empty-slug/            # --set-task "!!!" → error
+│       ├── not-linked/            # from main repo → error
+│       ├── not-wrk-worktree/      # custom branch → cannot parse → error
+│       ├── fixed-path-unsupported/ # fixed spawn path dir name → error
+│       ├── path-collision-suffix/ # target path exists → suffix walk
+│       ├── branch-collision-suffix/ # target branch exists → suffix walk
+│       ├── legacy-slash-migrate/  # feature/foo-{date} → sanitized rename
+│       ├── rename-succeeds/       # TTY-confirmed rename via WRK_SET_TASK_CONFIRM=1
+│       ├── slug-unchanged/        # same slug → no-op "task unchanged"
+│       ├── name-budget-fit/       # long basename + long set-task → rename ≤255
+│       ├── propagate/             # --set-task updates gitdir for nested repos
+│       │   ├── single-external-dep/ # external dep's gitdir updated to new path
+│       │   ├── non-external-linked-dep/ # manual deps/foo linked wt gitdir updated to new path
+│       │   └── abs-replace-rewritten/ # go.mod abs replace rewritten after consumer rename
+│       └── with-dir/              # wrk <dir> --set-task (target via argument)
+│           ├── rename-succeeds/   # rename worktree at given <dir>
+│           ├── empty-desc/        # empty description → error
+│           ├── mutually-exclusive/# with --list → mutual exclusion error
+│           └── missing-dir/       # non-existent dir → "does not exist"
+├── forgot-task-flag/              # forgot -t: task-like positionals promote / error
+│   ├── two-arg/                   # wrk <dir> <arg2> without -t
+│   │   ├── task-like/
+│   │   │   ├── non-tty/           # hard error + -t hint
+│   │   │   │   ├── spaces/        # multi-word second positional
+│   │   │   │   ├── over-120-bytes/# length >120, no spaces
+│   │   │   │   └── over-255-component/ # component >255 / ENAMETOOLONG class
+│   │   │   ├── confirm-y/spaces/  # WRK_TASK_LIKE_CONFIRM + y → promote WRK_HOME
+│   │   │   ├── confirm-n/spaces/  # n → keep target-dir path
+│   │   │   └── yes-flag/spaces/   # -y auto-promote
+│   │   └── not-task-like/
+│   │       ├── path-like-dot-slash/ # ./real-target unchanged
+│   │       ├── short-token/       # out → target-dir
+│   │       └── with-explicit-task/# -t set → second stays target-dir
+│   └── one-arg/                   # wrk <arg1>
+│       ├── task-like/
+│       │   ├── non-tty/spaces/    # error + source-dir hint
+│       │   ├── confirm-y/spaces/  # promote create from cwd
+│       │   └── yes-flag/spaces/   # -y auto-promote from cwd
+│       └── not-task-like/
+│           └── existing-source/   # resolvable path → no prompt
 ├── yes-flag/                     # universal -y / --yes flag
 │   ├── done/
 │   │   ├── ahead-non-tty/        # wrk --done -y on own ahead wt (non-TTY)
@@ -729,7 +758,9 @@ wrk tests
 | 69 | task/spawn/basic | `wrk --task "fix login bug"` → dir/branch include `-fix-login-bug` |
 | 69a | task/spawn/t-alias | `wrk -t "fix login bug"` → same slug behavior; event `args: ["-t", "fix login bug"]` |
 | 70 | task/spawn/special-chars | Task with capitals, symbols, unicode → sanitized slug |
-| 71 | task/spawn/long-task | >64 runes → truncated to 64 |
+| 71 | task/spawn/long-task | >64 runes → truncated to 64 (soft cap regression) |
+| 71a | task/spawn/name-budget/long-prefix-fit | long basename + long task → create; Base/branch ≤255; slug fitted |
+| 71b | task/spawn/name-budget/prefix-alone-too-long | prefix alone over budget → clear non-zero error; no basename chop |
 | 72 | task/spawn/empty-task | `--task ""` → error |
 | 73 | task/spawn/empty-slug | `--task "!!!"` → error (slug empty after sanitization) |
 | 74 | task/spawn/with-done | `--task` + `--done` → mutually exclusive |
@@ -747,6 +778,7 @@ wrk tests
 | 82d | task/set-task/legacy-slash-migrate | Legacy `feature/foo-{date}` → sanitized rename with slug |
 | 83 | task/set-task/rename-succeeds | `--set-task "new task"` with WRK_SET_TASK_CONFIRM=1 → worktree renamed, branch renamed |
 | 84 | task/set-task/slug-unchanged | `--set-task` with same slug → no-op, prints "task unchanged" |
+| 84a | task/set-task/name-budget-fit | long basename + long `--set-task` → rename; Base/branch ≤255 |
 | 85 | task/set-task/propagate/single-external-dep | `--set-task` with external dep → consumer renamed, dep gitdir updated to new path |
 | 85a | task/set-task/propagate/non-external-linked-dep | `--set-task` with manual `deps/foo` linked wt → consumer renamed, dep gitdir updated to new path |
 | 85b | task/set-task/propagate/abs-replace-rewritten | `--set-task` with `wrk --dep` abs replace → go.mod replace rewritten to new consumer path |
@@ -754,6 +786,19 @@ wrk tests
 | 87 | task/set-task/with-dir/empty-desc | `wrk <dir> --set-task ""` → error |
 | 88 | task/set-task/with-dir/mutually-exclusive | `wrk <dir> --set-task "task" --list` → mutual exclusion error |
 | 89 | task/set-task/with-dir/missing-dir | `wrk <nonexistent> --set-task "task"` → does not exist |
+| 89a | forgot-task-flag/two-arg/task-like/non-tty/spaces | `wrk <dir> "fix the login bug"` non-TTY → error + `-t` hint |
+| 89b | forgot-task-flag/two-arg/task-like/non-tty/over-120-bytes | second positional >120 bytes non-TTY → error + hint |
+| 89c | forgot-task-flag/two-arg/task-like/non-tty/over-255-component | second positional >255 component non-TTY → error + hint |
+| 89d | forgot-task-flag/two-arg/task-like/confirm-y/spaces | WRK_TASK_LIKE_CONFIRM + y → promote to WRK_HOME task create |
+| 89e | forgot-task-flag/two-arg/task-like/confirm-n/spaces | confirm n → fixed multi-word target-dir path |
+| 89f | forgot-task-flag/two-arg/task-like/yes-flag/spaces | `-y` auto-promotes multi-word second positional |
+| 89g | forgot-task-flag/two-arg/not-task-like/path-like-dot-slash | `./real-target` → target-dir; no treat-as-task |
+| 89h | forgot-task-flag/two-arg/not-task-like/short-token | short `out` → target-dir |
+| 89i | forgot-task-flag/two-arg/not-task-like/with-explicit-task | `-t` set → second stays target-dir |
+| 89j | forgot-task-flag/one-arg/task-like/non-tty/spaces | one-arg multi-word non-TTY → error + source hint |
+| 89k | forgot-task-flag/one-arg/task-like/confirm-y/spaces | one-arg confirm y → create from cwd with task |
+| 89l | forgot-task-flag/one-arg/task-like/yes-flag/spaces | one-arg `-y` → create from cwd with task |
+| 89m | forgot-task-flag/one-arg/not-task-like/existing-source | existing source path → normal create; no prompt |
 | 83 | status/valid-git-cwd/root-clean | `wrk --status` from repo root shows `Dir: .` and clean status |
 | 84 | status/valid-git-cwd/subdir-clean | `wrk --status` from nested subdir shows `Dir: ../..` + Remote |
 | 85 | status/valid-git-cwd/multiple-git-dirs | root + nested independent git repo produce two status blocks |
@@ -923,6 +968,7 @@ wrk tests
 | 176 | create-ux/interceptor-ignored/native-create | leftover interceptor ignored; native create |
 | 177 | create-ux/agent-quoting/adversarial-task-quotes | argv-safe prompt for agent-in-process |
 | 178 | create-ux/agent-quoting/terminal-followup-quotes | shell-safe prompt in iterm follow-up |
+| 178a | create-ux/agent-full-task/name-budget-trim | long basename+task fitted; agent-run prompt = full taskDesc |
 | 179a | create-ux/target-dir-config-skipped/config-ignored | full config + SpawnDir; no CLI UX → mocks silent |
 | 179b | create-ux/target-dir-config-skipped/flags-still-apply | empty config + SpawnDir + full CLI UX → pipeline runs |
 | 179c | create-ux/target-dir-config-skipped/flag-only-no-config-agent | config agent on + SpawnDir + `--new-terminal` only → no agent |
@@ -1093,6 +1139,8 @@ doctest test ./tests/task/spawn/basic
 doctest test ./tests/task/spawn/t-alias
 doctest test ./tests/task/spawn/empty-task
 doctest test ./tests/task/spawn/sequence
+doctest test ./tests/task/spawn/long-task
+doctest test ./tests/task/spawn/name-budget
 
 # Run a task set-task leaf (non-TTY, expects error)
 doctest test ./tests/task/set-task/non-tty
@@ -1102,10 +1150,22 @@ doctest test ./tests/task/set-task/fixed-path-unsupported
 doctest test ./tests/task/set-task/path-collision-suffix
 doctest test ./tests/task/set-task/branch-collision-suffix
 doctest test ./tests/task/set-task/legacy-slash-migrate
+doctest test ./tests/task/set-task/name-budget-fit
 
 # Run a set-task with-dir leaf
 doctest test ./tests/task/set-task/with-dir/rename-succeeds
 doctest test ./tests/task/set-task/with-dir/missing-dir
+
+# Forgot -t / task-like positionals (expect RED until implemented)
+doctest vet ./tests/forgot-task-flag
+doctest test ./tests/forgot-task-flag
+doctest test ./tests/forgot-task-flag/two-arg/task-like/non-tty
+doctest test ./tests/forgot-task-flag/two-arg/task-like/confirm-y
+doctest test ./tests/forgot-task-flag/two-arg/task-like/yes-flag
+doctest test ./tests/forgot-task-flag/one-arg
+
+# Name budget + agent full taskDesc (expect RED until implemented)
+doctest test ./tests/create-ux/agent-full-task/name-budget-trim
 
 # Run projects leaves (expect RED until project persistence is implemented)
 doctest vet ./tests/projects

@@ -62,6 +62,14 @@ func CreateDefaultWorktree(projectPath, wrkHome, taskSlug string) (*CreateWorktr
 	}
 	basename := filepath.Base(mainRepo)
 
+	// Fit task slug so path/branch last components stay within 255 bytes.
+	// Callers may pass already-fitted slugs; fitting is idempotent.
+	fitted, fitErr := fitTaskSlugForNames(basename, pathToken, date, taskSlug)
+	if fitErr != nil {
+		return nil, fitErr
+	}
+	taskSlug = fitted
+
 	worktreesDir := filepath.Join(wrkHome, "worktrees")
 	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create worktrees dir: %w", err)

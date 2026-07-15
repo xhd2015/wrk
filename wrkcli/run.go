@@ -393,9 +393,26 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		Positionals: remaining,
 	}
 	// Basename fallback: create/status/list/repos/--cd. --main uses cwd only.
+	// One-arg create: if source resolve fails and the arg is task-like, offer
+	// treat-as-task (promote creates from process cwd).
+	var promotedTask string
 	workDir, err := resolveSourceWorkDir(origWd, sourceDir, createMode || status || list || repos || cd, wrkHome, dirHint)
 	if err != nil {
-		return err
+		if createMode && !taskFlagSet && sourceDir != "" && spawnTarget == "" && isTaskLike(sourceDir) {
+			promote, perr := confirmTaskLikePromote("source", sourceDir, assumeYes)
+			if perr != nil {
+				return perr
+			}
+			if promote {
+				promotedTask = sourceDir
+				workDir = origWd
+				err = nil
+			} else {
+				return err
+			}
+		} else {
+			return err
+		}
 	}
 	ctx.workDir = workDir
 	if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
@@ -614,6 +631,24 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	task := ""
 	if taskDesc != nil {
 		task = *taskDesc
+	}
+	if promotedTask != "" {
+		task = promotedTask
+	}
+
+	// Two-arg create without -t: second positional may be a forgotten task description.
+	// When -t is already set, second remains target-dir (no treat-as-task).
+	if createMode && !taskFlagSet && promotedTask == "" && spawnTarget != "" {
+		if isTaskLike(spawnTarget) && !isExistingDirArg(spawnTarget, origWd) {
+			promote, perr := confirmTaskLikePromote("target", spawnTarget, assumeYes)
+			if perr != nil {
+				return perr
+			}
+			if promote {
+				task = spawnTarget
+				spawnTarget = ""
+			}
+		}
 	}
 
 	// With <target-dir> or --no-config, skip config create.* UX; CLI flags still apply.
@@ -1812,8 +1847,9 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 	}
 	basename := filepath.Base(mainRepo)
 
-	// Derive task slug if --task was set.
+	// Derive task slug if --task was set (or promoted from a task-like positional).
 	// CLI rejects empty/whitespace task text when the flag is present with empty value.
+	// Fit slug to path/branch 255-byte budget (reserve 3 for -N); agent still gets full taskDesc.
 	var slug string
 	if taskDesc != "" {
 		if strings.TrimSpace(taskDesc) == "" {
@@ -1824,6 +1860,11 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 			return fmt.Errorf("wrk: task description %q produces an empty slug", taskDesc)
 		}
 	}
+	fitted, fitErr := fitTaskSlugForNames(basename, pathToken, date, slug)
+	if fitErr != nil {
+		return fitErr
+	}
+	slug = fitted
 
 	if targetDir != "" {
 		return runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, branchBase, pathToken, date, slug, noCd, forceCd, execArgs, taskDesc, ux)
@@ -2223,6 +2264,13 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 	basename := filepath.Base(mainRepo)
 	// Sanitize so legacy slash branches (feature/foo-DATE) migrate to feature-foo-…
 	pathToken := sanitizeBranchToken(branchBase)
+
+	// Fit slug to path/branch component budget (same rules as create).
+	fittedSlug, fitErr := fitTaskSlugForNames(basename, pathToken, date, newSlug)
+	if fitErr != nil {
+		return fitErr
+	}
+	newSlug = fittedSlug
 
 	// Compute new names. We don't know the old suffix from the dir name alone,
 	// so we derive it from the current dir basename. Find the wrk-style naming
