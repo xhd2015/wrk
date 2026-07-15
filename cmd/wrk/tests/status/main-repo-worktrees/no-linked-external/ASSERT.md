@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Single scan block for main only — no appended section.
+- Single primary block for main only — no linked paths, no section header.
 - Stderr is empty.
 
 ## Exit Code
@@ -18,8 +18,12 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
 	assertStdoutBlocksSeparated(t, resp.Stdout, 1)
-	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
+	assertNoExternalSectionHeader(t, resp.Stdout)
+	assertOutputExact(t, resp.Stdout, statusStdoutPrimaryExternal(t,
+		[]string{
+			scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
+		},
+		nil,
 	))
 }
 ```

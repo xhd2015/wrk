@@ -1,13 +1,13 @@
 # Scenario
 
-**Feature**: scan shows in-tree linked wt; append shows external only
+**Feature**: main-repo status primary order follows ListLinked for in-tree + out-of-tree linked
 
 ```
-# wrk external + in-tree git worktree add
+# wrk out-of-tree + in-tree git worktree add (both main-owned → primary)
 myrepo -> wrk external + wt-linked in-tree
 
-# scan: main + wt-linked (Dir via statusDirLine); append: external only
-wrk --status from main -> dedup in-tree, append external
+# primary: main then ListLinked porcelain order; external empty → no header
+wrk --status from main -> primary three blocks; no "---- external ----"
 ```
 
 ## Steps

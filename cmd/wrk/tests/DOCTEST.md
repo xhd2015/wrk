@@ -36,7 +36,7 @@ after successful create / `--cd` / `--dep` / `--bring` / `--set-task` / `--done`
 - **--json with primary** — `--json` is **only** valid with bare `--tag-next` (machine-readable plan/result). `--done --json` and `--merge-back --json` → non-zero; stderr names `--json` and the primary (`wrk: --json is not valid with --done` / `… with --merge-back`). Not a silent accept into merge-back or tag-next.
 - **wrk --done** — resolves checkout root via `ShowToplevel(cwd)`; requires a linked worktree (not main repo); clean worktree; implicit `--rm`. **Cascade**: `scan_repo.Scan(consumerTop)` discovers every git directory under the checkout; for each row where `RepoType == worktree` and `IsLinked(path)` and `path != checkoutRoot`, run `mergeBackExternalWorktree(path)` in scan path order (path-sorted). This covers `external/*` dep worktrees **and** manually linked worktrees elsewhere (e.g. `deps/foo`). Skip `RepoTypeMain` nested repos (no merge-back/delete). Each cascaded worktree is a dep-repo worktree (registered under `<depMain>/.git/worktrees/`), so `MergeBack` resolves its main repo from the worktree's `.git` gitdir (the dep main) and merges the dep branch back into the dep repo (the branch shares the dep's history, so merge-base resolves); this ensures dep work committed on a nested linked worktree is merged back before removal. Relation to dep main: already-included → remove only; ahead/diverged → prompt (TTY / `-y` on TTY / `--confirm-from-stdin` on own worktree only). **Non-TTY pre-flight guard (option A)**: if stdin is not a terminal and any cascaded linked worktree needs ahead/diverged confirmation, reject `--done` before any cascade mutation — `-y` and `--confirm-from-stdin` do not bypass. No force-removal fallback. The consumer's own `checkoutRoot` is excluded (finished by the final `MergeBack` in `runDone`). **Guard**: scan **every** Go module under the checkout (`gotool/mod/scan.Scan`) — main + all sub-modules — and classify each filesystem/local `replace` (`./`, `../`, or absolute path without version) by resolving its target relative to the module's `go.mod` dir: **intra-repo** = target dir exists AND `git -C <target> rev-parse --show-toplevel` equals the consumer's toplevel (a `../../`/`./sub` nested-module reference back into the same repo); **extra-repo** = everything else (`./external/foo` dep worktree, non-existent target, absolute path to another checkout, sibling outside) (`./external/foo` dep worktree, non-existent target, absolute/sibling outside). The guard names the offending `<top>/<m.Dir>/go.mod` file and each `replace <Old> => <New>` directive in its message. Default (no flag): intra-repo → **WARN to stderr and proceed** (exit 0, merge-back runs); extra-repo → **error, block**. `--no-in-module-replace` (opt-in, valid only with `--done`) → **all** local replaces block (fully-strict). A checkout with no `go.mod` at all yields zero modules → guard is a no-op → `--done` proceeds (and the linked-worktree check inside `MergeBack` still runs for a main-repo cwd, producing `not a linked worktree`). Branch relation to main: already-included → remove only; ahead/diverged → prompt then merge/rebase (or `-y` / `--confirm-from-stdin` on own worktree).
 - **wrk --list** — runs `git -C <cwd> worktree list`; prints stdout unchanged; cwd must be inside a git work tree (main repo, linked worktree, or nested subpath). Mutually exclusive with no-args create and `--done`.
-- **wrk --status** — standalone reporting mode; cwd must be inside a git work tree. Resolves the effective cwd's checkout root with git toplevel discovery, calls `scan_repo.Scan(context.Background(), scan_repo.Options{Roots: []string{Root}})`, and prints every discovered git directory in scan path order. Each block includes `Dir` via **`statusDirLine`** (see below), current branch, short commit hash plus subject, and `Status` as either `clean` or `dirty (<added> added, <changed> changed, <renamed> renamed, <deleted> deleted)` (wrk taxonomy: porcelain `??` untracked counts as **added**, same as index `A` / `wrk --projects`). **`statusDirLine` (all Dir lines)**: `rel = filepath.Rel(normalize(invocationCwd), normalize(repoPath))`; on Rel failure or when cleaned rel has **more than two** leading `..` segments → absolute `storage.NormalizePath(repoPath)`; else `filepath.ToSlash(rel)`. Pure Rel (no soft force of `.` merely because cwd is inside the checkout). Applies to scan blocks, appended external blocks, and broken/prunable minimal blocks. **Main-repo status content** (`worktree.IsMainRepo(checkoutRoot)`): the main-repo scan block also includes `Remote:` — same brief upstream labels as `--projects` (`identical`, `needs push`, `needs pull`, `diverged`, `(no upstream)`); field order is `Dir`, `Branch`, `Commit`, `Status`, `Remote` (no `Worktrees:`). `Remote:` is gated on **main identity** (repoPath is main), **not** on `Dir == "."`. `Remote:` uses local upstream tracking refs by default; with `--fetch`, fetch upstream for the main repo first then compare. Nested independent `RepoTypeMain` sub-repos and **linked worktree blocks** do **not** show `Remote:`. Running from a **linked worktree cwd** omits `Remote:` on all blocks (append phase also skipped). **Linked worktrees only** (`worktree.IsLinked`) also include one-line `Master:` — brief branch-relation label comparing main repo's current branch vs the worktree's current branch via `git.CompareBranches` (`identical`, `needs merge back(+N commit(s))`, `needs fast forward(+N commit(s))`, `diverged(N commit(s))`). Main checkout blocks (other than `Remote:` above) and nested independent `RepoTypeMain` repos do **not** show `Master:`. When stdout is a TTY or `--color` is set, `Status: clean` is green; dirty status uses granular red/grey segments (same rules as `--projects`); `Master:` and `Remote:` values follow `--projects` color rules when applicable. Without color: plain text. **Scan-discovered broken** (alive checkout, `checkout.Enrich` or `masterBriefForRepo` fails during scan phase): minimal block with `Dir` via `statusDirLine` + `Status: error: <git stderr>` only (no `Branch`/`Commit`/`Remote`/`Master:`); red `error: …` when `--color`/TTY; run continues for remaining repos; exit 0; stderr empty (unless `-v`). Same non-fatal policy as `--projects` per-repo errors and appended broken blocks. **Append phase (main repo only)**: when `worktree.IsMainRepo(checkoutRoot)`, after all scan blocks (blank line between every block), append one block per **external** linked worktree from `worktree.ListLinked(mainRepo)` in porcelain order, skipping paths already in scan (`scanPaths` dedup — in-tree linked wts like `myrepo/wt-linked` are scan-only). Appended healthy blocks use `statusDirLine` for `Dir` with full fields (`Branch`, `Commit`, `Status`, `Master:`). Appended **broken** (alive checkout, git fails) blocks are minimal: `Dir` + `Status: error: <git stderr>` only (red `error: …` when `--color`/TTY; run continues). Appended **prunable** (`worktree.IsDead`) blocks are minimal: `Dir` + `Status: prunable` only (plain text). Running from a linked worktree cwd skips the append phase entirely. Mutually exclusive with `--done`, `--list`, `--dep`, `--all-deps`, create target arguments, and other modes. **Composition with `--main`**: `wrk --main --status` and `wrk --status --main` (order irrelevant) run status of the **main repository** of the resolved checkout — resolve `ShowToplevel(workDir)` → `ResolveMainRepo` then `runStatus` on main for content; **Dir labels still use original invocation cwd**. No nested shell. Event `command` is `"status"` with `args` including both `--main` and `--status`. From an in-tree linked cwd, always full main-repo status (not the linked-cwd shortcut in `runStatusLinkedInTreeCwd`). Equivalence: same blocks and Branch/Commit/Status/Master/Remote as `(cd <mainRepo> && wrk --status)`; **Dir may differ** when invocation cwd ≠ main. Pure `wrk --main` (shell) and pure `wrk --status` (current checkout) stay unchanged. `--fetch` / `--color` / `-v` remain allowed with the pair.
+- **wrk --status** — standalone reporting mode; cwd must be inside a git work tree. Resolves the effective cwd's checkout root with git toplevel discovery, calls `scan_repo.Scan(context.Background(), scan_repo.Options{Roots: []string{Root}})`, and for main-repo roots prints primary then optional external sections (see Main-repo sections below); non-main roots keep scan-order discovery. Each block includes `Dir` via **`statusDirLine`** (see below), current branch, short commit hash plus subject, and `Status` as either `clean` or `dirty (<added> added, <changed> changed, <renamed> renamed, <deleted> deleted)` (wrk taxonomy: porcelain `??` untracked counts as **added**, same as index `A` / `wrk --projects`). **`statusDirLine` (all Dir lines)**: `rel = filepath.Rel(normalize(invocationCwd), normalize(repoPath))`; on Rel failure or when cleaned rel has **more than two** leading `..` segments → absolute `storage.NormalizePath(repoPath)`; else `filepath.ToSlash(rel)`. Pure Rel (no soft force of `.` merely because cwd is inside the checkout). Applies to scan blocks, appended external blocks, and broken/prunable minimal blocks. **Main-repo status content** (`worktree.IsMainRepo(checkoutRoot)`): the main-repo scan block also includes `Remote:` — same brief upstream labels as `--projects` (`identical`, `needs push`, `needs pull`, `diverged`, `(no upstream)`); field order is `Dir`, `Branch`, `Commit`, `Status`, `Remote` (no `Worktrees:`). `Remote:` is gated on **main identity** (repoPath is main), **not** on `Dir == "."`. `Remote:` uses local upstream tracking refs by default; with `--fetch`, fetch upstream for the main repo first then compare. Nested independent `RepoTypeMain` sub-repos and **linked worktree blocks** do **not** show `Remote:`. Running from a **linked worktree cwd** omits `Remote:` on all blocks (append phase also skipped). **Linked worktrees only** (`worktree.IsLinked`) also include one-line `Master:` — brief branch-relation label comparing main repo's current branch vs the worktree's current branch via `git.CompareBranches` (`identical`, `needs merge back(+N commit(s))`, `needs fast forward(+N commit(s))`, `diverged(N commit(s))`). Main checkout blocks (other than `Remote:` above) and nested independent `RepoTypeMain` repos do **not** show `Master:`. When stdout is a TTY or `--color` is set, `Status: clean` is green; dirty status uses granular red/grey segments (same rules as `--projects`); `Master:` and `Remote:` values follow `--projects` color rules when applicable; the main-repo external section header `---- external ----` is full-line grey (`ansiGrey` / `#90`). Without color: plain text (including plain header). **Scan-discovered broken** (alive checkout, `checkout.Enrich` or `masterBriefForRepo` fails during scan phase): minimal block with `Dir` via `statusDirLine` + `Status: error: <git stderr>` only (no `Branch`/`Commit`/`Remote`/`Master:`); red `error: …` when `--color`/TTY; run continues for remaining repos; exit 0; stderr empty (unless `-v`). Same non-fatal policy as `--projects` per-repo errors and appended broken blocks. **Main-repo sections (P2+P3)**: when `worktree.IsMainRepo(checkoutRoot)`, partition via `PartitionStatusPaths(main, scanPaths, ListLinked)` — **primary** = main then all ListLinked paths in porcelain order (in-tree + out-of-tree WRK + prunable); **external** = scan paths not in primary, path-sorted. Print primary blocks first; if external non-empty, after last primary: blank line, header `---- external ----` (P3: gray ANSI `ansiGrey` / `#90` when colorEnabled via TTY or `--color`; plain ASCII when color off), blank line, then external blocks. Omit header when external empty. Main-owned WRK out-of-tree linked worktrees are **primary** (no section header for them alone). Out-of-tree/prunable primary linked keep `printAppendedLinkedBlock` presentation (healthy: full + `Master:`; broken/prunable: minimal). Nested external always `printStatusBlock`. Running from a linked worktree cwd without `--main` skips main-repo sectioning (scan-only shortcut). Mutually exclusive with `--done`, `--list`, `--dep`, `--all-deps`, create target arguments, and other modes. **Composition with `--main`**: `wrk --main --status` and `wrk --status --main` (order irrelevant) run status of the **main repository** of the resolved checkout — resolve `ShowToplevel(workDir)` → `ResolveMainRepo` then `runStatus` on main for content; **Dir labels still use original invocation cwd**. No nested shell. Event `command` is `"status"` with `args` including both `--main` and `--status`. From an in-tree linked cwd, always full main-repo status (not the linked-cwd shortcut in `runStatusLinkedInTreeCwd`). Equivalence: same blocks and Branch/Commit/Status/Master/Remote as `(cd <mainRepo> && wrk --status)`; **Dir may differ** when invocation cwd ≠ main. Pure `wrk --main` (shell) and pure `wrk --status` (current checkout) stay unchanged. `--fetch` / `--color` / `-v` remain allowed with the pair.
 - **-y / --yes** — universal top-level bool flag; no-op on commands without Y/n prompts (create, `--list`, basename `Select [1-N]`, etc.). Auto-confirms `Proceed? [Y/n]` on own-worktree `--done` / `--merge-back` (stdin check) and `--set-task` rename (stdout check) without reading stdin. On non-TTY, own-worktree ahead/diverged merge-back succeeds with `-y` (no `--confirm-from-stdin` needed). **Cascade guard**: when any cascaded linked worktree needs ahead/diverged confirmation and stdin is non-TTY, `--done` is rejected before mutations — `-y` and `--confirm-from-stdin` do not apply to cascaded worktrees. On TTY, `-y` auto-confirms both consumer and cascaded ahead/diverged worktrees. Recorded in `events.jsonl` `args` when passed.
 - **--confirm-from-stdin** — when set with piped `StdinInput`, reads Y/n from stdin for **own-worktree** merge-back confirmation on non-TTY ahead/diverged cases. Superseded by `-y` when `-y` is set (no stdin read). Does **not** confirm cascaded ahead/diverged worktrees on non-TTY (option A pre-flight guard).
 - **--no-in-module-replace** — bool flag (no value); valid ONLY with `--done`. Restores the fully-strict local-replace guard: every filesystem/local `replace` (intra-repo or extra-repo) blocks `--done`. Without it (default), intra-repo replaces — whose target dir exists and shares the consumer's `git rev-parse --show-toplevel` (`../../`/`./sub` nested-module reference) — only WARN and `--done` proceeds; extra-repo replaces (`./external/foo` dep worktree, non-existent/absolute/sibling) still block. Bare `wrk --no-in-module-replace`, or with any other mode (`--dep`/`--list`/no-args create/`--all-deps`) → non-zero exit, stderr `wrk: --no-in-module-replace is only valid with --done`.
@@ -370,10 +370,10 @@ wrk tests
 │   ├── valid-git-cwd/            # cwd resolves to a git checkout
 │   │   ├── root-clean/           # root checkout shown as "." and clean
 │   │   ├── subdir-clean/         # nested cwd Dir via Rel (e.g. ../..) + Remote
-│   │   ├── multiple-git-dirs/    # root + nested independent repo blocks
+│   │   ├── multiple-git-dirs/    # primary main + ---- external ---- + nested
 │   │   ├── dirty-counts/         # added/changed/renamed/deleted counts
 │   │   ├── untracked-dirty/      # ?? untracked file → dirty (1 added, …)
-│   │   └── nested-untracked-dirty/ # root clean; nested tools/child ?? → 1 added
+│   │   └── nested-untracked-dirty/ # primary + header + nested dirty (1 added)
 │   ├── invalid-git-cwd/
 │   │   └── non-git/              # cwd is not a git repo (error)
 │   ├── master-field/             # brief Master: on linked worktrees only (plain pipe)
@@ -382,7 +382,7 @@ wrk tests
 │   │   ├── linked-merge-back/    # Master: needs merge back(+N commits)
 │   │   ├── linked-diverged/      # Master: diverged(N commits)
 │   │   ├── main-no-compare/      # main checkout omits field
-│   │   └── nested-main-no-compare/ # nested independent repo omits field
+│   │   └── nested-main-no-compare/ # nested after header; omits Master:
 │   ├── color-output/             # wrk --status alignment + conditional ANSI (--color)
 │   │   ├── force-color-clean/    # --color → green Status: clean
 │   │   ├── force-color-dirty/    # --color → granular red/grey dirty status
@@ -390,6 +390,8 @@ wrk tests
 │   │   ├── force-color-master-fast-forward/ # orange needs fast forward
 │   │   ├── force-color-master-merge-back/   # orange needs merge back
 │   │   ├── force-color-master-diverged/   # red diverged
+│   │   ├── force-color-header/   # --color → gray ---- external ---- header (P3)
+│   │   ├── no-color-header/      # pipe, no --color → plain ---- external ---- header
 │   │   └── no-color-pipe/        # pipe without --color → no ANSI, brief Master:
 │   ├── basename-fallback/        # wrk <basename> --status → saved projects.json lookup (same core as create/--dep)
 │   │   ├── single-match/
@@ -403,22 +405,29 @@ wrk tests
 │   │   └── ambiguous/
 │   │       ├── tty-select/       # WRK_BASENAME_CONFIRM + stdin selects saved repo
 │   │       └── non-tty/          # error listing candidates
-│   └── invalid-mode/
-│       └── with-list/            # --status with --list is mutually exclusive
-│   ├── nested-broken-linked/     # scan-discovered broken linked wt (non-fatal)
+│   ├── invalid-mode/
+│   │   └── with-list/            # --status with --list is mutually exclusive
+│   ├── nested-broken-linked/     # primary + header + external including broken (non-fatal)
 │   │   ├── stale-gitdir/         # stale gitdir on nested linked wt; healthy siblings print
-│   │   └── color/                # --color red error on scan-discovered broken block
-│   ├── main-repo-worktrees/      # nested DOCTEST: append external linked wts; Dir=statusDirLine
-│   │   ├── no-linked-external/   # clean main, no external wt → scan only
-│   │   ├── external-clean/       # wrk external → scan + appended full block (Rel Dir)
-│   │   ├── external-dirty/       # external wt dirty counts in append
-│   │   ├── in-tree-only/         # in-tree git worktree add only → no append
-│   │   ├── mixed-external-in-tree/ # scan in-tree + append external only
+│   │   └── color/                # --color red error + gray ---- external ---- header (P3)
+│   ├── section-partition/        # nested DOCTEST: PartitionStatusPaths pure helper (P1 GREEN)
+│   ├── section-order/            # P2 CLI: primary-first + ---- external ---- (plain without --color)
+│   │   ├── header-present/       # main + nested → header between sections
+│   │   ├── header-omitted/       # main + WRK linked only → no header
+│   │   ├── primary-before-nested/# linked primary before nested external
+│   │   ├── linked-list-order/    # two WRK linked → ListLinked order; no header
+│   │   └── mixed-full/           # main + in-tree + out-of-tree + nested
+│   ├── main-repo-worktrees/      # nested DOCTEST: primary main-owned linked; Dir=statusDirLine
+│   │   ├── no-linked-external/   # clean main only → primary; no header
+│   │   ├── external-clean/       # WRK out-of-tree → primary full block (Rel Dir)
+│   │   ├── external-dirty/       # out-of-tree dirty counts in primary
+│   │   ├── in-tree-only/         # in-tree linked → primary; no header
+│   │   ├── mixed-external-in-tree/ # in-tree + out-of-tree ListLinked order; no header
 │   │   ├── external-broken/      # alive path, broken git → minimal error block
 │   │   ├── external-prunable/    # removed checkout → minimal prunable block
-│   │   ├── from-linked-cwd/      # --status inside external wt → no append
-│   │   ├── ordering-two-external/ # two external wts → ListLinked order
-│   │   ├── color-broken/         # --color red error on appended broken block
+│   │   ├── from-linked-cwd/      # --status inside external wt → no main-repo sectioning
+│   │   ├── ordering-two-external/ # two out-of-tree → ListLinked primary order
+│   │   ├── color-broken/         # --color red error on primary broken block
 │   │   ├── from-main-subdir/     # cwd main/pkg/api → Dir ../.. + Remote
 │   │   └── from-deep-subdir/     # cwd main/a/b/c/d → main Dir absolute + Remote
 │   └── main-flag/                # wrk --main --status: main content; Dir vs inv cwd
@@ -923,20 +932,34 @@ wrk tests
 | 88k | status/color-output/force-color-master-merge-back | `--color` → orange needs merge back |
 | 88l | status/color-output/force-color-master-diverged | `--color` → red diverged |
 | 88m | status/color-output/no-color-pipe | pipe `--status` → no ANSI, brief Master: |
-| 88n | status/main-repo-worktrees/no-linked-external | main repo only; scan block unchanged, no append |
-| 88o | status/main-repo-worktrees/external-clean | scan + appended full external block (statusDirLine Dir, Master) |
-| 88p | status/main-repo-worktrees/external-dirty | appended external `Status: dirty (...)` |
-| 88q | status/main-repo-worktrees/in-tree-only | in-tree linked wt scan-only; no append (dedup) |
-| 88r | status/main-repo-worktrees/mixed-external-in-tree | scan in-tree + append external only |
-| 88s | status/main-repo-worktrees/external-broken | appended minimal `Status: error: …`, exit 0 |
-| 88t | status/main-repo-worktrees/external-prunable | appended minimal `Status: prunable` |
-| 88u | status/main-repo-worktrees/from-linked-cwd | `--status` from external wt; no append section |
-| 88v | status/main-repo-worktrees/ordering-two-external | two external wts; append order = ListLinked |
-| 88w | status/main-repo-worktrees/color-broken | `--status --color` red `error:` on appended block |
+| 88m1 | status/color-output/force-color-header | `--status --color` with nested → gray full-line `---- external ----` (P3) |
+| 88m2 | status/color-output/no-color-header | pipe `--status` with nested → plain `---- external ----` (no ANSI) |
+| 88n | status/main-repo-worktrees/no-linked-external | clean main only → primary [main]; no header |
+| 88o | status/main-repo-worktrees/external-clean | main + WRK out-of-tree → primary both; no header; statusDirLine Dir + Master |
+| 88p | status/main-repo-worktrees/external-dirty | out-of-tree primary linked `Status: dirty (...)` |
+| 88q | status/main-repo-worktrees/in-tree-only | in-tree linked → primary both; no header |
+| 88r | status/main-repo-worktrees/mixed-external-in-tree | in-tree + out-of-tree → primary ListLinked order; no header |
+| 88s | status/main-repo-worktrees/external-broken | primary minimal `Status: error: …`, exit 0; no header |
+| 88t | status/main-repo-worktrees/external-prunable | primary minimal `Status: prunable`; no header |
+| 88u | status/main-repo-worktrees/from-linked-cwd | `--status` from external wt; no main-repo primary/external sections |
+| 88v | status/main-repo-worktrees/ordering-two-external | two out-of-tree → primary order = ListLinked; no header |
+| 88w | status/main-repo-worktrees/color-broken | `--status --color` red `error:` on primary broken block; no header |
 | 88w1 | status/main-repo-worktrees/from-main-subdir | cwd `main/pkg/api`; main Dir `../..` + Remote |
 | 88w2 | status/main-repo-worktrees/from-deep-subdir | cwd `main/a/b/c/d`; main Dir absolute + Remote |
-| 88x | status/nested-broken-linked/stale-gitdir | nested linked wt stale gitdir → minimal relative broken block; siblings print; exit 0 |
-| 88y | status/nested-broken-linked/color | `--status --color` red `error:` on scan-discovered broken block |
+| 88x | status/nested-broken-linked/stale-gitdir | nested linked wt stale gitdir → primary + plain header + external; exit 0 |
+| 88y | status/nested-broken-linked/color | `--status --color` red `error:` + gray `---- external ----` header (P3) |
+| 88y1 | status/section-order/header-present | main + nested → plain `---- external ----` between sections |
+| 88y2 | status/section-order/header-omitted | main + WRK linked only → no header (WRK linked is primary) |
+| 88y3 | status/section-order/primary-before-nested | ListLinked primary before nested external (vs legacy scan order) |
+| 88y4 | status/section-order/linked-list-order | two WRK linked → ListLinked porcelain order; no header |
+| 88y5 | status/section-order/mixed-full | main + in-tree + out-of-tree + nested → primary then header then nested |
+| 88y6 | status/section-partition/no-external/main-only | PartitionStatusPaths: primary=[main], external=[] |
+| 88y7 | status/section-partition/no-external/linked-order | primary preserves ListLinked order after main |
+| 88y8 | status/section-partition/no-external/prunable-linked | dead/prunable linked still in primary |
+| 88y9 | status/section-partition/no-external/scan-dup-linked | linked also in scan → once in primary; external empty |
+| 88y10 | status/section-partition/has-external/main-plus-nested | nested only in external |
+| 88y11 | status/section-partition/has-external/multiple-external-sorted | external path-sorted |
+| 88y12 | status/section-partition/has-external/mixed-full | primary ListLinked; external nesteds only, sorted |
 | 88z1 | status/main-flag/happy/from-external-wt/main-then-status | `--main --status` from external: content match; Dir via inv cwd |
 | 88z2 | status/main-flag/happy/from-external-wt/status-then-main | `--status --main` same Dir-aware content as main-then-status |
 | 88z3 | status/main-flag/happy/already-at-main | `--main --status` at main root matches plain `--status` Dirs |
@@ -1167,15 +1190,24 @@ doctest test ./tests/status/basename-fallback
 doctest test ./tests/status/basename-fallback/single-match/status
 doctest test ./tests/status/basename-fallback/ambiguous/tty-select
 
-# Run nested-broken-linked leaves (expect RED until scan broken blocks are non-fatal)
+# Run nested-broken-linked leaves (GREEN: non-fatal broken + P3 gray header when --color)
 doctest vet ./tests/status/nested-broken-linked
 doctest test ./tests/status/nested-broken-linked
 doctest test ./tests/status/nested-broken-linked/stale-gitdir
+doctest test ./tests/status/nested-broken-linked/color
 
-# Run main-repo-worktrees append leaves (expect RED until append phase implemented)
+# Run main-repo-worktrees (GREEN: primary = main + ListLinked; WRK linked not external section)
 doctest vet ./tests/status/main-repo-worktrees
 doctest test ./tests/status/main-repo-worktrees
 doctest test ./tests/status/main-repo-worktrees/external-clean
+
+# Run section-order + section-partition (GREEN: P1 partition + P2 primary/external CLI order)
+doctest vet ./tests/status/section-partition
+doctest test ./tests/status/section-partition
+doctest vet ./tests/status/section-order
+doctest test ./tests/status/section-order
+doctest test ./tests/status/color-output/force-color-header
+doctest test ./tests/status/color-output/no-color-header
 
 # Run a dep leaf
 doctest test ./tests/dep/basic

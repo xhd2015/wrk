@@ -7,6 +7,8 @@ Commit:       <root short hash>  ignore nested tools
 Status:       clean
 Remote:       (no upstream)
 
+---- external ----
+
 Dir:          tools/child
 Branch:       main
 Commit:       <child short hash>  child status repo
@@ -16,10 +18,9 @@ Status:       dirty (1 added, 0 changed, 0 renamed, 0 deleted)
 ## Expected
 
 - Exit code 0.
-- Stdout contains one block for the root checkout as `.` with `Status: clean`.
-- Stdout contains one block for the nested independent repository as `tools/child`.
+- Primary root block as `.` with `Status: clean` and Remote.
+- Plain header `---- external ----` then nested `tools/child` block.
 - Nested block status is dirty with one **added** entry from the untracked file.
-- Block order follows `scan_repo.Scan` path ordering.
 - Stderr is empty.
 
 ## Side Effects
@@ -44,9 +45,13 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if got := statusOutputBlockCount(resp.Stdout); got != 2 {
 		t.Fatalf("expected 2 status blocks, got %d:\n%s", got, resp.Stdout)
 	}
-	assert.Output(t, resp.Stdout, statusStdoutV2(t,
-		statusRootBlockPlain(t, req.MainRepo, "clean", statusNoUpstreamRemote()),
-		statusBlockPlain(t, req.DepPath, "tools/child", "dirty (1 added, 0 changed, 0 renamed, 0 deleted)"),
+	assert.Output(t, resp.Stdout, statusStdoutPrimaryExternal(t,
+		[]string{
+			statusRootBlockPlain(t, req.MainRepo, "clean", statusNoUpstreamRemote()),
+		},
+		[]string{
+			statusBlockPlain(t, req.DepPath, "tools/child", "dirty (1 added, 0 changed, 0 renamed, 0 deleted)"),
+		},
 	))
 }
 ```

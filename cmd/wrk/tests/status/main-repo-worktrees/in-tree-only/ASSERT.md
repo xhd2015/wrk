@@ -1,8 +1,8 @@
 ## Expected
 
 - Exit code 0.
-- Two scan blocks: main + in-tree linked (Dirs via statusDirLine from main root).
-- No appended external section.
+- Two primary blocks: main + in-tree linked (Dirs via statusDirLine from main root).
+- No `---- external ----` header.
 - Stderr is empty.
 
 ## Exit Code
@@ -19,11 +19,15 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
 	assertStdoutBlocksSeparated(t, resp.Stdout, 2)
+	assertNoExternalSectionHeader(t, resp.Stdout)
 
 	master := masterField(t, req.MainRepo, "main", req.InTreeWtBranch)
-	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
-		scanStatusBlockFromCwd(t, req.RepoDir, req.InTreeWtDir, "clean", master, false),
+	assertOutputExact(t, resp.Stdout, statusStdoutPrimaryExternal(t,
+		[]string{
+			scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
+			scanStatusBlockFromCwd(t, req.RepoDir, req.InTreeWtDir, "clean", master, false),
+		},
+		nil,
 	))
 
 	assertStdoutHasNoAppendedAbsDir(t, resp.Stdout, resolvePath(t, req.InTreeWtDir))

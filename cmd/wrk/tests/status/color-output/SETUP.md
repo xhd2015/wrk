@@ -8,6 +8,10 @@ wrk --status -> no \x1b[ sequences
 
 # --color forces ANSI even on pipe (doctest-safe)
 wrk --status --color -> green clean, granular dirty status, colored Master: values
+
+# P3: external section header gray when color on; plain when off
+main + nested -> --status --color -> <gray>---- external ----</gray>
+main + nested -> --status (pipe) -> plain ---- external ----
 ```
 
 ## Preconditions
@@ -23,9 +27,11 @@ wrk --status --color -> green clean, granular dirty status, colored Master: valu
 
 - Green (`#32`): entire `Status: clean` value on `--status` only; `Master: identical`.
 - Red (`#31`): word `dirty`, count segments with N > 0, `Master: diverged(...)`.
-- Grey (`#90`): count segments with N = 0 in dirty status lines.
+- Grey (`#90` / named `gray`): count segments with N = 0 in dirty status lines; full
+  `---- external ----` section header when color is enabled (P3).
 - Orange (`#33`): `Master: needs merge back(...)` and `Master: needs fast forward(...)`.
-- Labels (`Dir:`, `Branch:`, etc.) stay uncolored; only value substrings are wrapped.
+- Labels (`Dir:`, `Branch:`, etc.) stay uncolored; only value substrings are wrapped
+  (header is the exception: the entire header line is gray meta).
 
 ```go
 import (
@@ -45,6 +51,19 @@ func Setup(t *testing.T, req *Request) error {
 
 func withStatusColor(req *Request) {
 	req.Args = []string{"--status", "--color"}
+}
+
+// setupColorStatusMainPlusNested builds main + tools/child nested independent repo
+// (triggers ---- external ----). Parent porcelain stays clean via tools/ gitignore.
+func setupColorStatusMainPlusNested(t *testing.T, workRoot string) (mainRepo, child string) {
+	t.Helper()
+	mainRepo = setupColorStatusMainRepo(t, workRoot, "myrepo", "root status repo")
+	writeFile(t, filepath.Join(mainRepo, ".gitignore"), "tools/\n")
+	runGitIsolated(t, mainRepo, "add", ".gitignore")
+	runGitIsolated(t, mainRepo, "commit", "-m", "ignore nested for clean parent porcelain")
+	child = filepath.Join(mainRepo, "tools", "child")
+	statusInitRepoWithSubject(t, child, "child status repo")
+	return mainRepo, child
 }
 
 func stripANSI(s string) string {
@@ -200,6 +219,7 @@ func ensureColorStatusHelpersUsed() {
 	_ = stripANSI
 	_ = assertNoANSI
 	_ = setupColorStatusMainRepo
+	_ = setupColorStatusMainPlusNested
 	_ = addColorStatusLinkedWorktree
 	_ = commitColorStatusOnMain
 	_ = commitColorStatusOnWorktree
@@ -213,5 +233,7 @@ func ensureColorStatusHelpersUsed() {
 	_ = colorStatusBlockContains
 	_ = colorStatusStdoutV2
 	_ = dirtyColorStatusRepo
+	_ = statusExternalSectionHeaderColored
+	_ = statusStdoutPrimaryExternalColored
 }
 ```

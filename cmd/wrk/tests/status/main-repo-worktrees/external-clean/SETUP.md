@@ -1,13 +1,13 @@
 # Scenario
 
-**Feature**: main repo appends full block for one clean external wrk worktree
+**Feature**: main repo prints full primary block for one clean out-of-tree wrk worktree
 
 ```
-# wrk creates external linked wt under WRK_HOME
-myrepo -> wrk -> external wt
+# wrk creates out-of-tree linked wt under WRK_HOME (primary membership)
+myrepo -> wrk -> out-of-tree wt
 
-# --status from main: scan `.` + appended full block (Dir via statusDirLine, Master)
-wrk --status from main cwd -> scan + append external
+# --status from main: primary main + wt (Dir via statusDirLine, Master); no section header
+wrk --status from main cwd -> primary only
 ```
 
 ## Steps

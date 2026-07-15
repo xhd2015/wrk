@@ -1,9 +1,9 @@
 ## Expected
 
 - Exit code 0.
-- Scan blocks: main + in-tree linked (Dirs via statusDirLine from main root).
-- One appended block: external wt with statusDirLine Dir (not duplicated in scan).
-- Total three blocks separated by blank lines.
+- Three primary blocks: main, then each ListLinked path in porcelain order
+  (in-tree and out-of-tree main-owned linked).
+- No `---- external ----` header (external list empty).
 - Stderr is empty.
 
 ## Exit Code
@@ -20,12 +20,25 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
 	assertStdoutBlocksSeparated(t, resp.Stdout, 3)
+	assertNoExternalSectionHeader(t, resp.Stdout)
 
-	inTreeMaster := masterField(t, req.MainRepo, "main", req.InTreeWtBranch)
-	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
+	linked := listLinkedPaths(t, req.MainRepo)
+	if len(linked) != 2 {
+		t.Fatalf("expected 2 ListLinked entries, got %d: %v", len(linked), linked)
+	}
+
+	primary := []string{
 		scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
-		scanStatusBlockFromCwd(t, req.RepoDir, req.InTreeWtDir, "clean", inTreeMaster, false),
-		appendedHealthyBlockPlain(t, req.RepoDir, req.MainRepo, req.WtDir, req.WtBranch, "clean"),
-	))
+	}
+	for _, p := range linked {
+		branch := req.WtBranch
+		statusLine := "clean"
+		if resolvePath(t, p) == resolvePath(t, req.InTreeWtDir) {
+			branch = req.InTreeWtBranch
+		}
+		primary = append(primary, primaryLinkedBlockPlain(t, req.RepoDir, req.MainRepo, p, branch, statusLine))
+	}
+
+	assertOutputExact(t, resp.Stdout, statusStdoutPrimaryExternal(t, primary, nil))
 }
 ```

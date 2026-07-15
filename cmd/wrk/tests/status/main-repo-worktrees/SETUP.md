@@ -1,14 +1,20 @@
 # Scenario
 
-**Feature**: wrk --status appends external linked worktrees when run from main repo
+**Feature**: wrk --status from main prints primary (main + ListLinked) then optional external section
 
 ```
-# scan + append; every Dir: uses invocation-cwd Rel rule (≤2 leading ".." → relative)
-wrk --status from main cwd -> scan_repo.Scan(root) -> status blocks
-main repo cwd -> ListLinked(main) minus scan paths -> appended blocks (Dir via statusDirLine)
+# primary = main + ListLinked porcelain; WRK out-of-tree linked are primary (not the section header)
+wrk --status from main cwd
+  -> PartitionStatusPaths(main, scan, ListLinked)
+  -> primary blocks (Dir via statusDirLine; out-of-tree/prunable keep appended-style presentation)
 
-# linked worktree cwd skips append entirely
-wrk --status from external wt cwd -> scan only, no appended section
+# section header only when scan has non-primary (nested) paths
+# WRK out-of-tree linked are primary → no header for them alone
+external non-empty -> blank + "---- external ----" (+ gray when color) + blank + external blocks
+external empty -> no header
+
+# linked worktree cwd (no --main) skips main-repo sectioning
+wrk --status from external wt cwd -> scan only, no primary/external sections
 ```
 
 ## Preconditions
@@ -25,13 +31,17 @@ wrk --status from external wt cwd -> scan only, no appended section
 
 ## Context
 
-- **All** `Dir:` lines (scan + appended + broken/prunable) use `statusDirLine(invCwd, repoPath)`:
+- **All** `Dir:` lines (primary + external + broken/prunable) use `statusDirLine(invCwd, repoPath)`:
   Rel from **invocation cwd**; Rel fail or leading `..` count > 2 → absolute normalized path;
   else `filepath.ToSlash(rel)`. Typical fixture external under `{WorkRoot}/.wrk/worktrees/…`
   from main root is often `../.wrk/worktrees/…` (one `..` → **relative**, not absolute).
-- Healthy appended blocks include `Branch`, `Commit`, `Status`, and `Master:`.
-- Broken/prunable appended blocks are minimal two-line blocks (no Branch/Commit/Master).
-- Multi-block stdout is joined with `\n\n` (blank line between every block).
+- **Primary** includes main-owned linked worktrees (in-tree + WRK out-of-tree + prunable)
+  in ListLinked porcelain order after main. These do **not** get a section header.
+- Healthy primary linked blocks include `Branch`, `Commit`, `Status`, and `Master:`.
+- Broken/prunable primary linked blocks are minimal two-line blocks (no Branch/Commit/Master).
+- Multi-block stdout is joined with `\n\n` (blank line between every block and around the
+  `---- external ----` header when external is non-empty; header is plain without
+  color, gray ANSI when colorEnabled — P3).
 - `Remote:` on the main block is gated by main identity, not by `Dir == "."`.
 
 ```go
@@ -271,8 +281,66 @@ func statusStdoutV2(t *testing.T, blocks ...string) string {
 	return v2StdoutTemplate(joinStdoutBlocks(blocks...))
 }
 
+// statusExternalSectionHeader is the plain (color-off) marker between primary and
+// external sections. Product uses ansiGrey / #90 when colorEnabled (P3; covered in
+// parent status color-output leaves, not this nested tree's no-color fixtures).
+func statusExternalSectionHeader() string {
+	return "---- external ----"
+}
+
+// statusStdoutPrimaryExternal joins primary blocks, optional plain header, then
+// external blocks. Header is omitted when external is empty (e.g. only main +
+// ListLinked / WRK out-of-tree primary linked).
+func statusStdoutPrimaryExternal(t *testing.T, primary []string, external []string) string {
+	t.Helper()
+	parts := make([]string, 0, len(primary)+1+len(external))
+	parts = append(parts, primary...)
+	if len(external) > 0 {
+		parts = append(parts, statusExternalSectionHeader())
+		parts = append(parts, external...)
+	}
+	return statusStdoutV2(t, parts...)
+}
+
+func assertNoExternalSectionHeader(t *testing.T, stdout string) {
+	t.Helper()
+	if strings.Contains(stdout, statusExternalSectionHeader()) {
+		t.Fatalf("stdout must not contain %q, got:\n%s", statusExternalSectionHeader(), stdout)
+	}
+}
+
 func statusOutputBlockCount(stdout string) int {
 	return strings.Count(stdout, "Dir:          ")
+}
+
+// listLinkedPaths returns worktree.ListLinked paths in porcelain order.
+func listLinkedPaths(t *testing.T, mainRepo string) []string {
+	t.Helper()
+	linked, err := worktree.ListLinked(mainRepo)
+	if err != nil {
+		t.Fatalf("ListLinked(%q): %v", mainRepo, err)
+	}
+	paths := make([]string, 0, len(linked))
+	for _, entry := range linked {
+		paths = append(paths, entry.Path)
+	}
+	return paths
+}
+
+// primaryLinkedBlockPlain builds the expected primary linked block for a path.
+// Out-of-tree / dead paths use appended presentation; in-tree scan hits use scan block + Master.
+func primaryLinkedBlockPlain(t *testing.T, invCwd, mainRepo, wtDir, wtBranch, statusLine string) string {
+	t.Helper()
+	mainNorm := resolvePath(t, mainRepo)
+	wtNorm := resolvePath(t, wtDir)
+	inTree := strings.HasPrefix(wtNorm, mainNorm+string(filepath.Separator))
+	if worktree.IsDead(wtDir) {
+		return appendedMinimalBlockPlain(t, invCwd, wtDir, "prunable")
+	}
+	if inTree {
+		return scanStatusBlockFromCwd(t, invCwd, wtDir, statusLine, masterField(t, mainRepo, "main", wtBranch), false)
+	}
+	return appendedHealthyBlockPlain(t, invCwd, mainRepo, wtDir, wtBranch, statusLine)
 }
 
 func initMainRepo(t *testing.T, path, subject string) {
@@ -584,6 +652,11 @@ func ensureMainRepoWtHelpersUsed() {
 	_ = statusDirLine
 	_ = statusDirField
 	_ = statusStdoutV2
+	_ = statusStdoutPrimaryExternal
+	_ = statusExternalSectionHeader
+	_ = assertNoExternalSectionHeader
+	_ = listLinkedPaths
+	_ = primaryLinkedBlockPlain
 	_ = scanStatusBlockFromCwd
 	_ = createExternalWrkWorktree
 	_ = createSecondExternalWrkWorktree

@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Two status blocks for `.` and `tools/child`.
+- Primary root block + plain `---- external ----` + nested `tools/child` block.
 - Neither block contains `Master:`.
 - Stderr is empty.
 
@@ -23,9 +23,13 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if got := statusOutputBlockCount(resp.Stdout); got != 2 {
 		t.Fatalf("expected 2 status blocks, got %d:\n%s", got, resp.Stdout)
 	}
-	assert.Output(t, resp.Stdout, statusStdoutV2(t,
-		statusRootBlockPlain(t, req.MainRepo, "clean", statusNoUpstreamRemote()),
-		statusBlockPlain(t, req.DepPath, "tools/child", "clean"),
+	assert.Output(t, resp.Stdout, statusStdoutPrimaryExternal(t,
+		[]string{
+			statusRootBlockPlain(t, req.MainRepo, "clean", statusNoUpstreamRemote()),
+		},
+		[]string{
+			statusBlockPlain(t, req.DepPath, "tools/child", "clean"),
+		},
 	))
 	assertNoMasterField(t, resp.Stdout)
 }

@@ -85,48 +85,101 @@ func runStatus(statusRoot, displayCwd string, colorEnabled bool, fetchEnabled bo
 		return err
 	}
 
-	scanPaths := make(map[string]struct{}, len(repos))
+	scanPathList := make([]string, 0, len(repos))
+	scanPathSet := make(map[string]struct{}, len(repos))
 	for _, repo := range repos {
-		scanPaths[storage.NormalizePath(repo.Path)] = struct{}{}
+		scanPathList = append(scanPathList, repo.Path)
+		scanPathSet[storage.NormalizePath(repo.Path)] = struct{}{}
 	}
 
-	var appendEntries []worktree.Entry
-	if worktree.IsMainRepo(checkoutRoot) {
-		linked, err := worktree.ListLinked(checkoutRoot)
-		if err != nil {
-			return err
-		}
-		for _, entry := range linked {
-			if _, ok := scanPaths[storage.NormalizePath(entry.Path)]; ok {
-				continue
-			}
-			appendEntries = append(appendEntries, entry)
-		}
-	}
-
-	scanColorEnabled := colorEnabled && len(appendEntries) == 0
 	showRemote := worktree.IsMainRepo(checkoutRoot)
 	effectiveFetch := fetchEnabled && showRemote
 
+	// Non-main checkouts: scan-order only (no ListLinked partition / external header).
+	if !showRemote {
+		scanColorEnabled := colorEnabled
+		blocksPrinted := 0
+		for _, repo := range repos {
+			if blocksPrinted > 0 {
+				fmt.Println()
+			}
+			if err := printStatusBlock(displayBase, checkoutRoot, repo.Path, colorEnabled, scanColorEnabled, false, false, statusBlockPrintOpts{}); err != nil {
+				return err
+			}
+			blocksPrinted++
+		}
+		return nil
+	}
+
+	// Main-repo: primary = main + ListLinked (porcelain); external = other scan paths.
+	linked, err := worktree.ListLinked(checkoutRoot)
+	if err != nil {
+		return err
+	}
+	linkedOrdered := make([]string, 0, len(linked))
+	for _, entry := range linked {
+		linkedOrdered = append(linkedOrdered, entry.Path)
+	}
+	lists := PartitionStatusPaths(checkoutRoot, scanPathList, linkedOrdered)
+
+	// Preserve prior scan-color quirk: disable Status/Master/Remote coloring on
+	// printStatusBlock when any primary path uses appended-style presentation
+	// (out-of-tree or dead linked). Broken appended blocks still color via colorEnabled.
+	hasAppendedStyle := false
+	for _, p := range lists.Primary {
+		if statusPathNeedsAppendedPresentation(p, scanPathSet) {
+			hasAppendedStyle = true
+			break
+		}
+	}
+	scanColorEnabled := colorEnabled && !hasAppendedStyle
+
 	blocksPrinted := 0
-	for _, repo := range repos {
+	for _, path := range lists.Primary {
 		if blocksPrinted > 0 {
 			fmt.Println()
 		}
-		if err := printStatusBlock(displayBase, checkoutRoot, repo.Path, colorEnabled, scanColorEnabled, showRemote, effectiveFetch, statusBlockPrintOpts{}); err != nil {
-			return err
+		if statusPathNeedsAppendedPresentation(path, scanPathSet) {
+			printAppendedLinkedBlock(displayBase, path, colorEnabled)
+		} else {
+			if err := printStatusBlock(displayBase, checkoutRoot, path, colorEnabled, scanColorEnabled, showRemote, effectiveFetch, statusBlockPrintOpts{}); err != nil {
+				return err
+			}
 		}
 		blocksPrinted++
 	}
 
-	for _, entry := range appendEntries {
+	if len(lists.External) > 0 {
 		if blocksPrinted > 0 {
 			fmt.Println()
 		}
-		printAppendedLinkedBlock(displayBase, entry.Path, colorEnabled)
-		blocksPrinted++
+		// Gray ANSI when colorEnabled (P3); plain ASCII otherwise.
+		if colorEnabled {
+			fmt.Println(colorize("---- external ----", ansiGrey))
+		} else {
+			fmt.Println("---- external ----")
+		}
+		for _, path := range lists.External {
+			fmt.Println()
+			// External nested: printStatusBlock; Remote only for main identity (none here).
+			if err := printStatusBlock(displayBase, checkoutRoot, path, colorEnabled, scanColorEnabled, showRemote, effectiveFetch, statusBlockPrintOpts{}); err != nil {
+				return err
+			}
+			blocksPrinted++
+		}
 	}
 	return nil
+}
+
+// statusPathNeedsAppendedPresentation is true for dead/prunable or out-of-scan
+// linked paths that historically used printAppendedLinkedBlock (out-of-tree WRK
+// worktrees). In-scan healthy paths (main + in-tree linked) use printStatusBlock.
+func statusPathNeedsAppendedPresentation(path string, scanPathSet map[string]struct{}) bool {
+	if worktree.IsDead(path) {
+		return true
+	}
+	_, inScan := scanPathSet[storage.NormalizePath(path)]
+	return !inScan
 }
 
 func linkedInTreeMainRepo(cwd string) (string, bool) {

@@ -3,10 +3,13 @@
 **Feature**: wrk --status tolerates scan-discovered broken linked worktrees
 
 ```
-# scan_repo discovers repos under checkout root in path order
-wrk --status from main cwd -> scan_repo.Scan(root) -> status blocks per repo
+# main-repo status: primary main, then external section of nested scan hits
+wrk --status from main cwd
+  -> primary [main]
+  -> ---- external ----
+  -> tools/good, vendor/host, vendor/host/broken-wt (path-sorted)
 
-# enrich failure on one scan row must not abort the run (same policy as appended broken)
+# enrich failure on one external/scan row must not abort the run
 scan-discovered repo (alive checkout, git fails) -> minimal relative Dir + Status: error: ...
 ```
 
@@ -15,7 +18,7 @@ scan-discovered repo (alive checkout, git fails) -> minimal relative Dir + Statu
 - Git must be available.
 - Fixture layout: main repo `myrepo`, nested independent `tools/good`, nested main `vendor/host` with linked worktree `vendor/host/broken-wt`.
 - Broken worktree: checkout dir exists; `.git` gitlink points at non-existent `gitdir` under `{WorkRoot}/stale-main/`.
-- Scan-discovered broken blocks use **relative** `Dir` (not absolute like appended external worktrees).
+- External/scan-discovered broken blocks use **relative** `Dir` (not absolute like out-of-tree primary linked).
 
 ## Steps
 
@@ -23,13 +26,15 @@ scan-discovered repo (alive checkout, git fails) -> minimal relative Dir + Statu
   root init so nested independent checkouts are not counted as untracked on the parent
   (root porcelain stays clean when untracked is included).
 - Descendants call `setupNestedBrokenLinkedFixture` then run `wrk --status` from `{WorkRoot}/myrepo`.
-- Color leaf adds `--color` to force red `error: …` on the broken block value.
+- Color leaf adds `--color` to force red `error: …` on the broken block value and gray
+  `---- external ----` header (P3).
 
 ## Context
 
-- Healthy scan blocks unchanged (full `Dir`/`Branch`/`Commit`/`Status`; root block includes `Remote:` from main checkout cwd).
+- Healthy external blocks unchanged (full `Dir`/`Branch`/`Commit`/`Status`; root primary includes `Remote:`).
 - Linked worktree blocks normally include `Master:` when healthy; broken blocks omit all fields except `Dir` and `Status`.
-- Block order follows `scan_repo` path ordering.
+- External block order is path-sorted (via PartitionStatusPaths); header is plain without color,
+  gray ANSI when `--color` (P3).
 
 ```go
 import (

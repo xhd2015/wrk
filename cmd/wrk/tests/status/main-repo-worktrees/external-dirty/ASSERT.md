@@ -1,8 +1,9 @@
 ## Expected
 
 - Exit code 0.
-- Appended external block has `Status: dirty (0 added, 1 changed, 0 renamed, 0 deleted)`.
-- Appended `Dir` follows `statusDirLine(main, wt)` (relative when ≤2 leading `..`).
+- Primary out-of-tree block has `Status: dirty (0 added, 1 changed, 0 renamed, 0 deleted)`.
+- Primary `Dir` follows `statusDirLine(main, wt)` (relative when ≤2 leading `..`).
+- No `---- external ----` header.
 - Stderr is empty.
 
 ## Exit Code
@@ -19,11 +20,15 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
 	assertStdoutBlocksSeparated(t, resp.Stdout, 2)
+	assertNoExternalSectionHeader(t, resp.Stdout)
 
 	dirtyLine := statusLineForRepo(t, req.WtDir)
-	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
-		appendedHealthyBlockPlain(t, req.RepoDir, req.MainRepo, req.WtDir, req.WtBranch, dirtyLine),
+	assertOutputExact(t, resp.Stdout, statusStdoutPrimaryExternal(t,
+		[]string{
+			scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
+			appendedHealthyBlockPlain(t, req.RepoDir, req.MainRepo, req.WtDir, req.WtBranch, dirtyLine),
+		},
+		nil,
 	))
 }
 ```

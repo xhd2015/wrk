@@ -1,9 +1,10 @@
 ## Expected
 
 - Exit code 0 (broken worktree does not abort the run).
-- Scan block for main unchanged (Dir via statusDirLine).
-- Appended minimal block: `statusDirLine` Dir + `Status: error: <git stderr>` only.
-- No `Branch`/`Commit`/`Master:` on appended block.
+- Primary main block unchanged (Dir via statusDirLine).
+- Primary minimal block: `statusDirLine` Dir + `Status: error: <git stderr>` only.
+- No `Branch`/`Commit`/`Master:` on broken block.
+- No `---- external ----` header.
 - Stderr is empty.
 
 ## Exit Code
@@ -20,11 +21,15 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
 	assertStdoutBlocksSeparated(t, resp.Stdout, 2)
+	assertNoExternalSectionHeader(t, resp.Stdout)
 
 	errLine := appendedErrorStatusPlain(t, req.WtDir)
-	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
-		appendedMinimalBlockPlain(t, req.RepoDir, req.WtDir, errLine),
+	assertOutputExact(t, resp.Stdout, statusStdoutPrimaryExternal(t,
+		[]string{
+			scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
+			appendedMinimalBlockPlain(t, req.RepoDir, req.WtDir, errLine),
+		},
+		nil,
 	))
 }
 ```

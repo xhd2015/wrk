@@ -2,7 +2,7 @@
 
 - Exit code 0.
 - Single scan block for `Dir:          .` from the linked worktree cwd (with `Master:`).
-- No appended section (no second block for external path).
+- No main-repo primary/external sectioning (no second block; no `---- external ----`).
 - Stderr is empty.
 
 ## Exit Code
@@ -19,6 +19,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
 	assertStdoutBlocksSeparated(t, resp.Stdout, 1)
+	assertNoExternalSectionHeader(t, resp.Stdout)
 
 	master := masterField(t, req.MainRepo, "main", req.WtBranch)
 	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,

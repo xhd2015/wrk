@@ -1,7 +1,8 @@
 ## Expected
 
 - Exit code 0.
-- Broken scan block has red ANSI on `error: <git stderr>` value only.
+- Gray ANSI header `---- external ----` between primary and external sections (P3).
+- Broken external block has red ANSI on `error: <git stderr>` value only.
 - `Dir:` label stays uncolored.
 - Stderr is empty.
 
@@ -21,11 +22,15 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertStdoutBlocksSeparated(t, resp.Stdout, 4)
 
 	errStatus := scanErrorStatusColored(t, req.WtDir)
-	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		colorScanRootBlockPlain(t, req.MainRepo),
-		colorScanStatusBlockPlain(t, req.DepPath, "tools/good"),
-		colorScanStatusBlockPlain(t, req.ConsumerTop, "vendor/host"),
-		scanBrokenBlockPlain("vendor/host/broken-wt", errStatus),
+	assertOutputExact(t, resp.Stdout, statusStdoutPrimaryExternalColored(t,
+		[]string{
+			colorScanRootBlockPlain(t, req.MainRepo),
+		},
+		[]string{
+			colorScanStatusBlockPlain(t, req.DepPath, "tools/good"),
+			colorScanStatusBlockPlain(t, req.ConsumerTop, "vendor/host"),
+			scanBrokenBlockPlain("vendor/host/broken-wt", errStatus),
+		},
 	))
 }
 ```

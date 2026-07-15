@@ -1,8 +1,9 @@
 ## Expected
 
 - Exit code 0.
-- Appended broken block has red ANSI on `error: <git stderr>` value only.
+- Primary broken block has red ANSI on `error: <git stderr>` value only.
 - `Dir:` label stays uncolored; Dir value follows `statusDirLine`.
+- No `---- external ----` header (plain header N/A; primary-only fixture).
 - Stderr is empty.
 
 ## Exit Code
@@ -19,11 +20,15 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
 	assertStdoutBlocksSeparated(t, resp.Stdout, 2)
+	assertNoExternalSectionHeader(t, resp.Stdout)
 
 	errStatus := appendedErrorStatusColored(t, req.WtDir)
-	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
-		appendedDirLine(t, req.RepoDir, req.WtDir)+"\nStatus:       "+errStatus,
+	assertOutputExact(t, resp.Stdout, statusStdoutPrimaryExternal(t,
+		[]string{
+			scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
+			appendedDirLine(t, req.RepoDir, req.WtDir) + "\nStatus:       " + errStatus,
+		},
+		nil,
 	))
 }
 ```

@@ -7,6 +7,8 @@ Commit:       <root hash>  root repo
 Status:       clean
 Remote:       (no upstream)
 
+---- external ----
+
 Dir:          tools/good
 Branch:       main
 Commit:       <good hash>  good child
@@ -24,7 +26,10 @@ Status:       error: fatal: not a git repository: <stale gitdir path>
 ## Expected
 
 - Exit code 0 (broken worktree does not abort the run).
-- Stdout has four blocks in `scan_repo` path order; healthy blocks are full; broken block is minimal (`Dir` + `Status: error: …` only).
+- Primary: main root block only.
+- Plain header `---- external ----` then three external blocks in path-sorted order
+  (`tools/good`, `vendor/host`, `vendor/host/broken-wt`).
+- Healthy external blocks are full; broken block is minimal (`Dir` + `Status: error: …` only).
 - Broken block `Dir` is **relative** (`vendor/host/broken-wt`), not absolute.
 - Stderr is empty.
 
@@ -48,11 +53,15 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertStdoutBlocksSeparated(t, resp.Stdout, 4)
 
 	errLine := scanErrorStatusPlain(t, req.WtDir)
-	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		statusRootBlockPlain(t, req.MainRepo, "clean", statusNoUpstreamRemote()),
-		statusBlockPlain(t, req.DepPath, "tools/good", "clean"),
-		statusBlockPlain(t, req.ConsumerTop, "vendor/host", "clean"),
-		scanBrokenBlockPlain("vendor/host/broken-wt", errLine),
+	assertOutputExact(t, resp.Stdout, statusStdoutPrimaryExternal(t,
+		[]string{
+			statusRootBlockPlain(t, req.MainRepo, "clean", statusNoUpstreamRemote()),
+		},
+		[]string{
+			statusBlockPlain(t, req.DepPath, "tools/good", "clean"),
+			statusBlockPlain(t, req.ConsumerTop, "vendor/host", "clean"),
+			scanBrokenBlockPlain("vendor/host/broken-wt", errLine),
+		},
 	))
 }
 ```

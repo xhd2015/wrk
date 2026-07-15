@@ -1,13 +1,13 @@
 # Scenario
 
-**Feature**: two external worktrees appended in git worktree list order
+**Feature**: two out-of-tree main-owned worktrees keep ListLinked primary order (no header)
 
 ```
-# wrk twice from same main repo → two external wts
+# wrk twice from same main repo → two out-of-tree wts
 myrepo -> wrk -> wt1; wrk -> wt2
 
-# append order follows ListLinked porcelain order
-wrk --status from main -> scan `.` + append wt1 then wt2
+# primary order follows ListLinked porcelain; external empty → no header
+wrk --status from main -> primary: main, wt1, wt2
 ```
 
 ## Steps

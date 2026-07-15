@@ -6,6 +6,12 @@
 # cwd resolves to an effective git toplevel; status mode scans that root
 wrk --status from cwd -> scan_repo.Scan(root) -> status blocks
 
+# main-repo status: primary (main + ListLinked) then optional external section
+main-repo --status
+  -> PartitionStatusPaths(main, scan, ListLinked)
+  -> primary blocks first
+  -> if external non-empty: blank + "---- external ----" (+ gray when color) + blank + external blocks
+
 # status is standalone; combining with another mode is rejected
 wrk --status + other mode -> error (mutually exclusive)
 ```
@@ -34,8 +40,14 @@ wrk --status + other mode -> error (mutually exclusive)
   main-repo block includes `Remote:` (same brief labels as `--projects`; `(no upstream)`
   when no tracking remote). Linked worktree cwd and nested `RepoTypeMain` repos omit
   `Remote:`.
+- **Main-repo sections (P2+P3)**: primary paths are main then `worktree.ListLinked` porcelain
+  order (in-tree + out-of-tree + prunable). External paths are scan hits not in primary,
+  path-sorted. When external is non-empty, after the last primary block print a blank
+  line, the header line `---- external ----` (P3: gray ANSI `#90` when `colorEnabled`;
+  plain ASCII when color off), another blank line, then external blocks. Omit the header
+  entirely when external is empty.
 - **Linked worktrees only** (`worktree.IsLinked`) also include one-line `Master:` — brief branch-relation label comparing the main repo's current branch vs the worktree's current branch (`git.CompareBranches`: `identical`, `needs merge back(+N commit(s))`, `needs fast forward(+N commit(s))`, `diverged(N commit(s))`); main checkout and nested independent `RepoTypeMain` repos omit this field.
-- When stdout is a TTY or `--color` is set, `--status` colors `Status: clean` green and applies granular dirty-status coloring (same rules as `--projects`); `Master:` values use green/orange/red by relation. Without color: plain text.
+- When stdout is a TTY or `--color` is set, `--status` colors `Status: clean` green and applies granular dirty-status coloring (same rules as `--projects`); `Master:` values use green/orange/red by relation; external section header is gray meta. Without color: plain text.
 
 ```go
 import (
@@ -155,6 +167,56 @@ func statusMainBlockFromCwd(t *testing.T, invCwd, mainRepo, statusLine string) s
 func statusStdoutV2(t *testing.T, blocks ...string) string {
 	t.Helper()
 	return v2StdoutTemplate(joinStdoutBlocks(blocks...))
+}
+
+// statusExternalSectionHeader is the plain section marker between primary and
+// external status blocks (no ANSI; used when color is off).
+func statusExternalSectionHeader() string {
+	return "---- external ----"
+}
+
+// statusExternalSectionHeaderColored is the P3 gray meta header when colorEnabled
+// (maps to product ansiGrey / #90; assert token "gray").
+func statusExternalSectionHeaderColored() string {
+	return "<ansi-color gray>---- external ----</ansi-color>"
+}
+
+// statusStdoutPrimaryExternal joins primary blocks, optional plain header, then
+// external blocks with the same blank-line rhythm as inter-block separators.
+// When external is empty, the header is omitted entirely.
+func statusStdoutPrimaryExternal(t *testing.T, primary []string, external []string) string {
+	t.Helper()
+	return statusStdoutPrimaryExternalHeader(t, primary, external, false)
+}
+
+// statusStdoutPrimaryExternalColored is like statusStdoutPrimaryExternal but wraps
+// the external section header in gray ANSI (P3; --color / TTY color path).
+func statusStdoutPrimaryExternalColored(t *testing.T, primary []string, external []string) string {
+	t.Helper()
+	return statusStdoutPrimaryExternalHeader(t, primary, external, true)
+}
+
+func statusStdoutPrimaryExternalHeader(t *testing.T, primary []string, external []string, colorHeader bool) string {
+	t.Helper()
+	parts := make([]string, 0, len(primary)+1+len(external))
+	parts = append(parts, primary...)
+	if len(external) > 0 {
+		if colorHeader {
+			parts = append(parts, statusExternalSectionHeaderColored())
+		} else {
+			parts = append(parts, statusExternalSectionHeader())
+		}
+		parts = append(parts, external...)
+	}
+	return statusStdoutV2(t, parts...)
+}
+
+func assertNoExternalSectionHeader(t *testing.T, stdout string) {
+	t.Helper()
+	// Core text is present with or without gray ANSI wrappers.
+	if strings.Contains(stdout, statusExternalSectionHeader()) {
+		t.Fatalf("stdout must not contain %q, got:\n%s", statusExternalSectionHeader(), stdout)
+	}
 }
 
 func statusInitRepoWithSubject(t *testing.T, path, subject string) {
