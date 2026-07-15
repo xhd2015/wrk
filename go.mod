@@ -3,7 +3,7 @@ module github.com/xhd2015/wrk
 go 1.25.0
 
 require (
-	github.com/xhd2015/dot-pkgs/go-pkgs v0.0.75
+	github.com/xhd2015/dot-pkgs/go-pkgs v0.0.76
 	github.com/xhd2015/gitops v0.0.24
 	github.com/xhd2015/less-flags v1.0.1
 	github.com/xhd2015/skills v0.0.19

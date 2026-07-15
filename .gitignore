@@ -11,3 +11,4 @@ wrk-react/dist-ssr
 .env.*.local
 
 Thumbs.db
+/external

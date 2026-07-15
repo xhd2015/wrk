@@ -124,6 +124,10 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	var depPath string
 	var bringPath string
 	var allDeps bool
+	var tagNext bool
+	var syncFlag bool
+	var pushFlag bool
+	var jsonFlag bool
 	var dryRun bool
 	var taskDesc *string
 	var setTaskDesc *string
@@ -171,6 +175,10 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		Bool("--cd", &cd).
 		Bool("--main", &mainFlag).
 		Bool("--all-deps", &allDeps).
+		Bool("--tag-next", &tagNext).
+		Bool("--sync", &syncFlag).
+		Bool("--push", &pushFlag).
+		Bool("--json", &jsonFlag).
 		Bool("--dry-run", &dryRun).
 		Bool("--new-window", &newWindow).
 		Bool("--no-new-window", &noNewWindow).
@@ -214,7 +222,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if webFlag {
 		ctx.command = "web"
 	} else {
-		ctx.command = resolveCommand(projects, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, depPath, bringPath, allDeps, cd, mainFlag)
+		ctx.command = resolveCommand(projects, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, depPath, bringPath, allDeps, tagNext, syncFlag, cd, mainFlag)
 	}
 	ctx.eventArgs = extractEventArgs(args, remaining)
 
@@ -270,8 +278,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// --web is a standalone long-running mode: local HTTP UI + wrkserver API.
 	if webFlag {
 		otherMode := done || mergeBack || list || status || repos || projects ||
-			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || allDeps ||
-			dryRun || taskFlagSet || setTaskFlagSet || fetchFlag || noCd || forceCd ||
+			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || allDeps || tagNext || syncFlag ||
+			dryRun || pushFlag || jsonFlag || taskFlagSet || setTaskFlagSet || fetchFlag || noCd || forceCd ||
 			cd || mainFlag || confirmFromStdin || noInModuleReplace ||
 			newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
 			noNewTerminal || openInAgent || noOpenInAgent || len(execArgs) > 0
@@ -316,7 +324,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// also set, prefer that error over unexpected arguments.
 	if mainFlag {
 		otherMode := done || list || repos || projects || addFlagSet || removeFlagSet ||
-			whereFlagSet || depPath != "" || bringPath != "" || allDeps || dryRun || mergeBack || taskFlagSet ||
+			whereFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet ||
 			setTaskFlagSet || noCd || cd || spawnTarget != ""
 		// --fetch is only valid with --status (or --projects); allow with --main --status.
 		if !status {
@@ -338,9 +346,32 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		}
 	}
 
+	// --sync takes no positionals. Prefer mode-clash errors over unexpected args
+	// when combined with other modes (checked later alongside tag-next family).
+	if syncFlag {
+		otherMode := done || mergeBack || list || status || repos || projects ||
+			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" ||
+			allDeps || tagNext || pushFlag || jsonFlag || taskFlagSet || setTaskFlagSet ||
+			cd || mainFlag || fetchFlag || noCd || forceCd || spawnTarget != ""
+		if otherMode {
+			ctx.workDir = origWd
+			if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
+				return err
+			}
+			return fmt.Errorf("wrk: --sync is mutually exclusive with other modes")
+		}
+		if len(remaining) > 0 {
+			ctx.workDir = origWd
+			if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
+				return err
+			}
+			return fmt.Errorf("wrk: unexpected arguments")
+		}
+	}
+
 	// Resolve sourceDir to absolute; default to process cwd when absent.
 	// Passed to every sub-command as workDir instead of using os.Getwd/Chdir.
-	createMode := isCreateMode(projects, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status, depPath, bringPath, allDeps, list, done, mergeBack, cd, mainFlag)
+	createMode := isCreateMode(projects, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status, depPath, bringPath, allDeps, tagNext, syncFlag, list, done, mergeBack, cd, mainFlag)
 	uxFlags := createUXFlags{
 		newWindow:     newWindow,
 		noNewWindow:   noNewWindow,
@@ -413,6 +444,12 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if allDeps {
 			return fmt.Errorf("wrk: --exec is not valid with --all-deps")
 		}
+		if tagNext {
+			return fmt.Errorf("wrk: --exec is not valid with --tag-next")
+		}
+		if syncFlag {
+			return fmt.Errorf("wrk: --exec is not valid with --sync")
+		}
 		if mainFlag {
 			return fmt.Errorf("wrk: --exec is not valid with --main")
 		}
@@ -423,7 +460,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return fmt.Errorf("wrk: task description must not be empty")
 	}
 	// --set-task is mutually exclusive with all other modes.
-	if setTaskFlagSet && (taskFlagSet || done || list || status || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || dryRun || spawnTarget != "" || cd || mainFlag) {
+	if setTaskFlagSet && (taskFlagSet || done || list || status || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || spawnTarget != "" || cd || mainFlag) {
 		return fmt.Errorf("wrk: --set-task is mutually exclusive with other flags")
 	}
 	if setTaskFlagSet {
@@ -434,7 +471,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return fmt.Errorf("wrk: task description must not be empty")
 	}
 	// --task is only valid with create mode.
-	if taskFlagSet && (done || list || status || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || mergeBack || cd || mainFlag) {
+	if taskFlagSet && (done || list || status || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || syncFlag || mergeBack || cd || mainFlag) {
 		return fmt.Errorf("wrk: --task is mutually exclusive with --done, --merge-back, --list, --status, --repos, --projects, --add, --rm, --where, --dep and --all-deps")
 	}
 
@@ -447,29 +484,29 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if done && mergeBack {
 		return fmt.Errorf("wrk: --done and --merge-back are mutually exclusive")
 	}
-	if repos && (done || list || status || projects || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || dryRun || spawnTarget != "" || cd || mainFlag) {
+	if repos && (done || list || status || projects || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || spawnTarget != "" || cd || mainFlag) {
 		return fmt.Errorf("wrk: --repos is mutually exclusive with other modes")
 	}
-	if projects && (done || list || status || repos || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || dryRun || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
+	if projects && (done || list || status || repos || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
 		return fmt.Errorf("wrk: --projects is mutually exclusive with other modes")
 	}
-	if addFlagSet && (done || list || status || repos || projects || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || dryRun || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
+	if addFlagSet && (done || list || status || repos || projects || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
 		return fmt.Errorf("wrk: --add is mutually exclusive with other modes")
 	}
-	if removeFlagSet && (done || list || status || repos || projects || addFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || dryRun || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
+	if removeFlagSet && (done || list || status || repos || projects || addFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
 		return fmt.Errorf("wrk: --rm is mutually exclusive with other modes")
 	}
-	if whereFlagSet && (done || list || status || repos || projects || addFlagSet || removeFlagSet || depPath != "" || bringPath != "" || allDeps || dryRun || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || cd || mainFlag) {
+	if whereFlagSet && (done || list || status || repos || projects || addFlagSet || removeFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || cd || mainFlag) {
 		return fmt.Errorf("wrk: --where is mutually exclusive with other modes")
 	}
-	if cd && (done || list || status || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || dryRun || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || noCd || mainFlag) {
+	if cd && (done || list || status || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || noCd || mainFlag) {
 		return fmt.Errorf("wrk: --cd is mutually exclusive with other modes")
 	}
 	// --main composes with --status (and --fetch when status is set); exclusive otherwise.
-	if mainFlag && (done || list || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || dryRun || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || noCd || cd || (!status && fetchFlag)) {
+	if mainFlag && (done || list || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || noCd || cd || (!status && fetchFlag)) {
 		return fmt.Errorf("wrk: --main is mutually exclusive with other modes")
 	}
-	if status && (done || list || projects || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || dryRun || spawnTarget != "" || cd) {
+	if status && (done || list || projects || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || spawnTarget != "" || cd) {
 		return fmt.Errorf("wrk: --status is mutually exclusive with other modes")
 	}
 	if confirmFromStdin && !done && !mergeBack {
@@ -481,21 +518,33 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if depPath != "" && bringPath != "" {
 		return fmt.Errorf("wrk: --bring and --dep are mutually exclusive")
 	}
-	if depPath != "" && (done || list || mergeBack || cd || mainFlag) {
+	if depPath != "" && (done || list || mergeBack || tagNext || syncFlag || cd || mainFlag) {
 		return fmt.Errorf("wrk: --dep is mutually exclusive with --done, --merge-back and --list")
 	}
-	if bringPath != "" && (done || list || mergeBack || cd || mainFlag) {
+	if bringPath != "" && (done || list || mergeBack || tagNext || syncFlag || cd || mainFlag) {
 		return fmt.Errorf("wrk: --bring is mutually exclusive with --done, --merge-back and --list")
 	}
-	if allDeps && (depPath != "" || bringPath != "" || done || list || mergeBack || cd || mainFlag) {
+	if allDeps && (depPath != "" || bringPath != "" || done || list || mergeBack || tagNext || syncFlag || cd || mainFlag) {
 		return fmt.Errorf("wrk: --all-deps is mutually exclusive with --dep, --bring, --done, --merge-back and --list")
 	}
-	if dryRun && !allDeps {
-		return fmt.Errorf("wrk: --dry-run is only valid with --all-deps")
+	if tagNext && (depPath != "" || bringPath != "" || done || list || mergeBack || allDeps || syncFlag || cd || mainFlag || projects || repos || addFlagSet || removeFlagSet || whereFlagSet || status || taskFlagSet || setTaskFlagSet || spawnTarget != "") {
+		return fmt.Errorf("wrk: --tag-next is mutually exclusive with other modes")
+	}
+	if syncFlag && (depPath != "" || bringPath != "" || done || list || mergeBack || allDeps || tagNext || cd || mainFlag || projects || repos || addFlagSet || removeFlagSet || whereFlagSet || status || taskFlagSet || setTaskFlagSet || spawnTarget != "" || pushFlag || jsonFlag) {
+		return fmt.Errorf("wrk: --sync is mutually exclusive with other modes")
+	}
+	if pushFlag && !tagNext {
+		return fmt.Errorf("wrk: --push is only valid with --tag-next")
+	}
+	if jsonFlag && !tagNext {
+		return fmt.Errorf("wrk: --json is only valid with --tag-next")
+	}
+	if dryRun && !allDeps && !tagNext && !syncFlag {
+		return fmt.Errorf("wrk: --dry-run is only valid with --all-deps, --tag-next, or --sync")
 	}
 
 	// spawnTarget only applies to the create path. Reject for any other mode.
-	if spawnTarget != "" && (depPath != "" || bringPath != "" || allDeps || list || status || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || done || mergeBack || cd || mainFlag) {
+	if spawnTarget != "" && (depPath != "" || bringPath != "" || allDeps || tagNext || syncFlag || list || status || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || done || mergeBack || cd || mainFlag) {
 		return fmt.Errorf("wrk: unexpected arguments")
 	}
 	if whereFlagSet && len(remaining) > 0 {
@@ -545,6 +594,12 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	}
 	if allDeps {
 		return runAllDeps(workDir, dryRun)
+	}
+	if tagNext {
+		return runTagNext(workDir, dryRun, pushFlag, jsonFlag)
+	}
+	if syncFlag {
+		return runSync(workDir, dryRun)
 	}
 	if list {
 		return runList(workDir)
@@ -606,7 +661,11 @@ Flags:
   --dep <path>                    spawn a dependency worktree under ./external
   --bring <path>                  like --dep, but soft-skip go.mod replace when not a module dep
   --all-deps                      link every required dep from registered projects
-  --dry-run                       with --all-deps: plan only, no writes
+  --tag-next [--dry-run] [--push] [--json]  plan/apply per-scope release tags
+  --sync [--dry-run]              FF-only bi-directional sync main ↔ linked worktrees
+  --dry-run                       with --all-deps, --tag-next, or --sync: plan only, no writes
+  --push                          with --tag-next: push each new tag to origin
+  --json                          with --tag-next: machine-readable plan/result on stdout
   --task <desc>                   append task slug to worktree/branch names
   --set-task <desc>               rename worktree/branch to match new task
   -y, --yes                       auto-confirm Y/n prompts (own worktree; cascade on TTY only)

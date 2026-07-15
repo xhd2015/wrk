@@ -14,7 +14,7 @@ import (
 var setConfigDisallowedFlags = []string{
 	"--done", "--merge-back", "-l", "--list", "--status", "--repos", "--projects",
 	"--fetch", "--add", "--rm", "--where", "--cd", "--main",
-	"--dep", "--bring", "--all-deps", "--dry-run",
+	"--dep", "--bring", "--all-deps", "--tag-next", "--sync", "--dry-run",
 	"-t", "--task", "--set-task",
 	"--exec",
 	"--bash-integration", "--interceptor",
