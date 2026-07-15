@@ -4,13 +4,14 @@
 
 ```
 # invalid flag combos -> non-zero exit before tagscope runs
-wrk --dry-run (alone) / --tag-next --done -> errors
+wrk --dry-run (alone) -> error
+# primary+tag-next composition is covered under cmd/wrk/tests/done-compose/
 ```
 
 ## Preconditions
 
-- `--dry-run` requires `--all-deps` or `--tag-next`.
-- `--tag-next` is mutually exclusive with `--done` and other modes.
+- Bare `--dry-run` requires a host: `--done`, `--merge-back`, `--all-deps`, `--tag-next`, or `--sync`.
+- Composition of `--tag-next` with `--done` / `--merge-back` is allowed at flag layer (see `done-compose/`); still exclusive with other standalone modes (`--list`, etc.).
 
 ## Steps
 

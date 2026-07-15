@@ -1,16 +1,16 @@
 # Scenario
 
-**Feature**: bare wrk --dry-run rejected unless paired with --all-deps or --tag-next
+**Feature**: bare wrk --dry-run rejected without a dry-run host mode
 
 ```
-# wrk --dry-run alone -> error mentioning --all-deps and --tag-next
+# wrk --dry-run alone -> error listing done, merge-back, all-deps, tag-next, sync
 wrk --dry-run -> validation error before tagscope
 ```
 
 ## Steps
 
 1. `setupRootBumpRepo` (valid git cwd).
-2. Run `wrk --dry-run` without `--tag-next` or `--all-deps`.
+2. Run `wrk --dry-run` without any host (`--done` / `--merge-back` / `--all-deps` / `--tag-next` / `--sync`).
 
 ```go
 func Setup(t *testing.T, req *Request) error {

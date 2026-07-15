@@ -381,14 +381,19 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	// --sync takes no positionals when used alone. It may compose with --done /
 	// --merge-back (post-success pipeline); those modes may take a source dir.
+	// With a primary, --sync may also compose with --tag-next / --push / --dry-run.
 	// Prefer mode-clash errors over unexpected args when combined with other modes
 	// (checked later alongside tag-next family).
 	if syncFlag {
 		// done and mergeBack are intentionally excluded so composition is allowed.
 		otherMode := list || status || repos || projects ||
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" ||
-			allDeps || tagNext || pushFlag || jsonFlag || taskFlagSet || setTaskFlagSet ||
+			allDeps || jsonFlag || taskFlagSet || setTaskFlagSet ||
 			cd || mainFlag || fetchFlag || spawnTarget != ""
+		// tag-next / push compose with --sync only when a primary is present.
+		if (tagNext || pushFlag) && !done && !mergeBack {
+			otherMode = true
+		}
 		// noCd/forceCd are done/create modifiers: exclusive with bare/sync+merge-back,
 		// allowed with --done --sync.
 		if (noCd || forceCd) && !done {
@@ -586,23 +591,51 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if allDeps && (depPath != "" || bringPath != "" || done || list || mergeBack || tagNext || syncFlag || cd || mainFlag) {
 		return fmt.Errorf("wrk: --all-deps is mutually exclusive with --dep, --bring, --done, --merge-back and --list")
 	}
-	if tagNext && (depPath != "" || bringPath != "" || done || list || mergeBack || allDeps || syncFlag || cd || mainFlag || projects || repos || addFlagSet || removeFlagSet || whereFlagSet || status || taskFlagSet || setTaskFlagSet || spawnTarget != "") {
-		return fmt.Errorf("wrk: --tag-next is mutually exclusive with other modes")
+	// --tag-next may compose with --done / --merge-back (and then with --sync / --push / --dry-run).
+	// Without a primary it remains exclusive with those modes and other command modes.
+	if tagNext {
+		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
+			projects || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
+			taskFlagSet || setTaskFlagSet || spawnTarget != ""
+		if !done && !mergeBack {
+			// bare --tag-next: still exclusive with --sync (composition needs a primary)
+			otherMode = otherMode || syncFlag
+		}
+		if otherMode {
+			return fmt.Errorf("wrk: --tag-next is mutually exclusive with other modes")
+		}
 	}
-	// --sync may compose with --done / --merge-back only; still exclusive with other modes.
-	if syncFlag && (depPath != "" || bringPath != "" || list || allDeps || tagNext || cd || mainFlag || projects || repos || addFlagSet || removeFlagSet || whereFlagSet || status || taskFlagSet || setTaskFlagSet || spawnTarget != "" || pushFlag || jsonFlag) {
-		return fmt.Errorf("wrk: --sync is mutually exclusive with other modes")
+	// --sync may compose with --done / --merge-back (and then with --tag-next / --push);
+	// still exclusive with other modes and with --json.
+	if syncFlag {
+		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
+			projects || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
+			taskFlagSet || setTaskFlagSet || spawnTarget != "" || jsonFlag
+		if !done && !mergeBack {
+			otherMode = otherMode || tagNext || pushFlag
+		}
+		if otherMode {
+			return fmt.Errorf("wrk: --sync is mutually exclusive with other modes")
+		}
 	}
-	if pushFlag && !tagNext {
+	// --push is valid with --tag-next or a primary (--done / --merge-back).
+	if pushFlag && !tagNext && !done && !mergeBack {
 		return fmt.Errorf("wrk: --push is only valid with --tag-next")
+	}
+	// --json is only valid with bare --tag-next; never with --done / --merge-back.
+	if jsonFlag && done {
+		return fmt.Errorf("wrk: --json is not valid with --done")
+	}
+	if jsonFlag && mergeBack {
+		return fmt.Errorf("wrk: --json is not valid with --merge-back")
 	}
 	if jsonFlag && !tagNext {
 		return fmt.Errorf("wrk: --json is only valid with --tag-next")
 	}
-	// --dry-run is valid with bare --sync / --all-deps / --tag-next, not with done/merge-back
-	// composition even when --sync is also set.
-	if dryRun && (done || mergeBack || (!allDeps && !tagNext && !syncFlag)) {
-		return fmt.Errorf("wrk: --dry-run is only valid with --all-deps, --tag-next, or --sync")
+	// --dry-run is valid with bare --sync / --all-deps / --tag-next, and with
+	// --done / --merge-back composition (full multi-stage plan is later phases).
+	if dryRun && !done && !mergeBack && !allDeps && !tagNext && !syncFlag {
+		return fmt.Errorf("wrk: --dry-run is only valid with --done, --merge-back, --all-deps, --tag-next, or --sync")
 	}
 
 	// spawnTarget only applies to the create path. Reject for any other mode.
@@ -658,18 +691,20 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if allDeps {
 		return runAllDeps(workDir, dryRun)
 	}
-	if tagNext {
-		return runTagNext(workDir, dryRun, pushFlag, jsonFlag)
-	}
 	if list {
 		return runList(workDir)
 	}
-	// Prefer done / merge-back over bare sync so --done --sync / --merge-back --sync compose.
+	// Prefer done / merge-back over bare tag-next / sync so composition runs the
+	// primary path (post-pipeline handles --tag-next / --sync / --push).
 	if done {
-		return runDone(workDir, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd, execArgs, syncFlag)
+		return runDone(workDir, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, dryRun)
 	}
 	if mergeBack {
-		return runMergeBack(workDir, confirmFromStdin, assumeYes, syncFlag)
+		return runMergeBack(workDir, confirmFromStdin, assumeYes, syncFlag, tagNext, pushFlag, dryRun)
+	}
+	if tagNext {
+		_, err := runTagNext(workDir, dryRun, pushFlag, jsonFlag)
+		return err
 	}
 	if syncFlag {
 		return runSync(workDir, dryRun)
@@ -725,10 +760,12 @@ Positional arguments:
                    - missing parent            -> error
 
 Flags:
-  --done [--sync] [--confirm-from-stdin]  merge worktree branch back and remove it
-                                  (optional --sync after success from main)
-  --merge-back [--sync] [--confirm-from-stdin]  merge worktree branch back WITHOUT removing it
-                                  (optional --sync after success from main)
+  --done [--sync] [--tag-next] [--push] [--dry-run] [--confirm-from-stdin]
+                                  merge worktree branch back and remove it
+                                  (optional post-success: --sync, --tag-next, --push from main)
+  --merge-back [--sync] [--tag-next] [--push] [--dry-run] [--confirm-from-stdin]
+                                  merge worktree branch back WITHOUT removing it
+                                  (optional post-success: --sync, --tag-next, --push from main)
   --done --no-in-module-replace   block --done on ANY local replace (strict)
   --list                          list worktrees (git worktree list)
   --status                        show status for git repos under this checkout
@@ -748,11 +785,13 @@ Flags:
   --bring <path>                  like --dep, but soft-skip go.mod replace when not a module dep
   --all-deps                      link every required dep from registered projects
   --tag-next [--dry-run] [--push] [--json]  plan/apply per-scope release tags
+                                  (also: after successful --done / --merge-back; --json only bare)
   --sync [--dry-run]              FF-only bi-directional sync main ↔ linked worktrees
                                   (also: after successful --done / --merge-back)
-  --dry-run                       with --all-deps, --tag-next, or --sync: plan only, no writes
-  --push                          with --tag-next: push each new tag to origin
-  --json                          with --tag-next: machine-readable plan/result on stdout
+  --dry-run                       with --done/--merge-back/--all-deps/--tag-next/--sync: plan only
+  --push                          with --tag-next: push each new tag to origin;
+                                  with --done/--merge-back: push main branch (and tags when with --tag-next)
+  --json                          with bare --tag-next only: machine-readable plan/result on stdout
   --task <desc>                   append task slug to worktree/branch names
   --set-task <desc>               rename worktree/branch to match new task
   -y, --yes                       auto-confirm Y/n prompts (own worktree; cascade on TTY only)
@@ -999,7 +1038,7 @@ func runList(workDir string) error {
 	return nil
 }
 
-func runDone(workDir string, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync bool) error {
+func runDone(workDir string, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync, withTagNext, withPush, dryRun bool) error {
 	// Shell process cwd (inherited from interactive shell), not merely workDir.
 	// Used after remove to decide whether auto-cd is needed.
 	shellCwd, _ := os.Getwd()
@@ -1022,10 +1061,13 @@ func runDone(workDir string, confirmFromStdin, assumeYes, noInModuleReplace, noC
 	if err != nil {
 		return err
 	}
-	if err := checkCascadeNonInteractive(consumerTop, checkoutRoot); err != nil {
-		return err
+	// Dry-run never confirms/applies cascade, so skip the non-interactive block.
+	if !dryRun {
+		if err := checkCascadeNonInteractive(consumerTop, checkoutRoot); err != nil {
+			return err
+		}
 	}
-	if err := cascadeLinkedWorktrees(consumerTop, checkoutRoot, confirmFromStdin, assumeYes); err != nil {
+	if err := cascadeLinkedWorktrees(consumerTop, checkoutRoot, confirmFromStdin, assumeYes, dryRun); err != nil {
 		return err
 	}
 
@@ -1048,6 +1090,7 @@ func runDone(workDir string, confirmFromStdin, assumeYes, noInModuleReplace, noC
 		SourcePath: checkoutRoot,
 		TargetPath: "",
 		Remove:     true,
+		DryRun:     dryRun,
 		Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
 			return worktree.PromptConfirmPlan(plan, confirmFromStdin, assumeYes)
 		},
@@ -1055,32 +1098,38 @@ func runDone(workDir string, confirmFromStdin, assumeYes, noInModuleReplace, noC
 	if err != nil {
 		return err
 	}
-	fmt.Println(result.Message)
-	// After successful remove: optional --sync from main, then --exec, then land.
-	// --force-cd bypasses cwd-missing gate; otherwise write only if shell cwd gone.
-	// Abort / dry-run: no sync, no exec, no land.
-	if result.Action != "aborted" && result.Action != "dry-run" {
-		if withSync {
-			fmt.Println() // blank line between primary message and sync block
-			if err := runSync(result.TargetPath, false); err != nil {
-				return err
-			}
-		}
-		if err := runExecInDir(result.TargetPath, execArgs); err != nil {
+	// printDryRun already wrote planned commands (no trailing newline).
+	if result.Action == "dry-run" {
+		fmt.Println()
+	} else {
+		fmt.Println(result.Message)
+	}
+	if result.Action == "aborted" {
+		return nil
+	}
+	// Post-pipeline: sync → tag-next → push → exec → land.
+	// Dry-run: still print post stages in dry mode; skip exec/land.
+	// Real success: apply post stages then exec/land.
+	if dryRun {
+		return runComposePostStages(result, checkoutRoot, withSync, withTagNext, withPush, true)
+	}
+	if err := runComposePostStages(result, checkoutRoot, withSync, withTagNext, withPush, false); err != nil {
+		return err
+	}
+	if err := runExecInDir(result.TargetPath, execArgs); err != nil {
+		return err
+	}
+	if forceCd {
+		if err := forceLandInDir(result.TargetPath); err != nil {
 			return err
 		}
-		if forceCd {
-			if err := forceLandInDir(result.TargetPath); err != nil {
-				return err
-			}
-		} else if err := writeFollowupCDIfCwdMissing(noCd, shellCwd, result.TargetPath); err != nil {
-			return err
-		}
+	} else if err := writeFollowupCDIfCwdMissing(noCd, shellCwd, result.TargetPath); err != nil {
+		return err
 	}
 	return nil
 }
 
-func runMergeBack(workDir string, confirmFromStdin, assumeYes, withSync bool) error {
+func runMergeBack(workDir string, confirmFromStdin, assumeYes, withSync, withTagNext, withPush, dryRun bool) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -1099,6 +1148,7 @@ func runMergeBack(workDir string, confirmFromStdin, assumeYes, withSync bool) er
 		SourcePath: checkoutRoot,
 		TargetPath: "",
 		Remove:     false,
+		DryRun:     dryRun,
 		Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
 			return worktree.PromptConfirmPlan(plan, confirmFromStdin, assumeYes)
 		},
@@ -1106,15 +1156,99 @@ func runMergeBack(workDir string, confirmFromStdin, assumeYes, withSync bool) er
 	if err != nil {
 		return err
 	}
-	fmt.Println(result.Message)
-	// Optional --sync from main after successful merge (not on abort/dry-run).
-	if result.Action != "aborted" && result.Action != "dry-run" && withSync {
+	// printDryRun already wrote planned commands (no trailing newline).
+	if result.Action == "dry-run" {
+		fmt.Println()
+	} else {
+		fmt.Println(result.Message)
+	}
+	if result.Action == "aborted" {
+		return nil
+	}
+	// Post-pipeline same order as runDone (no exec/land). Worktree kept.
+	return runComposePostStages(result, checkoutRoot, withSync, withTagNext, withPush, dryRun)
+}
+
+// runComposePostStages runs optional post-merge stages in fixed order:
+//
+//	sync → tag-next (local create or plan) → push (branch + tags).
+//
+// When dryRun is true, stages plan only against the would-be main tip after the
+// planned primary merge (source worktree HEAD for ahead/FF cases). Blank line
+// between major stdout stages.
+func runComposePostStages(result *worktree.MergeBackResult, sourcePath string, withSync, withTagNext, withPush, dryRun bool) error {
+	if !withSync && !withTagNext && !withPush {
+		return nil
+	}
+	mainPath := result.TargetPath
+	if mainPath == "" {
+		return fmt.Errorf("wrk: merge-back result missing target path")
+	}
+
+	// Would-be tip for dry-run tag-next / sync: after planned FF merge of an
+	// ahead source, main moves to source HEAD. Already-included / noop leave
+	// main tip unchanged.
+	headRef := "HEAD"
+	var pretendMainAt string
+	if dryRun {
+		tip, err := resolveWouldBeMainTip(sourcePath, mainPath, result.Relation)
+		if err != nil {
+			return err
+		}
+		headRef = tip
+		pretendMainAt = tip
+	}
+
+	var createdTags []string
+	if withSync {
 		fmt.Println() // blank line between primary message and sync block
-		if err := runSync(result.TargetPath, false); err != nil {
+		if err := runSyncOpts(mainPath, syncOpts{
+			DryRun:        dryRun,
+			PretendMainAt: pretendMainAt,
+		}); err != nil {
+			return err
+		}
+	}
+	if withTagNext {
+		fmt.Println() // blank line before tag-next block
+		// Create tags locally only; push (if any) is via runPushMain with tag list.
+		// Dry-run plans against would-be tip; real apply uses main HEAD post-merge.
+		created, err := runTagNextAt(mainPath, headRef, dryRun, false, false)
+		if err != nil {
+			return err
+		}
+		createdTags = created
+	}
+	if withPush {
+		fmt.Println() // blank line before push confirmation
+		var tags []string
+		if withTagNext {
+			tags = createdTags
+		}
+		if err := runPushMain(mainPath, dryRun, tags); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// resolveWouldBeMainTip returns the commit main would land on after the planned
+// primary merge: source HEAD for ahead/diverged, else current main HEAD.
+func resolveWouldBeMainTip(sourcePath, mainPath, relation string) (string, error) {
+	switch relation {
+	case "ahead", "diverged":
+		out, err := gitOutputDir(sourcePath, "rev-parse", "HEAD")
+		if err != nil {
+			return "", fmt.Errorf("resolve would-be tip from source: %w", err)
+		}
+		return strings.TrimSpace(out), nil
+	default:
+		out, err := gitOutputDir(mainPath, "rev-parse", "HEAD")
+		if err != nil {
+			return "", fmt.Errorf("resolve would-be tip from main: %w", err)
+		}
+		return strings.TrimSpace(out), nil
+	}
 }
 
 func checkCascadeNonInteractive(consumerTop, checkoutRoot string) error {
@@ -1154,7 +1288,7 @@ func checkCascadeNonInteractive(consumerTop, checkoutRoot string) error {
 	return nil
 }
 
-func cascadeLinkedWorktrees(consumerTop, checkoutRoot string, confirmFromStdin, assumeYes bool) error {
+func cascadeLinkedWorktrees(consumerTop, checkoutRoot string, confirmFromStdin, assumeYes, dryRun bool) error {
 	repos, err := discoverStatusRepos(context.Background(), consumerTop)
 	if err != nil {
 		return err
@@ -1177,7 +1311,7 @@ func cascadeLinkedWorktrees(consumerTop, checkoutRoot string, confirmFromStdin, 
 		if filepath.Clean(repo.Path) == cleanCheckout {
 			continue
 		}
-		if err := mergeBackExternalWorktree(repo.Path, confirmFromStdin, assumeYes); err != nil {
+		if err := mergeBackExternalWorktree(repo.Path, confirmFromStdin, assumeYes, dryRun); err != nil {
 			return err
 		}
 	}
@@ -1196,7 +1330,13 @@ func cascadeLinkedWorktrees(consumerTop, checkoutRoot string, confirmFromStdin, 
 // dep repo before the worktree is removed. Relation to dep main: already-included
 // → remove only; ahead/diverged → prompt (via confirmFromStdin). A
 // non-interactive ahead/diverged worktree errors (no force-removal fallback).
-func mergeBackExternalWorktree(externalPath string, confirmFromStdin, assumeYes bool) error {
+//
+// When dryRun is true, prints a compact plan line and does not mutate.
+func mergeBackExternalWorktree(externalPath string, confirmFromStdin, assumeYes, dryRun bool) error {
+	if dryRun {
+		fmt.Printf("would: cascade merge-back %s\n", externalPath)
+		return nil
+	}
 	_, err := worktree.MergeBack(worktree.MergeBackOptions{
 		SourcePath: externalPath,
 		TargetPath: "",

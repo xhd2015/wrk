@@ -83,15 +83,16 @@ func resolveCommand(projects, addFlagSet, removeFlagSet, setTaskFlagSet, whereFl
 		return "bring"
 	case allDeps:
 		return "all-deps"
-	case tagNext:
-		return "tag-next"
 	case list:
 		return "list"
 	case done:
-		// Prefer done / merge-back over sync so composition keeps primary command identity.
+		// Prefer done / merge-back over tag-next / sync so composition keeps
+		// primary command identity (event command "done", not "tag-next").
 		return "done"
 	case mergeBack:
 		return "merge-back"
+	case tagNext:
+		return "tag-next"
 	case syncFlag:
 		return "sync"
 	default:

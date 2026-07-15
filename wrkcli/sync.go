@@ -26,6 +26,15 @@ func IsWipSubject(subject string) bool {
 		strings.HasPrefix(s, "[wip]")
 }
 
+// syncOpts configures runSync / composition dry-run planning.
+type syncOpts struct {
+	DryRun bool
+	// PretendMainAt, when non-empty, is used as the main tip ref for relation
+	// comparisons (composition dry-run after a planned merge that has not been
+	// applied yet). Real merges still use the named main branch.
+	PretendMainAt string
+}
+
 // runSync performs FF-only bi-directional sync between the main checkout and
 // linked named-branch worktrees.
 //
@@ -33,6 +42,11 @@ func IsWipSubject(subject string) bool {
 // Pass 2 distributes main into each strictly-behind worktree.
 // Partial skips warn on stderr and still exit 0.
 func runSync(workDir string, dryRun bool) error {
+	return runSyncOpts(workDir, syncOpts{DryRun: dryRun})
+}
+
+func runSyncOpts(workDir string, opts syncOpts) error {
+	dryRun := opts.DryRun
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -56,6 +70,13 @@ func runSync(workDir string, dryRun bool) error {
 	}
 	if mainBranch == "" || mainBranch == "HEAD" {
 		return fmt.Errorf("wrk: main repository is in detached HEAD (not on a named branch)")
+	}
+
+	// mainTipRef is used for CompareBranches / WIP range checks. When composition
+	// dry-run pretends the planned merge already landed, use that commit SHA.
+	mainTipRef := mainBranch
+	if opts.PretendMainAt != "" {
+		mainTipRef = opts.PretendMainAt
 	}
 
 	linked, err := worktree.ListLinked(mainRepo)
@@ -88,8 +109,8 @@ func runSync(workDir string, dryRun bool) error {
 			continue
 		}
 
-		// Refresh main tip for successive FF harvests.
-		cmp, err := git.CompareBranches(mainRepo, mainBranch, entry.Branch)
+		// Refresh main tip for successive FF harvests (or pretend tip on dry-run compose).
+		cmp, err := git.CompareBranches(mainRepo, mainTipRef, entry.Branch)
 		if err != nil {
 			return err
 		}
@@ -119,7 +140,7 @@ func runSync(workDir string, dryRun bool) error {
 			continue
 		}
 
-		if short, subject, ok, err := findFirstWipInRange(mainRepo, mainBranch, entry.Branch); err != nil {
+		if short, subject, ok, err := findFirstWipInRange(mainRepo, mainTipRef, entry.Branch); err != nil {
 			return err
 		} else if ok {
 			if _, seen := skipOnce[key]; !seen {
@@ -136,6 +157,8 @@ func runSync(workDir string, dryRun bool) error {
 			if err := gitRunDir(mainRepo, "merge", "--ff-only", "--quiet", entry.Branch); err != nil {
 				return fmt.Errorf("git merge --ff-only %s: %w", entry.Branch, err)
 			}
+			// Real harvest moves main tip; keep subsequent compares accurate.
+			mainTipRef = mainBranch
 		}
 		intoMain++
 	}
@@ -159,7 +182,7 @@ func runSync(workDir string, dryRun bool) error {
 			continue
 		}
 
-		cmp, err := git.CompareBranches(mainRepo, mainBranch, entry.Branch)
+		cmp, err := git.CompareBranches(mainRepo, mainTipRef, entry.Branch)
 		if err != nil {
 			return err
 		}

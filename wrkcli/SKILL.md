@@ -30,7 +30,13 @@ wrk myrepo -t 'fix login bug'    # basename + task slug in branch/dir names
 ```sh
 wrk --done                       # merge back and remove worktree
 wrk --merge-back                 # merge back without removing
+wrk --done --sync --tag-next --push   # after success: sync, tag, push main (+ tags)
+wrk --merge-back --tag-next --push --dry-run  # plan post-pipeline only
 ```
+
+Optional post-modifiers on `--done` / `--merge-back`: `--sync`, `--tag-next`, `--push`, `--dry-run`.
+`--push` with a primary pushes the main branch (and tags when combined with `--tag-next`).
+`--json` is only for bare `--tag-next`, not with `--done` / `--merge-back`.
 
 ## Inspect
 

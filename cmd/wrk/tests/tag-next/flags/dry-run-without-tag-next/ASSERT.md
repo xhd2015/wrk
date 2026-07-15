@@ -1,7 +1,8 @@
 ## Expected
 
 - Non-zero exit code.
-- Stderr mentions `--dry-run is only valid with --all-deps` and `--tag-next`.
+- Stderr contains the locked host list:
+  `wrk: --dry-run is only valid with --done, --merge-back, --all-deps, --tag-next, or --sync`
 - Stdout empty.
 
 ## Exit Code
@@ -17,7 +18,6 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if resp.Stdout != "" {
 		t.Fatalf("stdout should be empty, got %q", resp.Stdout)
 	}
-	assertContains(t, resp.Stderr, "--dry-run is only valid with --all-deps")
-	assertContains(t, resp.Stderr, "--tag-next")
+	assertContains(t, resp.Stderr, "--dry-run is only valid with --done, --merge-back, --all-deps, --tag-next, or --sync")
 }
 ```

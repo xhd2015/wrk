@@ -10,10 +10,11 @@ flag validation, mutual exclusion, events.jsonl, and non-git cwd errors.
 
 # DSN (Domain Specific Notion)
 
-- **wrk CLI** — new standalone mode `--tag-next`; invocation
+- **wrk CLI** — mode `--tag-next`; invocation
   `wrk --tag-next [--dry-run] [--push] [--json] [<dir>]`. Effective cwd is
-  optional `<dir>` or process cwd. Mutually exclusive with `--done`, `--list`,
-  `--status`, `--all-deps`, create, and other mode flags.
+  optional `<dir>` or process cwd. May **compose** with primary `--done` /
+  `--merge-back` (see `cmd/wrk/tests/done-compose/`). Still mutually exclusive
+  with `--list`, `--status`, `--all-deps`, create, and other non-composed modes.
 - **tagscope (dot-pkgs)** — `Plan(repoRoot, headRef)` runs Collect +
   LoadOwnedTrees + Evaluate; `Apply(repoRoot, plan, opts)` creates lightweight
   tags (`git tag <name> <head>`) and optionally pushes each new tag
@@ -26,8 +27,11 @@ flag validation, mutual exclusion, events.jsonl, and non-git cwd errors.
   `tagged <name> @ <short-hash>` lines; footer `N tag planned` (dry-run) or
   `N tag created` (apply). Colors when TTY/`--color` (doctest uses pipes → plain).
 - **JSON stdout** — `--json` emits machine-readable plan/result on stdout (no ANSI).
-- **--dry-run validation** — valid with `--all-deps` OR `--tag-next`; bare
-  `wrk --dry-run` → non-zero, stderr mentions `--all-deps` and `--tag-next`.
+- **--dry-run validation** — valid with `--all-deps`, `--tag-next`, `--sync`,
+  and primary composition (`--done` / `--merge-back`); bare `wrk --dry-run` →
+  non-zero, stderr lists those hosts (includes `--all-deps` and `--tag-next`).
+  Primary + `--dry-run` multi-stage plans live under monotree
+  `done-pipeline/dry-run/` and `merge-back-pipeline/dry-run/`.
 - **WRK_HOME** — isolated per test at `{WorkRoot}/.wrk`; auto-record + events on
   every invocation.
 - **events.jsonl** — successful `--tag-next` appends `command: "tag-next"`.
@@ -51,13 +55,14 @@ tag-next/
 ├── push/
 │   └── pushes-tag/               # bare origin + --push → tag on origin
 ├── flags/
-│   ├── dry-run-without-tag-next/ # wrk --dry-run alone → error (all-deps or tag-next)
-│   └── mutually-exclusive/
-│       └── with-done/            # --tag-next --done → error
+│   └── dry-run-without-tag-next/ # wrk --dry-run alone → error (done|merge-back|all-deps|tag-next|sync)
 ├── events/
 │   └── command-tag-next/         # events.jsonl command=tag-next on success
 └── not-git-cwd/                  # cwd not a git repo → error
 ```
+
+Note: `--tag-next` + `--done`/`--merge-back` composition flag matrix lives under
+`cmd/wrk/tests/done-compose/` (not mutually exclusive at flag layer).
 
 ## Test Case Index
 
@@ -70,10 +75,9 @@ tag-next/
 | 5 | exclude/sub-scope-only | sub/ file changed → sub/v0.2.4; root skips |
 | 6 | json/dry-run-root-bump | `--json` stdout is JSON with planned v0.0.2; no tag ref |
 | 7 | push/pushes-tag | `--push` creates v0.0.2 locally and on bare origin |
-| 8 | flags/dry-run-without-tag-next | `wrk --dry-run` → non-zero; stderr mentions both modes |
-| 9 | flags/mutually-exclusive/with-done | `--tag-next --done` → non-zero mutually exclusive |
-| 10 | events/command-tag-next | success → events.jsonl `command: "tag-next"` |
-| 11 | not-git-cwd | non-git cwd → non-zero, not a git repository |
+| 8 | flags/dry-run-without-tag-next | bare `wrk --dry-run` → non-zero; stderr lists done, merge-back, all-deps, tag-next, sync |
+| 9 | events/command-tag-next | success → events.jsonl `command: "tag-next"` |
+| 10 | not-git-cwd | non-git cwd → non-zero, not a git repository |
 
 ## How to Run
 
