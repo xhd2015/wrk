@@ -473,6 +473,97 @@ func commitAheadOnWorktree(t *testing.T, wtDir, filename, content string) {
 	runGitIsolated(t, wtDir, "commit", "-m", "worktree commit")
 }
 
+// --- composition helpers: --done/--merge-back + --sync ---
+
+func revParseHEAD(t *testing.T, dir string) string {
+	t.Helper()
+	return strings.TrimSpace(gitOutputIsolated(t, dir, "rev-parse", "HEAD"))
+}
+
+func assertHEAD(t *testing.T, dir, wantSHA string) {
+	t.Helper()
+	got := revParseHEAD(t, dir)
+	if got != wantSHA {
+		t.Fatalf("HEAD at %s: got %s want %s", dir, got, wantSHA)
+	}
+}
+
+func assertEmptyStderr(t *testing.T, stderr string) {
+	t.Helper()
+	if stderr != "" {
+		t.Fatalf("stderr should be empty, got %q", stderr)
+	}
+}
+
+func syncCommitWord(n int) string {
+	if n == 1 {
+		return "commit"
+	}
+	return "commits"
+}
+
+// syncDetailPass2: pass-2 distribute line  <branch> ← main  (+N commit(s))\n
+func syncDetailPass2(branch string, n int) string {
+	return fmt.Sprintf("%s ← main  (+%d %s)\n", branch, n, syncCommitWord(n))
+}
+
+func syncSummaryLine(intoMain, intoWT, skipped int) string {
+	return fmt.Sprintf("synced: %d into main, %d into worktrees, %d skipped\n", intoMain, intoWT, skipped)
+}
+
+// buildSyncStdout builds standalone sync stdout (details only when actions > 0).
+func buildSyncStdout(details []string, intoMain, intoWT, skipped int) string {
+	var b strings.Builder
+	for _, d := range details {
+		line := strings.TrimSuffix(d, "\n") + "\n"
+		b.WriteString(line)
+	}
+	if len(details) > 0 {
+		b.WriteByte('\n')
+	}
+	b.WriteString(syncSummaryLine(intoMain, intoWT, skipped))
+	return b.String()
+}
+
+// primaryThenSyncStdout joins primary MergeBack message and sync block with a blank line.
+func primaryThenSyncStdout(primaryMsg string, details []string, intoMain, intoWT, skipped int) string {
+	primary := strings.TrimSuffix(primaryMsg, "\n") + "\n"
+	return primary + "\n" + buildSyncStdout(details, intoMain, intoWT, skipped)
+}
+
+func compositionResolvePath(t *testing.T, path string) string {
+	t.Helper()
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatalf("abs %s: %v", path, err)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	return abs
+}
+
+// setupCompositionTwoWTs creates:
+//   - wrk-managed wtA (req.WtDir / req.WtBranch) with an ahead commit (feature-work)
+//   - second linked wtB on branch feature-stays at the pre-ahead tip (req.Wt2Dir / req.Wt2Branch)
+// RepoDir is set to wtA. Caller sets Args.
+func setupCompositionTwoWTs(t *testing.T, req *Request) {
+	t.Helper()
+	skipIfNoGit(t)
+	mainRepo, wtA, _ := setupWrkWorktreeFromMain(t, req)
+	mainRepo = compositionResolvePath(t, mainRepo)
+	req.MainRepo = mainRepo
+
+	wt2Path := filepath.Join(req.WorkRoot, "wt-stays")
+	runGitIsolated(t, mainRepo, "worktree", "add", "-b", "feature-stays", wt2Path)
+	wt2Path = compositionResolvePath(t, wt2Path)
+	req.Wt2Dir = wt2Path
+	req.Wt2Branch = "feature-stays"
+
+	commitAheadOnWorktree(t, wtA, "feature-work", "ahead of main")
+	req.RepoDir = wtA
+}
+
 const cascadeAheadExternalDepModule = "example.com/dep"
 
 // setupConsumerWithAheadExternalDep creates a consumer linked wt plus an external
@@ -968,6 +1059,16 @@ func ensureHelpersUsed() {
 	_ = assertWorktreeListNotContains
 	_ = setupWrkWorktreeFromMain
 	_ = commitAheadOnWorktree
+	_ = revParseHEAD
+	_ = assertHEAD
+	_ = assertEmptyStderr
+	_ = syncCommitWord
+	_ = syncDetailPass2
+	_ = syncSummaryLine
+	_ = buildSyncStdout
+	_ = primaryThenSyncStdout
+	_ = compositionResolvePath
+	_ = setupCompositionTwoWTs
 	_ = setupConsumerWithAheadExternalDep
 	_ = runGoModInDir
 	_ = buildWrkCLIArgs

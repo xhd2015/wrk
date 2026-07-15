@@ -379,13 +379,21 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		}
 	}
 
-	// --sync takes no positionals. Prefer mode-clash errors over unexpected args
-	// when combined with other modes (checked later alongside tag-next family).
+	// --sync takes no positionals when used alone. It may compose with --done /
+	// --merge-back (post-success pipeline); those modes may take a source dir.
+	// Prefer mode-clash errors over unexpected args when combined with other modes
+	// (checked later alongside tag-next family).
 	if syncFlag {
-		otherMode := done || mergeBack || list || status || repos || projects ||
+		// done and mergeBack are intentionally excluded so composition is allowed.
+		otherMode := list || status || repos || projects ||
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" ||
 			allDeps || tagNext || pushFlag || jsonFlag || taskFlagSet || setTaskFlagSet ||
-			cd || mainFlag || fetchFlag || noCd || forceCd || spawnTarget != ""
+			cd || mainFlag || fetchFlag || spawnTarget != ""
+		// noCd/forceCd are done/create modifiers: exclusive with bare/sync+merge-back,
+		// allowed with --done --sync.
+		if (noCd || forceCd) && !done {
+			otherMode = true
+		}
 		if otherMode {
 			ctx.workDir = origWd
 			if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
@@ -393,7 +401,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			}
 			return fmt.Errorf("wrk: --sync is mutually exclusive with other modes")
 		}
-		if len(remaining) > 0 {
+		if !done && !mergeBack && len(remaining) > 0 {
 			ctx.workDir = origWd
 			if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
 				return err
@@ -497,7 +505,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if tagNext {
 			return fmt.Errorf("wrk: --exec is not valid with --tag-next")
 		}
-		if syncFlag {
+		// --exec is valid with --done --sync (runs after sync); invalid with bare --sync.
+		if syncFlag && !done {
 			return fmt.Errorf("wrk: --exec is not valid with --sync")
 		}
 		if mainFlag {
@@ -580,7 +589,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if tagNext && (depPath != "" || bringPath != "" || done || list || mergeBack || allDeps || syncFlag || cd || mainFlag || projects || repos || addFlagSet || removeFlagSet || whereFlagSet || status || taskFlagSet || setTaskFlagSet || spawnTarget != "") {
 		return fmt.Errorf("wrk: --tag-next is mutually exclusive with other modes")
 	}
-	if syncFlag && (depPath != "" || bringPath != "" || done || list || mergeBack || allDeps || tagNext || cd || mainFlag || projects || repos || addFlagSet || removeFlagSet || whereFlagSet || status || taskFlagSet || setTaskFlagSet || spawnTarget != "" || pushFlag || jsonFlag) {
+	// --sync may compose with --done / --merge-back only; still exclusive with other modes.
+	if syncFlag && (depPath != "" || bringPath != "" || list || allDeps || tagNext || cd || mainFlag || projects || repos || addFlagSet || removeFlagSet || whereFlagSet || status || taskFlagSet || setTaskFlagSet || spawnTarget != "" || pushFlag || jsonFlag) {
 		return fmt.Errorf("wrk: --sync is mutually exclusive with other modes")
 	}
 	if pushFlag && !tagNext {
@@ -589,7 +599,9 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if jsonFlag && !tagNext {
 		return fmt.Errorf("wrk: --json is only valid with --tag-next")
 	}
-	if dryRun && !allDeps && !tagNext && !syncFlag {
+	// --dry-run is valid with bare --sync / --all-deps / --tag-next, not with done/merge-back
+	// composition even when --sync is also set.
+	if dryRun && (done || mergeBack || (!allDeps && !tagNext && !syncFlag)) {
 		return fmt.Errorf("wrk: --dry-run is only valid with --all-deps, --tag-next, or --sync")
 	}
 
@@ -649,17 +661,18 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if tagNext {
 		return runTagNext(workDir, dryRun, pushFlag, jsonFlag)
 	}
-	if syncFlag {
-		return runSync(workDir, dryRun)
-	}
 	if list {
 		return runList(workDir)
 	}
+	// Prefer done / merge-back over bare sync so --done --sync / --merge-back --sync compose.
 	if done {
-		return runDone(workDir, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd, execArgs)
+		return runDone(workDir, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd, execArgs, syncFlag)
 	}
 	if mergeBack {
-		return runMergeBack(workDir, confirmFromStdin, assumeYes)
+		return runMergeBack(workDir, confirmFromStdin, assumeYes, syncFlag)
+	}
+	if syncFlag {
+		return runSync(workDir, dryRun)
 	}
 	task := ""
 	if taskDesc != nil {
@@ -712,8 +725,10 @@ Positional arguments:
                    - missing parent            -> error
 
 Flags:
-  --done [--confirm-from-stdin]   merge worktree branch back and remove it
-  --merge-back [--confirm-from-stdin]  merge worktree branch back WITHOUT removing it
+  --done [--sync] [--confirm-from-stdin]  merge worktree branch back and remove it
+                                  (optional --sync after success from main)
+  --merge-back [--sync] [--confirm-from-stdin]  merge worktree branch back WITHOUT removing it
+                                  (optional --sync after success from main)
   --done --no-in-module-replace   block --done on ANY local replace (strict)
   --list                          list worktrees (git worktree list)
   --status                        show status for git repos under this checkout
@@ -734,6 +749,7 @@ Flags:
   --all-deps                      link every required dep from registered projects
   --tag-next [--dry-run] [--push] [--json]  plan/apply per-scope release tags
   --sync [--dry-run]              FF-only bi-directional sync main ↔ linked worktrees
+                                  (also: after successful --done / --merge-back)
   --dry-run                       with --all-deps, --tag-next, or --sync: plan only, no writes
   --push                          with --tag-next: push each new tag to origin
   --json                          with --tag-next: machine-readable plan/result on stdout
@@ -983,7 +999,7 @@ func runList(workDir string) error {
 	return nil
 }
 
-func runDone(workDir string, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd bool, execArgs []string) error {
+func runDone(workDir string, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync bool) error {
 	// Shell process cwd (inherited from interactive shell), not merely workDir.
 	// Used after remove to decide whether auto-cd is needed.
 	shellCwd, _ := os.Getwd()
@@ -1040,9 +1056,16 @@ func runDone(workDir string, confirmFromStdin, assumeYes, noInModuleReplace, noC
 		return err
 	}
 	fmt.Println(result.Message)
-	// After successful remove: optional --exec in main repo, then land/follow-up.
+	// After successful remove: optional --sync from main, then --exec, then land.
 	// --force-cd bypasses cwd-missing gate; otherwise write only if shell cwd gone.
+	// Abort / dry-run: no sync, no exec, no land.
 	if result.Action != "aborted" && result.Action != "dry-run" {
+		if withSync {
+			fmt.Println() // blank line between primary message and sync block
+			if err := runSync(result.TargetPath, false); err != nil {
+				return err
+			}
+		}
 		if err := runExecInDir(result.TargetPath, execArgs); err != nil {
 			return err
 		}
@@ -1057,7 +1080,7 @@ func runDone(workDir string, confirmFromStdin, assumeYes, noInModuleReplace, noC
 	return nil
 }
 
-func runMergeBack(workDir string, confirmFromStdin, assumeYes bool) error {
+func runMergeBack(workDir string, confirmFromStdin, assumeYes, withSync bool) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -1084,6 +1107,13 @@ func runMergeBack(workDir string, confirmFromStdin, assumeYes bool) error {
 		return err
 	}
 	fmt.Println(result.Message)
+	// Optional --sync from main after successful merge (not on abort/dry-run).
+	if result.Action != "aborted" && result.Action != "dry-run" && withSync {
+		fmt.Println() // blank line between primary message and sync block
+		if err := runSync(result.TargetPath, false); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

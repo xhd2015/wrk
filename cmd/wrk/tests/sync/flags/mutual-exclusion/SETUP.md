@@ -1,15 +1,16 @@
 # Scenario
 
-**Feature**: wrk --sync rejects other mode flags
+**Feature**: wrk --sync rejects non-composable mode flags
 
 ```
-# --sync combined with --done / --list / --status -> mutually exclusive error
-wrk --sync --done|--list|--status -> error before sync body
+# --sync combined with --list / --status -> mutually exclusive error
+# --done / --merge-back are composable (covered under monotree done-sync/ + merge-back-sync/)
+wrk --sync --list|--status -> error before sync body
 ```
 
 ## Steps
 
-- Descendants combine `--sync` with another standalone mode flag.
+- Descendants combine `--sync` with a non-composable mode flag (`--list`, `--status`).
 
 ```go
 func Setup(t *testing.T, req *Request) error {

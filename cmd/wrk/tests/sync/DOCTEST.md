@@ -23,8 +23,11 @@ bodies must stay GREEN (zero-summary exact stdout; probe helper).
 
 - **wrk CLI** — standalone mode `--sync`; invocation
   `wrk --sync [--dry-run] [-v]`. No path/positional arguments when `--sync` is
-  set. Mutually exclusive with `--done`, `--list`, `--status`, and other mode
-  flags (same exclusive-mode family as `--tag-next` / `--all-deps`).
+  set alone. **Composable** with `--done` / `--merge-back` as a post-success
+  modifier (flag order free; covered under monotree `done-sync/` and
+  `merge-back-sync/`, not this nested tree). Mutually exclusive with `--list`,
+  `--status`, and other non-composed mode flags (same exclusive-mode family as
+  `--tag-next` / `--all-deps` for those modes).
 - **Git cwd** — process cwd must be inside a git work tree (main checkout or
   linked worktree); else existing not-a-repo error. Resolve **main repo** from
   cwd. Main must be on a **named branch** (not detached) → else fatal Error.
@@ -83,8 +86,7 @@ bodies must stay GREEN (zero-summary exact stdout; probe helper).
 ```
 sync/
 ├── flags/                         # Phase 1 CLI skeleton (keep GREEN)
-│   ├── mutual-exclusion/
-│   │   ├── with-done/
+│   ├── mutual-exclusion/          # non-composable modes only (--done retired; see monotree done-sync/)
 │   │   ├── with-list/
 │   │   └── with-status/
 │   ├── unexpected-args/
@@ -123,33 +125,36 @@ sync/
 
 | # | Leaf | Description |
 |---|------|-------------|
-| 1 | flags/mutual-exclusion/with-done | `wrk --sync --done` → non-zero; mutually exclusive |
-| 2 | flags/mutual-exclusion/with-list | `wrk --sync --list` → non-zero; mutually exclusive |
-| 3 | flags/mutual-exclusion/with-status | `wrk --sync --status` → non-zero; mutually exclusive |
-| 4 | flags/unexpected-args | `wrk --sync some-path` → non-zero; unexpected arguments |
-| 5 | flags/dry-run-bare | `wrk --dry-run` → non-zero; stderr mentions `--all-deps` + `--sync` |
-| 6 | flags/dry-run-ok | `wrk --sync --dry-run` on main-only → exit 0; exact `would: synced: 0…` |
-| 7 | flags/no-linked-noop | `wrk --sync` on main-only → exit 0; exact `synced: 0 into main, 0 into worktrees, 0 skipped` |
-| 8 | flags/not-git | non-git cwd + `--sync` → non-zero; not a git repository |
-| 9 | wip-subject/match-wip-colon | `IsWipSubject("wip: half done")` → true |
-| 10 | wip-subject/match-wip-colon-upper | `IsWipSubject("WIP: foo")` → true |
-| 11 | wip-subject/match-wip-paren | `IsWipSubject("wip(login): sketch")` → true |
-| 12 | wip-subject/match-bracket | `IsWipSubject("[wip] experiment")` → true |
-| 13 | wip-subject/match-bracket-upper | `IsWipSubject("[WIP] foo")` → true |
-| 14 | wip-subject/non-match-feat | `IsWipSubject("feat: done")` → false |
-| 15 | wip-subject/non-match-empty | `IsWipSubject("")` → false |
-| 16 | wip-subject/non-match-mid | `IsWipSubject("chore: wip: later")` → false (not a prefix) |
-| 17 | pass1/ff-clean | wt ahead +2 clean commits → main FF; detail + summary; rev-parse main==wt tip |
-| 18 | pass1/skip-wip-tip | tip `wip:` → skip pass1; warning with short hash+subject; main unchanged |
-| 19 | pass1/skip-wip-middle | older unique `wip:` + clean tip → still skip; names first wip |
-| 20 | pass1/skip-diverged | diverged → skip; `diverged from main`; main/wt SHAs unchanged |
-| 21 | pass1/skip-dirty-main | dirty main + wt ahead → skip; `dirty main`; main tip unchanged |
-| 22 | pass2/ff-from-main | main ahead +1 → wt FF; detail pass2; rev-parse wt==main |
-| 23 | pass2/skip-dirty-wt | main ahead + dirty wt → skip; `dirty worktree`; SHAs unchanged |
-| 24 | combined/harvest-then-distribute | feature-login ahead; feature-api behind → 1 into main + 1 into worktrees |
-| 25 | dry-run/no-mutation | `--dry-run` with wt ahead → `would:` details+summary; HEADs unchanged |
-| 26 | edge/main-detached-error | main detached → non-zero; stderr detached / not named branch |
-| 27 | edge/detached-wt-skip | linked wt detached → warning skip; exit 0; main unchanged |
+| 1 | flags/mutual-exclusion/with-list | `wrk --sync --list` → non-zero; mutually exclusive |
+| 2 | flags/mutual-exclusion/with-status | `wrk --sync --status` → non-zero; mutually exclusive |
+| 3 | flags/unexpected-args | `wrk --sync some-path` → non-zero; unexpected arguments |
+| 4 | flags/dry-run-bare | `wrk --dry-run` → non-zero; stderr mentions `--all-deps` + `--sync` |
+| 5 | flags/dry-run-ok | `wrk --sync --dry-run` on main-only → exit 0; exact `would: synced: 0…` |
+| 6 | flags/no-linked-noop | `wrk --sync` on main-only → exit 0; exact `synced: 0 into main, 0 into worktrees, 0 skipped` |
+| 7 | flags/not-git | non-git cwd + `--sync` → non-zero; not a git repository |
+| 8 | wip-subject/match-wip-colon | `IsWipSubject("wip: half done")` → true |
+| 9 | wip-subject/match-wip-colon-upper | `IsWipSubject("WIP: foo")` → true |
+| 10 | wip-subject/match-wip-paren | `IsWipSubject("wip(login): sketch")` → true |
+| 11 | wip-subject/match-bracket | `IsWipSubject("[wip] experiment")` → true |
+| 12 | wip-subject/match-bracket-upper | `IsWipSubject("[WIP] foo")` → true |
+| 13 | wip-subject/non-match-feat | `IsWipSubject("feat: done")` → false |
+| 14 | wip-subject/non-match-empty | `IsWipSubject("")` → false |
+| 15 | wip-subject/non-match-mid | `IsWipSubject("chore: wip: later")` → false (not a prefix) |
+| 16 | pass1/ff-clean | wt ahead +2 clean commits → main FF; detail + summary; rev-parse main==wt tip |
+| 17 | pass1/skip-wip-tip | tip `wip:` → skip pass1; warning with short hash+subject; main unchanged |
+| 18 | pass1/skip-wip-middle | older unique `wip:` + clean tip → still skip; names first wip |
+| 19 | pass1/skip-diverged | diverged → skip; `diverged from main`; main/wt SHAs unchanged |
+| 20 | pass1/skip-dirty-main | dirty main + wt ahead → skip; `dirty main`; main tip unchanged |
+| 21 | pass2/ff-from-main | main ahead +1 → wt FF; detail pass2; rev-parse wt==main |
+| 22 | pass2/skip-dirty-wt | main ahead + dirty wt → skip; `dirty worktree`; SHAs unchanged |
+| 23 | combined/harvest-then-distribute | feature-login ahead; feature-api behind → 1 into main + 1 into worktrees |
+| 24 | dry-run/no-mutation | `--dry-run` with wt ahead → `would:` details+summary; HEADs unchanged |
+| 25 | edge/main-detached-error | main detached → non-zero; stderr detached / not named branch |
+| 26 | edge/detached-wt-skip | linked wt detached → warning skip; exit 0; main unchanged |
+
+Note: `--sync --done` / `--merge-back --sync` composition lives under monotree
+`cmd/wrk/tests/done-sync/` and `merge-back-sync/` (retired exclusive leaf
+`flags/mutual-exclusion/with-done`).
 
 ## How to Run
 
