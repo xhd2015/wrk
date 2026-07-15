@@ -1,10 +1,9 @@
 ## Expected
 
-- Exit code 0.
-- Scan blocks: main + in-tree linked (Dirs via statusDirLine from main root).
-- One appended block: external wt with statusDirLine Dir (not duplicated in scan).
-- Total three blocks separated by blank lines.
-- Stderr is empty.
+- Exit code 0; stderr empty.
+- Main block: `Dir:          ../..` (not `.`); still has `Remote:`.
+- Appended external: Dir via `statusDirLine(subdir, wt)` (often absolute — three `..`).
+- Branch/Commit/Status/Master content otherwise same as main-root status.
 
 ## Exit Code
 
@@ -19,12 +18,16 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if resp.Stderr != "" {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
-	assertStdoutBlocksSeparated(t, resp.Stdout, 3)
+	assertStdoutBlocksSeparated(t, resp.Stdout, 2)
 
-	inTreeMaster := masterField(t, req.MainRepo, "main", req.InTreeWtBranch)
+	mainDir := statusDirLine(t, req.RepoDir, req.MainRepo)
+	if mainDir != "../.." {
+		t.Fatalf("fixture expectation: main Dir want ../.., got %q (cwd=%s main=%s)",
+			mainDir, req.RepoDir, req.MainRepo)
+	}
+
 	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
 		scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
-		scanStatusBlockFromCwd(t, req.RepoDir, req.InTreeWtDir, "clean", inTreeMaster, false),
 		appendedHealthyBlockPlain(t, req.RepoDir, req.MainRepo, req.WtDir, req.WtBranch, "clean"),
 	))
 }

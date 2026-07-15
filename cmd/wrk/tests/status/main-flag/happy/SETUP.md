@@ -5,7 +5,7 @@
 ```
 # cwd anywhere under a checkout → status of that checkout's main repo
 linked or main cwd + --main --status -> runStatus(mainRepo)
-  == (cd mainRepo && wrk --status)
+  content == (cd mainRepo && wrk --status); Dir may differ by inv cwd
 ```
 
 ## Preconditions
@@ -16,7 +16,7 @@ linked or main cwd + --main --status -> runStatus(mainRepo)
 ## Steps
 
 - Descendants set cwd (main / external wt / in-tree linked) and Args for the pair.
-- Assert exit 0 and stdout equivalence to `wrk --status` from main.
+- Assert exit 0 and Dir-aware content equivalence to `wrk --status` from main.
 
 ## Context
 

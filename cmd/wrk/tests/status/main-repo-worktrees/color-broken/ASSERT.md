@@ -2,7 +2,7 @@
 
 - Exit code 0.
 - Appended broken block has red ANSI on `error: <git stderr>` value only.
-- `Dir:` label stays uncolored.
+- `Dir:` label stays uncolored; Dir value follows `statusDirLine`.
 - Stderr is empty.
 
 ## Exit Code
@@ -22,8 +22,8 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 
 	errStatus := appendedErrorStatusColored(t, req.WtDir)
 	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		scanStatusBlockPlain(t, req.MainRepo, ".", "clean", "", true),
-		appendedDirLine(t, req.WtDir)+"\nStatus:       "+errStatus,
+		scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
+		appendedDirLine(t, req.RepoDir, req.WtDir)+"\nStatus:       "+errStatus,
 	))
 }
 ```

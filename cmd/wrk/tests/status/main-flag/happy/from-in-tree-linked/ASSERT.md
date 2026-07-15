@@ -1,8 +1,10 @@
 ## Expected
 
 - Exit code 0; stderr empty.
-- Stdout equals `wrk --status` from main (full main-repo status: root `.` with `Remote:`, plus relative in-tree linked block with `Master:`).
-- Stdout is **not** equal to plain `wrk --status` from the in-tree linked cwd (linked-cwd shortcut: single `.` + `Master` only).
+- Full main-repo status content (root with `Remote:`, plus in-tree linked with `Master:`).
+- Dir lines relative to inv cwd = in-tree linked root: main typically `..`, linked `.`.
+- Stdout is **not** equal to plain `wrk --status` from the in-tree linked cwd (linked-cwd
+  shortcut: single `.` + `Master` only).
 
 ## Exit Code
 
@@ -11,7 +13,7 @@
 ```go
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertExitZeroEmptyStderr(t, resp, err)
-	assertStdoutEqualsMainStatus(t, req, resp)
+	assertStdoutMainStatusDirAware(t, req, resp, req.MainRepo, req.WtDir)
 
 	// Prove we did not take the linked-in-tree cwd special path.
 	plainLinked := runWrkCapture(t, req, req.WtDir, "--status")

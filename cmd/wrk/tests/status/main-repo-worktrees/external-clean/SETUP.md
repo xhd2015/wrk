@@ -6,7 +6,7 @@
 # wrk creates external linked wt under WRK_HOME
 myrepo -> wrk -> external wt
 
-# --status from main: scan `.` + appended full block (abs Dir, Master)
+# --status from main: scan `.` + appended full block (Dir via statusDirLine, Master)
 wrk --status from main cwd -> scan + append external
 ```
 

@@ -569,13 +569,14 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		statusRoot := workDir
 		if mainFlag {
 			// Status the main repository of this checkout (no nested shell).
+			// Dir labels still use original workDir as display base.
 			mainRepo, err := resolveMainRepoForWorkDir(workDir)
 			if err != nil {
 				return err
 			}
 			statusRoot = mainRepo
 		}
-		return runStatus(statusRoot, colorEnabled, fetchFlag)
+		return runStatus(statusRoot, workDir, colorEnabled, fetchFlag)
 	}
 	if mainFlag {
 		return runMain(workDir)

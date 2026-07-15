@@ -1,7 +1,8 @@
 ## Expected
 
 - Exit code 0; stderr empty.
-- Stdout equals `wrk --status` from main (same as `--main --status` order).
+- Same Dir-aware content as `--main --status` order (invocation cwd = external wt).
+- Content fields match status-from-main; Dir via `statusDirLine`.
 
 ## Exit Code
 
@@ -10,6 +11,6 @@
 ```go
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertExitZeroEmptyStderr(t, resp, err)
-	assertStdoutEqualsMainStatus(t, req, resp)
+	assertStdoutMainStatusDirAware(t, req, resp, req.MainRepo, req.WtDir)
 }
 ```

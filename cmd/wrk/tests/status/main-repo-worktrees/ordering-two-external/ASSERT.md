@@ -1,8 +1,9 @@
 ## Expected
 
 - Exit code 0.
-- Scan block for `.` plus two appended full blocks.
+- Scan block for main plus two appended full blocks.
 - Appended order matches `worktree.ListLinked` external order (first wrk, then second).
+- Each Dir follows `statusDirLine(invCwd, path)` (only formatting changes vs abs policy).
 - Stderr is empty.
 
 ## Exit Code
@@ -29,9 +30,9 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 
 	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		scanStatusBlockPlain(t, req.MainRepo, ".", "clean", "", true),
-		appendedHealthyBlockPlain(t, req.MainRepo, req.WtDir, req.WtBranch, "clean"),
-		appendedHealthyBlockPlain(t, req.MainRepo, req.WtDir2, req.WtBranch2, "clean"),
+		scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
+		appendedHealthyBlockPlain(t, req.RepoDir, req.MainRepo, req.WtDir, req.WtBranch, "clean"),
+		appendedHealthyBlockPlain(t, req.RepoDir, req.MainRepo, req.WtDir2, req.WtBranch2, "clean"),
 	))
 }
 ```

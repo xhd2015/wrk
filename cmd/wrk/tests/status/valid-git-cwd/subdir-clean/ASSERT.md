@@ -1,16 +1,18 @@
 ## Expected Output
 
 ```text
-Dir:          .
+Dir:          ../..
 Branch:       main
 Commit:       <short hash>  add subdir file
 Status:       clean
+Remote:       (no upstream)
 ```
 
 ## Expected
 
 - Exit code 0.
-- Stdout reports the checkout root as `Dir:          .`, not `sub/dir`.
+- Stdout reports main Dir as `../..` (Rel from `sub/dir`), **not** forced `.`.
+- `Remote:` still present (main identity, not Dir==".").
 - The branch, short commit, and subject match the root checkout.
 - Stderr is empty.
 
@@ -36,6 +38,10 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if got := statusOutputBlockCount(resp.Stdout); got != 1 {
 		t.Fatalf("expected 1 status block, got %d:\n%s", got, resp.Stdout)
 	}
-	assert.Output(t, resp.Stdout, statusBlockTemplate(t, req.MainRepo, ".", "clean"))
+	dir := statusDirLine(t, req.RepoDir, req.MainRepo)
+	if dir != "../.." {
+		t.Fatalf("fixture Dir want ../.., got %q", dir)
+	}
+	assert.Output(t, resp.Stdout, v2StdoutTemplate(statusMainBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean")))
 }
 ```

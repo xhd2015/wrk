@@ -1,10 +1,10 @@
 # Scenario
 
-**Feature**: wrk --status invoked from a subdirectory still reports root-relative dot
+**Feature**: wrk --status from a subdirectory uses Rel Dir vs invocation cwd (not forced `.`)
 
 ```
-# process cwd is below the checkout top
-myrepo/sub/dir -> wrk --status -> Dir "."
+# process cwd is two levels below the checkout top
+myrepo/sub/dir -> wrk --status -> Dir "../.." + Remote on main
 ```
 
 ## Steps

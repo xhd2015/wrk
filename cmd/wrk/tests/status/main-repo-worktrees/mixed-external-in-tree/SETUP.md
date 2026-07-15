@@ -6,7 +6,7 @@
 # wrk external + in-tree git worktree add
 myrepo -> wrk external + wt-linked in-tree
 
-# scan: `.` + `wt-linked`; append: external abs block only
+# scan: main + wt-linked (Dir via statusDirLine); append: external only
 wrk --status from main -> dedup in-tree, append external
 ```
 

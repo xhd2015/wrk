@@ -2,7 +2,8 @@
 
 - Exit code 0.
 - No `Remote:` anywhere in stdout.
-- Linked block has `Master:` where applicable.
+- Linked block has `Master:` where applicable; Dir for the current linked cwd is `.`
+  (statusDirLine), not main-relative `wt-linked`.
 - Stderr is empty (no `-v`).
 
 ## Exit Code
@@ -27,9 +28,10 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertStdoutNoRemoteField(t, resp.Stdout)
 
 	master := masterIdenticalField(t, req.MainRepo, "main", "wt-branch")
+	// Same linked-in-tree layout as from-linked-no-remote: Dir relative to inv cwd.
 	rootBlock := fmt.Sprintf("Dir:          .\n%s\n%s\nStatus:       clean",
 		statusBranchLine(t, req.WtDir), statusCommitLine(t, req.WtDir))
-	wtBlock := fmt.Sprintf("Dir:          wt-linked\n%s\n%s\nStatus:       clean\n%s",
+	wtBlock := fmt.Sprintf("Dir:          .\n%s\n%s\nStatus:       clean\n%s",
 		statusBranchLine(t, req.WtDir), statusCommitLine(t, req.WtDir), master)
 	assert.Output(t, resp.Stdout, v2StdoutTemplate(joinStdoutBlocks(rootBlock, wtBlock)))
 }

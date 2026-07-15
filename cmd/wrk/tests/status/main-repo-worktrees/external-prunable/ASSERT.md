@@ -1,8 +1,8 @@
 ## Expected
 
 - Exit code 0.
-- Scan block for `.` unchanged.
-- Appended minimal block: absolute `Dir` (from porcelain) + `Status: prunable`.
+- Scan block for main unchanged (Dir via statusDirLine).
+- Appended minimal block: `statusDirLine` Dir (from porcelain path) + `Status: prunable`.
 - No `Branch`/`Commit`/`Master:` on appended block.
 - Stderr is empty.
 
@@ -22,8 +22,8 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertStdoutBlocksSeparated(t, resp.Stdout, 2)
 
 	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		scanStatusBlockPlain(t, req.MainRepo, ".", "clean", "", true),
-		appendedMinimalBlockPlain(t, req.WtDir, "prunable"),
+		scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
+		appendedMinimalBlockPlain(t, req.RepoDir, req.WtDir, "prunable"),
 	))
 }
 ```

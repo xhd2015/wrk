@@ -6,8 +6,7 @@
 # composition: --main + --status → status of main repo, not shell
 wrk --main --status from linked or main cwd
   -> ResolveMainRepo(ShowToplevel(workDir))
-  -> runStatus(mainRepo, …)
-  -> stdout == (cd mainRepo && wrk --status)
+  -> runStatus(mainRepo, …) with Dir labels vs original invocation cwd
 
 # flag order irrelevant
 wrk --status --main  -> same as wrk --main --status
@@ -22,14 +21,15 @@ events.jsonl command="status"; args include --main and --status
 - Parent `status/SETUP.md` defaults `Args` to `["--status"]`; this node defaults to
   the composition `["--main", "--status"]`. Leaves may override.
 - Do **not** redefine root `Request` / `Response` / `Run`.
-- Prefer **equivalence** asserts: primary stdout == second `wrk --status` capture
-  from `req.MainRepo` (full bytes, trailing `\n` preserved).
+- **Dir-aware equivalence**: same blocks and Branch/Commit/Status/Master/Remote as
+  `wrk --status` from main; **Dir may differ** when invocation cwd ≠ main (rewrite
+  reference Dir lines with `statusDirLine(invCwd, path)`).
 
 ## Steps
 
 1. Descendants build a main checkout and optional external / in-tree linked worktrees.
 2. Set `RepoDir` (process cwd) and `Args` for the composition under test.
-3. Happy leaves compare against a reference `wrk --status` from main.
+3. Happy leaves compare against reference main status with Dir rewrite for inv cwd.
 
 ## Context
 
@@ -37,6 +37,7 @@ events.jsonl command="status"; args include --main and --status
 - In-tree linked cwd + `--main --status` must use full main-repo status (not the
   linked-cwd scan-only shortcut of plain `--status` from that cwd).
 - `--fetch` / `--color` / `-v` remain allowed with the pair; other modes stay exclusive.
+- When already at main, Dir layout matches plain `--status` from main.
 
 ```go
 import (
@@ -116,9 +117,37 @@ func assertExitZeroEmptyStderr(t *testing.T, resp *Response, err error) {
 	}
 }
 
-// assertStdoutEqualsMainStatus is the primary equivalence promise:
-// wrk --main --status (or --status --main) stdout == wrk --status from main.
-func assertStdoutEqualsMainStatus(t *testing.T, req *Request, resp *Response) {
+// rewriteStatusDirLines replaces each "Dir:          …" line in order with
+// statusDirLine(invCwd, repoPaths[i]) so reference stdout (from main cwd) can be
+// compared against composition stdout from a different invocation cwd.
+func rewriteStatusDirLines(t *testing.T, invCwd string, repoPaths []string, stdout string) string {
+	t.Helper()
+	const prefix = "Dir:          "
+	var b strings.Builder
+	pathIdx := 0
+	for _, line := range strings.SplitAfter(stdout, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			if pathIdx >= len(repoPaths) {
+				t.Fatalf("more Dir lines than repoPaths (%d): paths=%v\nstdout:\n%s", len(repoPaths), repoPaths, stdout)
+			}
+			hasNL := strings.HasSuffix(line, "\n")
+			line = prefix + statusDirLine(t, invCwd, repoPaths[pathIdx])
+			if hasNL {
+				line += "\n"
+			}
+			pathIdx++
+		}
+		b.WriteString(line)
+	}
+	if pathIdx != len(repoPaths) {
+		t.Fatalf("Dir line count %d != len(repoPaths) %d\nstdout:\n%s", pathIdx, len(repoPaths), stdout)
+	}
+	return b.String()
+}
+
+// assertStdoutMainStatusDirAware: composition has same non-Dir fields as status-from-main;
+// Dir lines equal statusDirLine(req.RepoDir, each path in block order).
+func assertStdoutMainStatusDirAware(t *testing.T, req *Request, resp *Response, blockPaths ...string) {
 	t.Helper()
 	ref := runStatusFromMain(t, req)
 	if ref.ExitCode != 0 {
@@ -127,10 +156,27 @@ func assertStdoutEqualsMainStatus(t *testing.T, req *Request, resp *Response) {
 	if resp.ExitCode != ref.ExitCode {
 		t.Fatalf("exit code: composition=%d reference=%d", resp.ExitCode, ref.ExitCode)
 	}
-	if resp.Stdout != ref.Stdout {
-		t.Fatalf("stdout not equivalent to wrk --status from main\n--- composition ---\n%s\n--- reference (main) ---\n%s",
-			resp.Stdout, ref.Stdout)
+	want := rewriteStatusDirLines(t, req.RepoDir, blockPaths, ref.Stdout)
+	if resp.Stdout != want {
+		t.Fatalf("stdout Dir-aware mismatch vs main status content\n--- composition ---\n%s\n--- want (ref Dirs rewritten for cwd %s) ---\n%s\n--- reference (main cwd) ---\n%s",
+			resp.Stdout, req.RepoDir, want, ref.Stdout)
 	}
+}
+
+// assertStdoutEqualsMainStatus: when invCwd is main, Dir rewrite is identity for
+// scan-relative paths; still rewrite so external Dir uses statusDirLine (not old abs).
+// Root Request has MainRepo + WtDir only (no WtDir2); callers with extra blocks should
+// pass paths explicitly via assertStdoutMainStatusDirAware.
+func assertStdoutEqualsMainStatus(t *testing.T, req *Request, resp *Response) {
+	t.Helper()
+	if req.MainRepo == "" {
+		t.Fatal("MainRepo empty")
+	}
+	paths := []string{req.MainRepo}
+	if req.WtDir != "" {
+		paths = append(paths, req.WtDir)
+	}
+	assertStdoutMainStatusDirAware(t, req, resp, paths...)
 }
 
 func assertEmptyStdout(t *testing.T, stdout string) {
@@ -215,9 +261,12 @@ func assertLastEventCommandStatusWithMain(t *testing.T, wrkHome string, wantExit
 func ensureMainFlagHelpersUsed() {
 	_ = setMainStatusArgs
 	_ = resolvePath
+	_ = statusDirLine
 	_ = runWrkCapture
 	_ = runStatusFromMain
 	_ = assertExitZeroEmptyStderr
+	_ = rewriteStatusDirLines
+	_ = assertStdoutMainStatusDirAware
 	_ = assertStdoutEqualsMainStatus
 	_ = assertEmptyStdout
 	_ = addInTreeLinkedWorktree

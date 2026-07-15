@@ -3,8 +3,10 @@
 **Feature**: wrk --status from linked worktree cwd omits Remote: everywhere
 
 ```
-linked wt cwd -> blocks have Master: where applicable; no Remote:
+# cwd = in-tree linked wt (wt-linked); Dir labels use statusDirLine(inv cwd)
+linked wt cwd -> Dir . (not main-relative wt-linked); Master where applicable; no Remote:
 ```
+
 
 ```go
 import "path/filepath"

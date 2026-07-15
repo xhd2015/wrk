@@ -24,8 +24,16 @@ wrk --status + other mode -> error (mutually exclusive)
 
 - Successful status output is a sequence of blocks containing `Dir`, `Branch`, `Commit`, and `Status` lines.
 - `Status` is `clean` or `dirty (N added, N changed, N renamed, N deleted)`; porcelain `??` untracked counts as **added** (same wrk taxonomy as `--projects`).
-- The `Dir` line is relative to the current checkout toplevel; the checkout itself is `.`.
-- **Main repo checkout cwd only**: the root `Dir: .` block also includes `Remote:` (same brief labels as `--projects`; `(no upstream)` when no tracking remote). Linked worktree cwd and nested `RepoTypeMain` repos omit `Remote:`.
+- Every `Dir:` value uses **invocation cwd** (process work directory when wrk started):
+  `filepath.Rel(normalize(cwd), normalize(repoPath))`; on Rel failure, or when the
+  cleaned relative path has **more than two** leading `..` segments, print the
+  absolute normalized path; otherwise print `filepath.ToSlash(rel)`.
+  Examples: cwd at checkout root → `.`; cwd at `main/pkg/api` → main shows `../..`;
+  cwd at `main/a/b/c/d` → main shows absolute (four leading `..`).
+- **Main repo identity** (not `Dir == "."`): when statusing a main-repo checkout, the
+  main-repo block includes `Remote:` (same brief labels as `--projects`; `(no upstream)`
+  when no tracking remote). Linked worktree cwd and nested `RepoTypeMain` repos omit
+  `Remote:`.
 - **Linked worktrees only** (`worktree.IsLinked`) also include one-line `Master:` — brief branch-relation label comparing the main repo's current branch vs the worktree's current branch (`git.CompareBranches`: `identical`, `needs merge back(+N commit(s))`, `needs fast forward(+N commit(s))`, `diverged(N commit(s))`); main checkout and nested independent `RepoTypeMain` repos omit this field.
 - When stdout is a TTY or `--color` is set, `--status` colors `Status: clean` green and applies granular dirty-status coloring (same rules as `--projects`); `Master:` values use green/orange/red by relation. Without color: plain text.
 
@@ -59,29 +67,89 @@ func statusNoUpstreamRemote() string {
 	return "Remote:       (no upstream)"
 }
 
-func statusBlockPlain(t *testing.T, repoDir, relDir, statusLine string) string {
+// statusNormalizePath matches storage.NormalizePath / resolvePath used by product Dir abs fallback.
+func statusNormalizePath(t *testing.T, path string) string {
+	t.Helper()
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatalf("abs %s: %v", path, err)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	return abs
+}
+
+// statusDirLine mirrors product statusDirLine(displayCwd, repoPath):
+// rel = Rel(norm(cwd), norm(repo)); Rel fail or leading ".." count > 2 → absolute; else ToSlash(rel).
+func statusDirLine(t *testing.T, invCwd, repoPath string) string {
+	t.Helper()
+	base := statusNormalizePath(t, invCwd)
+	target := statusNormalizePath(t, repoPath)
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return target
+	}
+	rel = filepath.Clean(rel)
+	slash := filepath.ToSlash(rel)
+	leading := 0
+	for _, p := range strings.Split(slash, "/") {
+		if p == ".." {
+			leading++
+			continue
+		}
+		break
+	}
+	if leading > 2 {
+		return target
+	}
+	return slash
+}
+
+func statusDirField(t *testing.T, invCwd, repoPath string) string {
+	t.Helper()
+	return "Dir:          " + statusDirLine(t, invCwd, repoPath)
+}
+
+func statusBlockPlain(t *testing.T, repoDir, dirLine, statusLine string) string {
 	t.Helper()
 	return fmt.Sprintf("Dir:          %s\n%s\n%s\nStatus:       %s",
-		relDir, statusBranchLine(t, repoDir), statusCommitLine(t, repoDir), statusLine)
+		dirLine, statusBranchLine(t, repoDir), statusCommitLine(t, repoDir), statusLine)
 }
 
+// statusRootBlockWithDir builds a main-repo block. dirLine comes from statusDirLine (may be
+// ".", "../..", or absolute). Remote is attached for main identity — not gated on Dir==".".
+func statusRootBlockWithDir(t *testing.T, mainRepo, dirLine, statusLine, remoteLine string) string {
+	t.Helper()
+	return fmt.Sprintf("Dir:          %s\n%s\n%s\nStatus:       %s\n%s",
+		dirLine, statusBranchLine(t, mainRepo), statusCommitLine(t, mainRepo), statusLine, remoteLine)
+}
+
+// statusRootBlockPlain is the main-root convenience form (Dir: .).
 func statusRootBlockPlain(t *testing.T, mainRepo, statusLine, remoteLine string) string {
 	t.Helper()
-	return fmt.Sprintf("Dir:          .\n%s\n%s\nStatus:       %s\n%s",
-		statusBranchLine(t, mainRepo), statusCommitLine(t, mainRepo), statusLine, remoteLine)
+	return statusRootBlockWithDir(t, mainRepo, ".", statusLine, remoteLine)
 }
 
-func statusBlockTemplate(t *testing.T, repoDir, relDir, statusLine string) string {
+// statusBlockTemplate: dirLine "." implies main-root block with Remote (historical helper).
+// For non-dot main Dir lines (subdir cwd), use statusMainBlockFromCwd / statusRootBlockWithDir.
+func statusBlockTemplate(t *testing.T, repoDir, dirLine, statusLine string) string {
 	t.Helper()
-	if relDir == "." {
+	if dirLine == "." {
 		return v2StdoutTemplate(statusRootBlockPlain(t, repoDir, statusLine, statusNoUpstreamRemote()))
 	}
-	return v2StdoutTemplate(statusBlockPlain(t, repoDir, relDir, statusLine))
+	return v2StdoutTemplate(statusBlockPlain(t, repoDir, dirLine, statusLine))
 }
 
 func statusRootBlockTemplate(t *testing.T, mainRepo, statusLine, remoteLine string) string {
 	t.Helper()
 	return v2StdoutTemplate(statusRootBlockPlain(t, mainRepo, statusLine, remoteLine))
+}
+
+// statusMainBlockFromCwd builds expected main-repo block (with Remote) using invocation-cwd Dir rule.
+func statusMainBlockFromCwd(t *testing.T, invCwd, mainRepo, statusLine string) string {
+	t.Helper()
+	return statusRootBlockWithDir(t, mainRepo, statusDirLine(t, invCwd, mainRepo), statusLine, statusNoUpstreamRemote())
 }
 
 func statusStdoutV2(t *testing.T, blocks ...string) string {

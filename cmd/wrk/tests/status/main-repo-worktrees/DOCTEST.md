@@ -10,9 +10,14 @@ per **external** linked worktree not already discovered by scan.
 # DSN (Domain Specific Notion)
 
 - **wrk CLI** — `wrk --status` resolves the effective cwd's git toplevel, scans
-  with `scan_repo.Scan`, and prints one status block per discovered git directory
-  (unchanged scan output: relative `Dir`, optional `Master:` on in-tree linked
-  worktrees only).
+  with `scan_repo.Scan`, and prints one status block per discovered git directory.
+- **Dir display (`statusDirLine`)** — every `Dir:` (scan + appended + broken/prunable)
+  is based on **invocation cwd** (process work directory when wrk started), not
+  relative-only-to-main and not always-absolute for external worktrees:
+  `rel = filepath.Rel(normalize(invCwd), normalize(repoPath))`; on Rel failure or
+  leading `..` segment count after Clean **> 2** → absolute (`storage.NormalizePath`);
+  else `filepath.ToSlash(rel)`. `.` / `../x` / `../../x` stay relative; deeper ups
+  become absolute. No soft rule forcing `.` when cwd is inside the checkout.
 - **Main repo checkout** — `.git` is a directory (`worktree.IsMainRepo`); running
   `--status` from here enables the **append phase** after scan blocks.
 - **Linked worktree cwd** — `.git` is a file (`worktree.IsLinked`); append phase
@@ -21,13 +26,16 @@ per **external** linked worktree not already discovered by scan.
   porcelain order; skip any entry whose normalized path is already in
   `scan_repo.Scan` results (dedup: in-tree linked wts like `myrepo/wt-linked`
   stay scan-only; external `{WRK_HOME}/worktrees/…` are appended).
-- **Appended healthy block** — absolute normalized `Dir` (`storage.NormalizePath`);
-  full fields: `Branch`, `Commit`, `Status`, `Master:` (brief branch-relation vs
-  main repo current branch).
+- **Appended healthy block** — `Dir` via `statusDirLine`; full fields: `Branch`,
+  `Commit`, `Status`, `Master:` (brief branch-relation vs main repo current branch).
+  Fixture layout `{WorkRoot}/myrepo` + `{WorkRoot}/.wrk/worktrees/…` often yields
+  relative `../.wrk/worktrees/…` from main root (one leading `..`).
 - **Appended broken block** — alive checkout path but git metadata fails: minimal
   `Dir` + `Status: error: <git stderr>` only; run continues for remaining wts.
 - **Appended prunable block** — checkout dir missing (`worktree.IsDead`): minimal
   `Dir` (from porcelain) + `Status: prunable` only.
+- **Remote** — printed for the main-repo block when statusing main; gated on main
+  identity, **not** on `Dir == "."`.
 - **WRK_HOME** — isolated per test at `{WorkRoot}/.wrk`; external worktrees
   created via `wrk` (no args) from main repo.
 - **Color** — `--color` forces ANSI on pipe; appended broken `error: …` value is
@@ -37,8 +45,8 @@ per **external** linked worktree not already discovered by scan.
 
 ```
 main-repo-worktrees/
-├── no-linked-external/       # clean main, no external wt → scan only (unchanged)
-├── external-clean/           # wrk external → scan `.` + appended full block
+├── no-linked-external/       # clean main, no external wt → scan only
+├── external-clean/           # wrk external → scan + appended full block (Dir rule)
 ├── external-dirty/           # uncommitted change in external wt
 ├── in-tree-only/             # git worktree add only → no append (dedup)
 ├── mixed-external-in-tree/   # scan in-tree + append external only
@@ -46,15 +54,17 @@ main-repo-worktrees/
 ├── external-prunable/        # removed checkout dir → minimal prunable block
 ├── from-linked-cwd/          # --status inside external wt → no append section
 ├── ordering-two-external/    # two external wts → append order = ListLinked
-└── color-broken/             # --status --color → red error on appended block
+├── color-broken/             # --status --color → red error on appended block
+├── from-main-subdir/         # cwd main/pkg/api → Dir ../.. + Remote; external per rule
+└── from-deep-subdir/         # cwd main/a/b/c/d → main Dir absolute + Remote
 ```
 
 ## Test Case Index
 
 | # | Leaf | Description |
 |---|------|-------------|
-| 1 | no-linked-external | Clean main repo; output identical to scan-only today |
-| 2 | external-clean | Main + one wrk external wt; appended full block with abs Dir + Master |
+| 1 | no-linked-external | Clean main repo; scan-only |
+| 2 | external-clean | Main + one wrk external wt; appended full block with statusDirLine Dir + Master |
 | 3 | external-dirty | External wt dirty; appended `Status: dirty (...)` |
 | 4 | in-tree-only | In-tree `git worktree add` only; scan blocks only, no append |
 | 5 | mixed-external-in-tree | wrk external + in-tree wt; append external only |
@@ -63,13 +73,17 @@ main-repo-worktrees/
 | 8 | from-linked-cwd | `--status` from external wt cwd; no appended section |
 | 9 | ordering-two-external | Two external wts; append order matches `git worktree list` |
 | 10 | color-broken | `--status --color` with broken external; red `error:` value |
+| 11 | from-main-subdir | cwd `main/pkg/api` (≤2 ups); main Dir `../..` + Remote |
+| 12 | from-deep-subdir | cwd `main/a/b/c/d` (>2 ups); main Dir absolute + Remote |
 
 ## How to Run
 
 ```sh
-doctest vet ./tests/status/main-repo-worktrees
-doctest test ./tests/status/main-repo-worktrees
-doctest test ./tests/status/main-repo-worktrees/external-clean
+doctest vet ./cmd/wrk/tests/status/main-repo-worktrees
+doctest test ./cmd/wrk/tests/status/main-repo-worktrees
+doctest test ./cmd/wrk/tests/status/main-repo-worktrees/external-clean
+doctest test ./cmd/wrk/tests/status/main-repo-worktrees/from-main-subdir
+doctest test ./cmd/wrk/tests/status/main-repo-worktrees/from-deep-subdir
 ```
 
 ```go

@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Single scan block for `Dir:          .` only — no appended section.
+- Single scan block for main only — no appended section.
 - Stderr is empty.
 
 ## Exit Code
@@ -19,7 +19,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 	assertStdoutBlocksSeparated(t, resp.Stdout, 1)
 	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		scanStatusBlockPlain(t, req.MainRepo, ".", "clean", "", true),
+		scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
 	))
 }
 ```

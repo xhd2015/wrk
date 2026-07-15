@@ -5,9 +5,9 @@
 ```
 # in-tree linked under main (git worktree add)
 myrepo + wt-linked -> cwd = wt-linked
-wrk --main --status -> full main scan (`.` + Remote + relative linked block)
+wrk --main --status -> full main scan with Dir vs inv cwd (main often "..", linked ".")
   != plain wrk --status from wt-linked (single `.` + Master only)
-  == wrk --status from main
+  content fields match wrk --status from main (Dirs may differ)
 ```
 
 ## Steps

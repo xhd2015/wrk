@@ -1,8 +1,10 @@
 ## Expected
 
 - Exit code 0.
-- Scan block for `Dir:          .` (no `Master:`).
-- Appended full block for external wt with absolute `Dir` and `Master: identical`.
+- Scan block for main with invocation-cwd Dir (`.` from main root) and `Remote:`.
+- Appended full block for external wt with `statusDirLine` Dir (typically relative
+  `../.wrk/worktrees/…` for `{WorkRoot}/.wrk` fixtures — **not** forced absolute) and
+  `Master: identical`.
 - Blank line between blocks.
 - Stderr is empty.
 
@@ -22,8 +24,8 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertStdoutBlocksSeparated(t, resp.Stdout, 2)
 
 	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		scanStatusBlockPlain(t, req.MainRepo, ".", "clean", "", true),
-		appendedHealthyBlockPlain(t, req.MainRepo, req.WtDir, req.WtBranch, "clean"),
+		scanStatusBlockFromCwd(t, req.RepoDir, req.MainRepo, "clean", "", true),
+		appendedHealthyBlockPlain(t, req.RepoDir, req.MainRepo, req.WtDir, req.WtBranch, "clean"),
 	))
 }
 ```

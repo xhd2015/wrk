@@ -1,7 +1,8 @@
 ## Expected
 
 - Exit code 0; stderr empty.
-- Stdout equals plain `wrk --status` at the same main root (no shell notice required beyond status).
+- Stdout matches plain `wrk --status` at the same main root with Dir via statusDirLine
+  (identity when inv cwd is main root).
 
 ## Exit Code
 
@@ -10,6 +11,6 @@
 ```go
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertExitZeroEmptyStderr(t, resp, err)
-	assertStdoutEqualsMainStatus(t, req, resp)
+	assertStdoutMainStatusDirAware(t, req, resp, req.MainRepo)
 }
 ```

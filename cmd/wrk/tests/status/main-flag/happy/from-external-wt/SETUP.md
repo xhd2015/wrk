@@ -1,11 +1,11 @@
 # Scenario
 
-**Feature**: --main --status from an external wrk worktree matches status from main
+**Feature**: --main --status from an external wrk worktree statuses main with inv-cwd Dirs
 
 ```
 # main + external wt under WRK_HOME; cwd = external
 myrepo -> wrk -> external wt
-external wt cwd + --main --status -> full main status (scan + append)
+external wt cwd + --main --status -> main content; Dir labels vs external cwd
 ```
 
 ## Preconditions
@@ -17,12 +17,13 @@ external wt cwd + --main --status -> full main status (scan + append)
 
 1. Create main repo + one external wrk worktree.
 2. Leaves set Args order; cwd remains the external worktree.
-3. Assert stdout == `wrk --status` run from main.
+3. Assert content matches main status; Dir lines rewritten for inv cwd.
 
 ## Context
 
 - Plain `wrk --status` from the external wt is scan-only (no append); the composition
   must produce the multi-block main view instead.
+- Stdout is **not** required to be byte-equal to `(cd main && wrk --status)`.
 
 ```go
 func Setup(t *testing.T, req *Request) error {

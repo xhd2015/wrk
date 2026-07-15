@@ -2,7 +2,7 @@
 
 - Exit code 0.
 - Single scan block for `Dir:          .` from the linked worktree cwd (with `Master:`).
-- No appended section (no second block with absolute external path).
+- No appended section (no second block for external path).
 - Stderr is empty.
 
 ## Exit Code
@@ -22,7 +22,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 
 	master := masterField(t, req.MainRepo, "main", req.WtBranch)
 	assertOutputExact(t, resp.Stdout, statusStdoutV2(t,
-		scanStatusBlockPlain(t, req.WtDir, ".", "clean", master, false),
+		scanStatusBlockFromCwd(t, req.RepoDir, req.WtDir, "clean", master, false),
 	))
 
 	assertStdoutHasNoAppendedAbsDir(t, resp.Stdout, resolvePath(t, req.WtDir))

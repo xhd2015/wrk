@@ -23,14 +23,48 @@ var wrkCheckoutOpts = checkout.Options{
 }
 
 type statusBlockPrintOpts struct {
-	forceRel   string
 	showMaster *bool
 }
 
-func runStatus(workDir string, colorEnabled bool, fetchEnabled bool) error {
-	cwd, err := filepath.Abs(workDir)
+// statusDirLine formats a Dir: value relative to invocation cwd.
+// Rel fail or more than two leading ".." segments → absolute NormalizePath.
+func statusDirLine(displayCwd, repoPath string) string {
+	base := storage.NormalizePath(displayCwd)
+	target := storage.NormalizePath(repoPath)
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return target
+	}
+	rel = filepath.Clean(rel)
+	slash := filepath.ToSlash(rel)
+	leading := 0
+	for _, p := range strings.Split(slash, "/") {
+		if p == ".." {
+			leading++
+			continue
+		}
+		break
+	}
+	if leading > 2 {
+		return target
+	}
+	return slash
+}
+
+func sameNormalizedPath(a, b string) bool {
+	return storage.NormalizePath(a) == storage.NormalizePath(b)
+}
+
+// runStatus prints status for statusRoot. displayCwd is the invocation work
+// directory used only for Dir: labels (kept when --main rewrites status root).
+func runStatus(statusRoot, displayCwd string, colorEnabled bool, fetchEnabled bool) error {
+	cwd, err := filepath.Abs(statusRoot)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
+	}
+	displayBase, err := filepath.Abs(displayCwd)
+	if err != nil {
+		return fmt.Errorf("resolve display cwd: %w", err)
 	}
 
 	if !worktree.IsInsideWorkTree(cwd) {
@@ -43,7 +77,7 @@ func runStatus(workDir string, colorEnabled bool, fetchEnabled bool) error {
 	}
 
 	if mainRepo, ok := linkedInTreeMainRepo(cwd); ok {
-		return runStatusLinkedInTreeCwd(cwd, mainRepo, colorEnabled)
+		return runStatusLinkedInTreeCwd(displayBase, cwd, mainRepo, colorEnabled)
 	}
 
 	repos, err := discoverStatusRepos(context.Background(), checkoutRoot)
@@ -79,7 +113,7 @@ func runStatus(workDir string, colorEnabled bool, fetchEnabled bool) error {
 		if blocksPrinted > 0 {
 			fmt.Println()
 		}
-		if err := printStatusBlock(checkoutRoot, repo.Path, colorEnabled, scanColorEnabled, showRemote, effectiveFetch, statusBlockPrintOpts{}); err != nil {
+		if err := printStatusBlock(displayBase, checkoutRoot, repo.Path, colorEnabled, scanColorEnabled, showRemote, effectiveFetch, statusBlockPrintOpts{}); err != nil {
 			return err
 		}
 		blocksPrinted++
@@ -89,7 +123,7 @@ func runStatus(workDir string, colorEnabled bool, fetchEnabled bool) error {
 		if blocksPrinted > 0 {
 			fmt.Println()
 		}
-		printAppendedLinkedBlock(checkoutRoot, entry.Path, colorEnabled)
+		printAppendedLinkedBlock(displayBase, entry.Path, colorEnabled)
 		blocksPrinted++
 	}
 	return nil
@@ -118,7 +152,7 @@ func linkedInTreeMainRepo(cwd string) (string, bool) {
 	return mainRepo, true
 }
 
-func runStatusLinkedInTreeCwd(cwd, mainRepo string, colorEnabled bool) error {
+func runStatusLinkedInTreeCwd(displayCwd, cwd, mainRepo string, colorEnabled bool) error {
 	repos, err := discoverStatusRepos(context.Background(), mainRepo)
 	if err != nil {
 		return err
@@ -130,11 +164,12 @@ func runStatusLinkedInTreeCwd(cwd, mainRepo string, colorEnabled bool) error {
 			fmt.Println()
 		}
 		blocksPrinted++
-		return printStatusBlock(mainRepo, repoPath, colorEnabled, colorEnabled, false, false, opts)
+		// showRemote false: linked-in-tree cwd path never prints Remote.
+		return printStatusBlock(displayCwd, mainRepo, repoPath, colorEnabled, colorEnabled, false, false, opts)
 	}
 
 	showMasterFalse := false
-	if err := printBlock(cwd, statusBlockPrintOpts{forceRel: ".", showMaster: &showMasterFalse}); err != nil {
+	if err := printBlock(cwd, statusBlockPrintOpts{showMaster: &showMasterFalse}); err != nil {
 		return err
 	}
 
@@ -184,8 +219,8 @@ func discoverStatusRepos(ctx context.Context, root string) ([]scan_repo.Repo, er
 	return result.Repos, err
 }
 
-func printAppendedLinkedBlock(mainRepo, repoPath string, colorEnabled bool) {
-	dirLine := storage.NormalizePath(repoPath)
+func printAppendedLinkedBlock(displayCwd, repoPath string, colorEnabled bool) {
+	dirLine := statusDirLine(displayCwd, repoPath)
 
 	if worktree.IsDead(repoPath) {
 		fmt.Printf("Dir:          %s\n", dirLine)
@@ -228,22 +263,15 @@ func brokenStatusMessage(meta checkout.Meta, repoPath string) string {
 	return gitCombinedOutputError(repoPath, "status", "--porcelain")
 }
 
-func printStatusBlock(root, repoPath string, colorEnabled, scanColorEnabled bool, showRemote bool, fetchEnabled bool, opts statusBlockPrintOpts) error {
-	rel := opts.forceRel
-	if rel == "" {
-		var err error
-		rel, err = filepath.Rel(root, repoPath)
-		if err != nil {
-			return fmt.Errorf("resolve relative repo path: %w", err)
-		}
-		if rel == "." {
-			rel = "."
-		}
-	}
+// printStatusBlock prints one status block. statusRoot is the status checkout root
+// (ShowToplevel of status cwd); Remote is printed only for that block when showRemote
+// is set — not for nested main-repo blocks under a multi-repo scan, and not via Dir==".".
+func printStatusBlock(displayCwd, statusRoot, repoPath string, colorEnabled, scanColorEnabled bool, showRemote bool, fetchEnabled bool, opts statusBlockPrintOpts) error {
+	dirLine := statusDirLine(displayCwd, repoPath)
 
 	meta := checkout.Enrich(context.Background(), repoPath, wrkCheckoutOpts)
 	if meta.Error != "" {
-		printBrokenStatusBlock(filepath.ToSlash(rel), brokenStatusMessage(meta, repoPath), colorEnabled)
+		printBrokenStatusBlock(dirLine, brokenStatusMessage(meta, repoPath), colorEnabled)
 		return nil
 	}
 	applyWrkStatusWithLinkedSkip(repoPath, &meta)
@@ -257,12 +285,12 @@ func printStatusBlock(root, repoPath string, colorEnabled, scanColorEnabled bool
 		var err error
 		masterBrief, _, err = masterBriefForRepo(repoPath, meta.Branch, scanColorEnabled)
 		if err != nil {
-			printBrokenStatusBlock(filepath.ToSlash(rel), gitCombinedOutputError(repoPath, "status", "--porcelain"), colorEnabled)
+			printBrokenStatusBlock(dirLine, gitCombinedOutputError(repoPath, "status", "--porcelain"), colorEnabled)
 			return nil
 		}
 	}
 
-	fmt.Printf("Dir:          %s\n", filepath.ToSlash(rel))
+	fmt.Printf("Dir:          %s\n", dirLine)
 	fmt.Printf("Branch:       %s\n", meta.Branch)
 	fmt.Printf("Commit:       %s  %s\n", meta.CommitSHA, meta.CommitMsg)
 
@@ -270,7 +298,8 @@ func printStatusBlock(root, repoPath string, colorEnabled, scanColorEnabled bool
 	fmt.Printf("Status:       %s\n", statusLine)
 	if hasMaster {
 		fmt.Printf("Master:       %s\n", masterBrief)
-	} else if showRemote && rel == "." {
+	} else if showRemote && sameNormalizedPath(repoPath, statusRoot) {
+		// Primary status root only (may be Dir ../.. when cwd is a subdir — not Dir==".").
 		remoteLine, err := formatStatusRemoteLine(repoPath, meta.Branch, scanColorEnabled, fetchEnabled, meta.Status == "clean")
 		if err != nil {
 			return err

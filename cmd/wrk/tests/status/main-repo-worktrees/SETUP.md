@@ -3,11 +3,9 @@
 **Feature**: wrk --status appends external linked worktrees when run from main repo
 
 ```
-# scan phase unchanged — relative Dir, Master on in-tree linked wts only
+# scan + append; every Dir: uses invocation-cwd Rel rule (≤2 leading ".." → relative)
 wrk --status from main cwd -> scan_repo.Scan(root) -> status blocks
-
-# append phase only when worktree.IsMainRepo(checkoutRoot)
-main repo cwd -> ListLinked(main) minus scan paths -> appended blocks (abs Dir)
+main repo cwd -> ListLinked(main) minus scan paths -> appended blocks (Dir via statusDirLine)
 
 # linked worktree cwd skips append entirely
 wrk --status from external wt cwd -> scan only, no appended section
@@ -27,12 +25,14 @@ wrk --status from external wt cwd -> scan only, no appended section
 
 ## Context
 
-- Scan blocks use **relative** `Dir` (`.` for checkout root; `wt-linked` for in-tree).
-- Appended blocks use **absolute normalized** `Dir` (`resolvePath`, matching
-  `storage.NormalizePath`).
+- **All** `Dir:` lines (scan + appended + broken/prunable) use `statusDirLine(invCwd, repoPath)`:
+  Rel from **invocation cwd**; Rel fail or leading `..` count > 2 → absolute normalized path;
+  else `filepath.ToSlash(rel)`. Typical fixture external under `{WorkRoot}/.wrk/worktrees/…`
+  from main root is often `../.wrk/worktrees/…` (one `..` → **relative**, not absolute).
 - Healthy appended blocks include `Branch`, `Commit`, `Status`, and `Master:`.
 - Broken/prunable appended blocks are minimal two-line blocks (no Branch/Commit/Master).
 - Multi-block stdout is joined with `\n\n` (blank line between every block).
+- `Remote:` on the main block is gated by main identity, not by `Dir == "."`.
 
 ```go
 import (
@@ -202,6 +202,45 @@ func resolvePath(t *testing.T, path string) string {
 	return abs
 }
 
+// statusNormalizePath matches storage.NormalizePath / resolvePath used by product Dir abs fallback.
+// Duplicated here: main-repo-worktrees is its own doctest root (own DOCTEST.md) and does not
+// inherit helpers from cmd/wrk/tests/status/SETUP.md.
+func statusNormalizePath(t *testing.T, path string) string {
+	t.Helper()
+	return resolvePath(t, path)
+}
+
+// statusDirLine mirrors product statusDirLine(displayCwd, repoPath):
+// rel = Rel(norm(cwd), norm(repo)); Rel fail or leading ".." count > 2 → absolute; else ToSlash(rel).
+func statusDirLine(t *testing.T, invCwd, repoPath string) string {
+	t.Helper()
+	base := statusNormalizePath(t, invCwd)
+	target := statusNormalizePath(t, repoPath)
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return target
+	}
+	rel = filepath.Clean(rel)
+	slash := filepath.ToSlash(rel)
+	leading := 0
+	for _, p := range strings.Split(slash, "/") {
+		if p == ".." {
+			leading++
+			continue
+		}
+		break
+	}
+	if leading > 2 {
+		return target
+	}
+	return slash
+}
+
+func statusDirField(t *testing.T, invCwd, repoPath string) string {
+	t.Helper()
+	return "Dir:          " + statusDirLine(t, invCwd, repoPath)
+}
+
 func v2StdoutTemplate(body string) string {
 	if body == "" {
 		return "---\nversion: 2\n---\n"
@@ -367,20 +406,25 @@ func statusNoUpstreamRemote() string {
 	return "Remote:       (no upstream)"
 }
 
-func scanStatusBlockPlain(t *testing.T, repoDir, relDir, statusLine, masterLine string, withRemote bool) string {
+// scanStatusBlockPlain builds one scan-phase block. dirLine is already computed via
+// statusDirLine(invCwd, repoDir). withRemote is main-identity (not dirLine==".").
+func scanStatusBlockPlain(t *testing.T, repoDir, dirLine, statusLine, masterLine string, withRemote bool) string {
 	t.Helper()
-	var block string
-	if relDir == "." && withRemote {
-		block = fmt.Sprintf("Dir:          .\n%s\n%s\nStatus:       %s\n%s",
-			statusBranchLine(t, repoDir), statusCommitLine(t, repoDir), statusLine, statusNoUpstreamRemote())
-	} else {
-		block = fmt.Sprintf("Dir:          %s\n%s\n%s\nStatus:       %s",
-			relDir, statusBranchLine(t, repoDir), statusCommitLine(t, repoDir), statusLine)
+	block := fmt.Sprintf("Dir:          %s\n%s\n%s\nStatus:       %s",
+		dirLine, statusBranchLine(t, repoDir), statusCommitLine(t, repoDir), statusLine)
+	if withRemote {
+		block += "\n" + statusNoUpstreamRemote()
 	}
 	if masterLine != "" {
 		block += "\n" + masterLine
 	}
 	return block
+}
+
+// scanStatusBlockFromCwd computes Dir from invCwd via statusDirLine.
+func scanStatusBlockFromCwd(t *testing.T, invCwd, repoDir, statusLine, masterLine string, withRemote bool) string {
+	t.Helper()
+	return scanStatusBlockPlain(t, repoDir, statusDirLine(t, invCwd, repoDir), statusLine, masterLine, withRemote)
 }
 
 func masterBriefFromResult(result *git.CompareBranchesResult) string {
@@ -420,16 +464,16 @@ func masterField(t *testing.T, mainRepo, mainBranch, wtBranch string) string {
 	return "Master:       " + masterBriefFromResult(result)
 }
 
-func appendedDirLine(t *testing.T, wtPath string) string {
+func appendedDirLine(t *testing.T, invCwd, wtPath string) string {
 	t.Helper()
-	return "Dir:          " + resolvePath(t, wtPath)
+	return statusDirField(t, invCwd, wtPath)
 }
 
-func appendedHealthyBlockPlain(t *testing.T, mainRepo, wtDir, wtBranch, statusLine string) string {
+func appendedHealthyBlockPlain(t *testing.T, invCwd, mainRepo, wtDir, wtBranch, statusLine string) string {
 	t.Helper()
 	master := masterField(t, mainRepo, "main", wtBranch)
 	return fmt.Sprintf("%s\n%s\n%s\nStatus:       %s\n%s",
-		appendedDirLine(t, wtDir),
+		appendedDirLine(t, invCwd, wtDir),
 		statusBranchLine(t, wtDir),
 		statusCommitLine(t, wtDir),
 		statusLine,
@@ -437,9 +481,9 @@ func appendedHealthyBlockPlain(t *testing.T, mainRepo, wtDir, wtBranch, statusLi
 	)
 }
 
-func appendedMinimalBlockPlain(t *testing.T, wtPath, statusLine string) string {
+func appendedMinimalBlockPlain(t *testing.T, invCwd, wtPath, statusLine string) string {
 	t.Helper()
-	return appendedDirLine(t, wtPath) + "\nStatus:       " + statusLine
+	return appendedDirLine(t, invCwd, wtPath) + "\nStatus:       " + statusLine
 }
 
 func appendedErrorStatusPlain(t *testing.T, wtPath string) string {
@@ -536,7 +580,11 @@ func ensureMainRepoWtHelpersUsed() {
 	_ = getWrkBin
 	_ = wrkEnv
 	_ = resolvePath
+	_ = statusNormalizePath
+	_ = statusDirLine
+	_ = statusDirField
 	_ = statusStdoutV2
+	_ = scanStatusBlockFromCwd
 	_ = createExternalWrkWorktree
 	_ = createSecondExternalWrkWorktree
 	_ = addInTreeLinkedWorktree

@@ -1,8 +1,10 @@
 ## Expected
 
 - Exit code 0; stderr empty.
-- Stdout equals running `wrk --status` from the main repo (equivalence promise).
-- Implies multi-block main view (`.` + `Remote:`, appended external block with abs `Dir` and `Master:`).
+- Content (Branch/Commit/Status/Master/Remote) matches `wrk --status` from main.
+- **Dir** lines use invocation cwd = external wt (`statusDirLine`): main is typically
+  `../../myrepo` (≤2 ups), external block is `.` when appended.
+- **Not** byte-equal to status-from-main when Dir differs (old equivalence dropped).
 
 ## Side Effects
 
@@ -16,6 +18,11 @@
 ```go
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertExitZeroEmptyStderr(t, resp, err)
-	assertStdoutEqualsMainStatus(t, req, resp)
+	assertStdoutMainStatusDirAware(t, req, resp, req.MainRepo, req.WtDir)
+
+	ref := runStatusFromMain(t, req)
+	if resp.Stdout == ref.Stdout {
+		t.Fatalf("expected Dir-aware difference vs status-from-main when cwd is external wt; stdout:\n%s", resp.Stdout)
+	}
 }
 ```
