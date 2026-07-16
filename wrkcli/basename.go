@@ -27,11 +27,11 @@ func isBasename(dir string) bool {
 	return true
 }
 
-func isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status bool, depPath, bringPath string, allDeps, tagNext, propagateTags, syncFlag, list, done, mergeBack, cd, mainFlag bool) bool {
+func isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status bool, depPath, bringPath string, allDeps, reinstallLocal, tagNext, propagateTags, syncFlag, list, done, mergeBack, cd, mainFlag bool) bool {
 	if projects || projectsDepGraph || addFlagSet || removeFlagSet || setTaskFlagSet || whereFlagSet || repos || status || cd || mainFlag {
 		return false
 	}
-	if depPath != "" || bringPath != "" || allDeps || tagNext || propagateTags || syncFlag || list || done || mergeBack {
+	if depPath != "" || bringPath != "" || allDeps || reinstallLocal || tagNext || propagateTags || syncFlag || list || done || mergeBack {
 		return false
 	}
 	return true

@@ -1,0 +1,20 @@
+## Expected
+
+- `err` is nil.
+- Exactly one item for `foo`.
+- Method is `go-run-install` and RelPath is `./script/foo/install` (script wins).
+- No separate `./cmd/foo` item.
+
+## Side Effects
+
+- None.
+
+## Exit Code
+
+- N/A (no process).
+
+```go
+func Assert(t *testing.T, req *Request, resp *Response, err error) {
+	assertPlanOK(t, req, resp, err)
+}
+```

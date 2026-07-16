@@ -56,7 +56,7 @@ func (ctx *invocationContext) autoRecord() error {
 	return nil
 }
 
-func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack bool, depPath, bringPath string, allDeps, tagNext, propagateTags, syncFlag, cd, mainFlag bool) string {
+func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack bool, depPath, bringPath string, allDeps, reinstallLocal, tagNext, propagateTags, syncFlag, cd, mainFlag bool) string {
 	switch {
 	case setTaskFlagSet:
 		return "set-task"
@@ -73,6 +73,9 @@ func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTa
 	case status:
 		// status wins over main when both set (wrk --main --status)
 		return "status"
+	case reinstallLocal:
+		// reinstall-local wins over main when both set (wrk --main --reinstall-local)
+		return "reinstall-local"
 	case mainFlag:
 		return "main"
 	case cd:
