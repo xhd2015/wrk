@@ -50,10 +50,10 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("stdout must end with trailing newline; got %q", resp.Stdout)
 	}
 	assert.Output(t, resp.Stdout, `---
-version: 2
+version: 3
 __PORT__: type=number, example=18080, TCP listen port
 ---
-http://127.0.0.1:__PORT__/
+http://127\.0\.0\.1:__PORT__/
 `)
 }
 ```

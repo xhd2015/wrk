@@ -12,6 +12,7 @@
 
 ```go
 import (
+	"regexp"
 	"testing"
 
 	"github.com/xhd2015/doctest/assert"
@@ -25,7 +26,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("expected exit 0, got %d; stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
 	wantPath := worktreePath(req.WrkHome, "myrepo", "main", wrkDate, 0)
-	assert.Output(t, resp.Stdout, "---\nversion: 2\n---\n"+wantPath+"\n")
+	assert.Output(t, resp.Stdout, "---\nversion: 3\n---\n"+regexp.QuoteMeta(wantPath)+"\n")
 	assertFollowupCD(t, resp, wantPath)
 	if resp.Stderr != "" {
 		t.Fatalf("binary stderr should be empty on Branch A force-cd (file-only), got %q", resp.Stderr)

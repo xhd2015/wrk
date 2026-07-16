@@ -43,10 +43,10 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 	// Exact single-line listen URL with trailing newline (port is free/dynamic).
 	assert.Output(t, resp.Stdout, `---
-version: 2
+version: 3
 __PORT__: type=number, example=18080, TCP listen port
 ---
-http://127.0.0.1:__PORT__/
+http://127\.0\.0\.1:__PORT__/
 `)
 }
 ```

@@ -26,7 +26,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertColorProjectsBlocksSeparated(t, resp.Stdout, 1)
 
 	block := fmt.Sprintf(`---
-version: 2
+version: 3
 ---
 %s
 %s

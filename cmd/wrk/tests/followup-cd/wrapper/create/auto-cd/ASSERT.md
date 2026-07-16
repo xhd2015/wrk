@@ -11,6 +11,7 @@
 
 ```go
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -26,7 +27,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 	wantPath := worktreePath(req.WrkHome, "myrepo", "main", wrkDate, 0)
 	// stdout from wrk binary should still print path
-	assert.Output(t, resp.Stdout, "---\nversion: 2\n---\n"+wantPath+"\n")
+	assert.Output(t, resp.Stdout, "---\nversion: 3\n---\n"+regexp.QuoteMeta(wantPath)+"\n")
 	wantCD := "cd " + wantPath
 	assertContains(t, resp.Stderr, wantCD)
 	// Must not prefix follow-up with wrk:

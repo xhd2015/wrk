@@ -30,14 +30,14 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 
 	assert.Output(t, resp.Stdout, `---
-version: 2
+version: 3
 ---
-dry-run: would remove marker block from ~/.bash_profile
-dry-run: would remove marker block from ~/.bashrc
+dry-run: would remove marker block from ~/\.bash_profile
+dry-run: would remove marker block from ~/\.bashrc
 
 # === wrk integration begin ===
-_wrk_home="${WRK_HOME:-$HOME/.wrk}"
-[[ -f "$_wrk_home/integration/bash.sh" ]] && source "$_wrk_home/integration/bash.sh"
+_wrk_home="\$\{WRK_HOME:-\$HOME/\.wrk\}"
+\[\[ -f "\$_wrk_home/integration/bash\.sh" \]\] && source "\$_wrk_home/integration/bash\.sh"
 # === wrk integration end ===
 
 `)

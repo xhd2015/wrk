@@ -29,7 +29,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	remote := colorCompareWithRemoteField(t, req.MainRepo, "origin/main", "main")
 	status := colorFormatDirtyStatusCounts(0, 2, 0, 0)
 	block := fmt.Sprintf(`---
-version: 2
+version: 3
 ---
 %s
 %s

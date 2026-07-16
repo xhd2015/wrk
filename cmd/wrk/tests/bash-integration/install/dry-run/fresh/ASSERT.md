@@ -43,12 +43,12 @@ t.Fatalf("expected exit 0, got %d; stderr=%s", resp.ExitCode, resp.Stderr)
 }
 
 assert.Output(t, resp.Stdout, fmt.Sprintf(`---
-version: 2
+version: 3
 ---
 bash integration: would install
-script: %s (would install)
-bash_profile: %s (marker would install)
-bashrc: %s (marker would install)
+script: %s \(would install\)
+bash_profile: %s \(marker would install\)
+bashrc: %s \(marker would install\)
 
 `, resp.BashShPath, resp.BashProfilePath, resp.BashRCPath))
 
