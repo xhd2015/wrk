@@ -58,8 +58,15 @@ E3 dry-run multi regression remains `dry-run-multi/*` (zero mutation).
 modes). H1 remains `events/dry-run` (no `--main`). New leaf
 `events/main-dry-run` (H2). Sealed H1/execute event ASSERTs stay intact.
 
+**Conflict diagnostics (Classic TDD):** plan diagnostics (prefer-script notice,
+ambiguous-cmd/script warnings) print on **stderr** during dry-run/execute.
+Default pipe harness: plain prefixes (no ANSI). With `--color`: colorize only
+the prefix token (`notice:` grey `#90`, `warning:` orange `#33`); rest of line
+plain. Exit 0 for successful dry-run plans that include diagnostics (non-fatal).
+
 **Out of scope:** full root DOCTEST.md mega-doc, `--force`, parallel installs,
-JSON CLI, bare `--main` nested shell e2e.
+JSON CLI, bare `--main` nested shell e2e, FORCE_COLOR / CLICOLOR, coloring
+`would:` / `go install` stdout lines.
 
 # DSN (Domain Specific Notion)
 
@@ -93,6 +100,29 @@ JSON CLI, bare `--main` nested shell e2e.
 - **skip: lines** — for each plan item with `Action=skip`:
   `skip: <bin> (not in <bindir>)` where `<bindir>` is the resolved bin directory
   path (absolute under test isolation). Same wording in dry-run and execute.
+- **Diagnostics on stderr** — when the plan has diagnostics, print one line per
+  diagnostic on **stderr** (not stdout), exit still 0 for successful dry-run:
+  - prefer-script:
+    `notice: bin <bin>: preferring <scriptPath> over <cmdPath>`
+  - ambiguous-cmd:
+    `warning: bin <bin>: ambiguous under cmd (<path1>, <path2>, ...); skipping`
+  - ambiguous-script:
+    `warning: bin <bin>: ambiguous under script (<path1>, <path2>, ...); skipping`
+  Paths inside messages: slash-form `./…`, **lexicographically sorted** in
+  parenthesized lists. Prefer-script uses the script path first then cmd path
+  (message order), not the diagnostic Paths sort order for the phrase.
+  Prefix tokens exactly `notice:` and `warning:`.
+- **Diagnostic color (CLI only)** — when color is enabled for diagnostics:
+  - colorize **only** the prefix token `notice:` / `warning:`
+  - `notice:` → grey (`ansiGrey` `\x1b[90m` … `\x1b[0m`)
+  - `warning:` → orange/yellow (`ansiOrange` `\x1b[33m` … `\x1b[0m`)
+  - rest of the line plain; never put ANSI on stdout plan lines
+  Color enablement (aligned with go-best-practice / existing wrkcli):
+  - `--color` → always on for these prefixes
+  - auto (no `--color`): on when stderr is a TTY and `NO_COLOR` is empty;
+    pipe harness → plain prefixes
+  Harness strips ambient `NO_COLOR` from the process env so leaves own color
+  policy; force `--color` for color-on asserts.
 - **Single-module dry-run (K=1)** — when the multi plan has exactly one module:
   print items **without** `# module` headers (same order as plan: lex by
   BinName), then summary:
@@ -168,10 +198,14 @@ JSON CLI, bare `--main` nested shell e2e.
 
 ```
 reinstall-local-cli/
-├── dry-run/                         # happy-path CLI dry-run single-mod (P2, sealed) — C2 regression
+├── dry-run/                         # happy-path CLI dry-run single-mod (P2) + conflict diags
 │   ├── present-install/             # C1 / E4 / C2: present bin → would: go install + summary; no mutation
 │   ├── skip-only/                   # C2-orig: absent bin → skip + reinstall 0
-│   └── script-wins/                 # C3-orig: cmd+script same bin → would: go run script
+│   ├── script-wins/                 # C3-orig: cmd+script → would: go run + stderr prefer-script notice (plain)
+│   ├── ambiguous-cmd/               # two cmd same bin → warning stderr; reinstall 0; no go install
+│   ├── ambiguous-script-fallback-cmd/ # two script + unique cmd → warning script; would: go install cmd
+│   ├── prefer-script-color/         # --color + conflict → grey notice: on stderr; stdout plain
+│   └── warning-color/               # --color + ambiguous cmd → orange warning: on stderr
 ├── dry-run-multi/                   # multi-module dry-run (P3 multi, sealed) — P5 E3 regression
 │   ├── nested-modules/              # C1: root + tools; headers + both would; across 2 modules
 │   ├── install-collision/           # C3: install×install same bin → non-zero; stderr names bin
@@ -208,7 +242,7 @@ reinstall-local-cli/
 Split factor (MECE, significance-first):
 
 1. **Mode** — dry-run plan (single vs multi) vs real execute (single vs multi) vs events vs main-compose vs flag surface / errors.
-2. **Within single dry-run / execute** — present install / skip-only / (dry-run script-wins | execute continue-on-failure).
+2. **Within single dry-run** — present install / skip-only / script-wins notice / ambiguous / color.
 3. **Within multi dry-run** — happy nested modules / install×install collision / from git subdir.
 4. **Within multi execute** — both modules install / continue across module failure / collision before install.
 5. **Events** — dry-run / execute / main-compose dry-run success recording of
@@ -223,7 +257,11 @@ Split factor (MECE, significance-first):
 |---|------|-------------|
 | C1-s / E4 / **C2** | dry-run/present-install | `./cmd/present` + GOBIN/present → `would: go install ./cmd/present`; summary N=1 M=0 **without** `across`; exit 0; **stub unchanged** (single-mod regression lock for multi wire-up) |
 | C2-s | dry-run/skip-only | `./cmd/missing` no bin → `skip: missing (not in <gobin>)`; `would: reinstall 0 binaries (1 skipped)`; exit 0 |
-| C3-s | dry-run/script-wins | cmd+script foo + bin → `would: go run ./script/foo/install` only (not go install ./cmd/foo) |
+| C3-s | dry-run/script-wins | cmd+script foo + bin → `would: go run ./script/foo/install` only; stderr plain `notice: bin foo: preferring ./script/foo/install over ./cmd/foo`; exit 0 |
+| C3-amb | dry-run/ambiguous-cmd | two cmd foo, no script → warning ambiguous cmd on stderr; reinstall 0; no `go install`; exit 0 |
+| C3-fb | dry-run/ambiguous-script-fallback-cmd | two script + unique cmd → warning script; `would: go install ./cmd/foo`; exit 0 |
+| C3-nc | dry-run/prefer-script-color | `--color` + unique conflict → stderr grey `notice:`; stdout plan uncolored |
+| C3-wc | dry-run/warning-color | `--color` + ambiguous cmd → stderr orange `warning:`; stdout uncolored |
 | **C1** | dry-run-multi/nested-modules | root + nested tools, both bins present → `# module … (.)` + `# module … (tools)` + both `would: go install`; `across 2 modules`; stubs unchanged |
 | **C3** | dry-run-multi/install-collision | nested mod-a + mod-b both `./cmd/samebin` + GOBIN/samebin → non-zero; stderr contains `samebin`, `mod-a`, `mod-b` |
 | **C4** | dry-run-multi/from-subdir | git repo root+tools; cwd=`pkg/sub` → same multi dry-run as full tree; both modules; `across 2 modules` |
@@ -253,6 +291,10 @@ doctest vet ./cmd/wrk/tests/reinstall-local-cli
 doctest test ./cmd/wrk/tests/reinstall-local-cli
 doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run/present-install
 doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run/script-wins
+doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run/ambiguous-cmd
+doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run/ambiguous-script-fallback-cmd
+doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run/prefer-script-color
+doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run/warning-color
 doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run-multi
 doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run-multi/nested-modules
 doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run-multi/install-collision
@@ -278,6 +320,11 @@ doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run-host/bare-dry-run
 doctest test ./cmd/wrk/tests/reinstall-local-cli/error/no-go-mod
 doctest test ./cmd/wrk/tests/reinstall-local-cli/help/mentions-flag
 ```
+
+**Coverage (conflict diagnostics):** expect **RED** (or mixed) on
+`dry-run/script-wins` (stderr notice), `dry-run/ambiguous-*`, and color leaves
+until implementer prints plan Diagnostics on stderr with optional ANSI under
+`--color`. Items-only stdout leaves without diagnostic asserts stay GREEN.
 
 **Coverage (P5 multi execute):** expect **GREEN** on `execute-multi/*` when
 `runReinstallLocal` already plans multi via `PlanLocalReinstallsFromWorkDir`

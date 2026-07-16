@@ -12,6 +12,7 @@ import (
 
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/mod/scan"
+	"golang.org/x/term"
 )
 
 // Method and Action are string type aliases so harness code can use string(it.Method).
@@ -23,15 +24,32 @@ const (
 	MethodGoRunInstall Method = "go-run-install"
 	ActionInstall      Action = "install"
 	ActionSkip         Action = "skip"
+
+	DiagLevelNotice  = "notice"
+	DiagLevelWarning = "warning"
+
+	DiagKindPreferScript    = "prefer-script"
+	DiagKindAmbiguousCmd    = "ambiguous-cmd"
+	DiagKindAmbiguousScript = "ambiguous-script"
 )
+
+// ReinstallDiagnostic is a non-fatal notice or warning produced while merging
+// cmd/ and script/ candidates for the same BinName.
+type ReinstallDiagnostic struct {
+	Level   string // "notice" | "warning"
+	Kind    string // "prefer-script" | "ambiguous-cmd" | "ambiguous-script"
+	BinName string
+	Paths   []string // sorted ./ relative paths involved
+}
 
 // LocalReinstallPlan is the pure discovery/filter result for local binary reinstalls.
 type LocalReinstallPlan struct {
-	ModuleRoot string
-	ModulePath string // full module path from go.mod
-	ModuleName string // basename of module path from go.mod
-	BinDir     string
-	Items      []PlanItem // sorted lexicographically by BinName
+	ModuleRoot  string
+	ModulePath  string // full module path from go.mod
+	ModuleName  string // basename of module path from go.mod
+	BinDir      string
+	Items       []PlanItem            // sorted lexicographically by BinName
+	Diagnostics []ReinstallDiagnostic // sorted by BinName, then Kind
 }
 
 // MultiLocalReinstallPlan is the multi-module discovery/filter result for a
@@ -43,11 +61,12 @@ type MultiLocalReinstallPlan struct {
 
 // ModuleReinstallPlan is one module's contribution to a multi-module plan.
 type ModuleReinstallPlan struct {
-	ModuleRoot string
-	ModulePath string // full module path from go.mod
-	ModuleName string // basename of module path from go.mod
-	RelDir     string // module root relative to scan root ("." or slash path); set by FromWorkDir
-	Items      []PlanItem // sorted lexicographically by BinName
+	ModuleRoot  string
+	ModulePath  string                // full module path from go.mod
+	ModuleName  string                // basename of module path from go.mod
+	RelDir      string                // module root relative to scan root ("." or slash path); set by FromWorkDir
+	Items       []PlanItem            // sorted lexicographically by BinName
+	Diagnostics []ReinstallDiagnostic // per-module; sorted by BinName, then Kind
 }
 
 // PlanItem is one candidate binary to install or skip.
@@ -63,6 +82,14 @@ type PlanItem struct {
 //
 // moduleRoot must contain a parseable go.mod with a module path.
 // Callers resolve binDir (e.g. GOBIN); this function only stats entries there.
+//
+// Merge rules (per BinName):
+//   - Collect all cmd and script package-main paths keyed by BinName.
+//   - If a tree has multiple paths for the same BinName, emit an ambiguous-*
+//     warning and that tree contributes nothing for the name.
+//   - Unique cmd + unique script → script item + prefer-script notice.
+//   - Unique on one side only → that side; ambiguous other side keeps its warning.
+//   - Ambiguous alone / both ambiguous → omit bin from Items (not a skip row).
 func PlanLocalReinstalls(moduleRoot, binDir string) (*LocalReinstallPlan, error) {
 	modulePath, err := readModulePath(moduleRoot)
 	if err != nil {
@@ -73,32 +100,143 @@ func PlanLocalReinstalls(moduleRoot, binDir string) (*LocalReinstallPlan, error)
 		return nil, fmt.Errorf("invalid module path %q", modulePath)
 	}
 
-	// Keyed by BinName; script discovery overwrites cmd (script wins).
-	byName := make(map[string]PlanItem)
+	cmdByName := make(map[string][]string)
+	scriptByName := make(map[string][]string)
 
-	if err := walkCmdMains(moduleRoot, byName); err != nil {
+	if err := collectCmdMains(moduleRoot, cmdByName); err != nil {
 		return nil, err
 	}
-	if err := walkScriptInstalls(moduleRoot, moduleName, byName); err != nil {
+	if err := collectScriptInstalls(moduleRoot, moduleName, scriptByName); err != nil {
 		return nil, err
 	}
 
-	items := make([]PlanItem, 0, len(byName))
-	for _, it := range byName {
-		it.Action = binAction(binDir, it.BinName)
-		items = append(items, it)
+	// Union of bin names from both trees.
+	nameSet := make(map[string]struct{}, len(cmdByName)+len(scriptByName))
+	for n := range cmdByName {
+		nameSet[n] = struct{}{}
 	}
+	for n := range scriptByName {
+		nameSet[n] = struct{}{}
+	}
+	names := make([]string, 0, len(nameSet))
+	for n := range nameSet {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	items := make([]PlanItem, 0, len(names))
+	diags := make([]ReinstallDiagnostic, 0)
+
+	for _, binName := range names {
+		cmdPaths := sortedCopy(cmdByName[binName])
+		scriptPaths := sortedCopy(scriptByName[binName])
+		cmdUnique := len(cmdPaths) == 1
+		scriptUnique := len(scriptPaths) == 1
+		cmdAmbig := len(cmdPaths) > 1
+		scriptAmbig := len(scriptPaths) > 1
+
+		if cmdAmbig {
+			diags = append(diags, ReinstallDiagnostic{
+				Level:   DiagLevelWarning,
+				Kind:    DiagKindAmbiguousCmd,
+				BinName: binName,
+				Paths:   cmdPaths,
+			})
+		}
+		if scriptAmbig {
+			diags = append(diags, ReinstallDiagnostic{
+				Level:   DiagLevelWarning,
+				Kind:    DiagKindAmbiguousScript,
+				BinName: binName,
+				Paths:   scriptPaths,
+			})
+		}
+
+		var survivor *PlanItem
+		switch {
+		case cmdUnique && scriptUnique:
+			// Script wins; prefer-script notice with both paths sorted.
+			paths := sortedCopy([]string{cmdPaths[0], scriptPaths[0]})
+			diags = append(diags, ReinstallDiagnostic{
+				Level:   DiagLevelNotice,
+				Kind:    DiagKindPreferScript,
+				BinName: binName,
+				Paths:   paths,
+			})
+			survivor = &PlanItem{
+				BinName: binName,
+				RelPath: scriptPaths[0],
+				Method:  MethodGoRunInstall,
+			}
+		case cmdUnique && !scriptUnique && !scriptAmbig:
+			// unique cmd, no script
+			survivor = &PlanItem{
+				BinName: binName,
+				RelPath: cmdPaths[0],
+				Method:  MethodGoInstall,
+			}
+		case scriptUnique && !cmdUnique && !cmdAmbig:
+			// unique script, no cmd
+			survivor = &PlanItem{
+				BinName: binName,
+				RelPath: scriptPaths[0],
+				Method:  MethodGoRunInstall,
+			}
+		case cmdAmbig && scriptUnique:
+			// drop cmd; fall back to unique script (warning already recorded)
+			survivor = &PlanItem{
+				BinName: binName,
+				RelPath: scriptPaths[0],
+				Method:  MethodGoRunInstall,
+			}
+		case scriptAmbig && cmdUnique:
+			// drop script; fall back to unique cmd
+			survivor = &PlanItem{
+				BinName: binName,
+				RelPath: cmdPaths[0],
+				Method:  MethodGoInstall,
+			}
+		case cmdAmbig && !scriptUnique:
+			// ambiguous cmd, no unique script → omit
+		case scriptAmbig && !cmdUnique:
+			// ambiguous script, no unique cmd → omit
+		default:
+			// both empty (should not happen) or both ambig → omit
+		}
+
+		if survivor != nil {
+			survivor.Action = binAction(binDir, survivor.BinName)
+			items = append(items, *survivor)
+		}
+	}
+
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].BinName < items[j].BinName
 	})
+	sort.Slice(diags, func(i, j int) bool {
+		if diags[i].BinName != diags[j].BinName {
+			return diags[i].BinName < diags[j].BinName
+		}
+		return diags[i].Kind < diags[j].Kind
+	})
 
 	return &LocalReinstallPlan{
-		ModuleRoot: moduleRoot,
-		ModulePath: modulePath,
-		ModuleName: moduleName,
-		BinDir:     binDir,
-		Items:      items,
+		ModuleRoot:  moduleRoot,
+		ModulePath:  modulePath,
+		ModuleName:  moduleName,
+		BinDir:      binDir,
+		Items:       items,
+		Diagnostics: diags,
 	}, nil
+}
+
+func sortedCopy(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := append([]string(nil), paths...)
+	sort.Strings(out)
+	return out
 }
 
 // PlanLocalReinstallsMulti runs PlanLocalReinstalls for each module root and
@@ -123,10 +261,11 @@ func PlanLocalReinstallsMulti(moduleRoots []string, binDir string) (*MultiLocalR
 			return nil, err
 		}
 		modules = append(modules, ModuleReinstallPlan{
-			ModuleRoot: plan.ModuleRoot,
-			ModulePath: plan.ModulePath,
-			ModuleName: plan.ModuleName,
-			Items:      plan.Items,
+			ModuleRoot:  plan.ModuleRoot,
+			ModulePath:  plan.ModulePath,
+			ModuleName:  plan.ModuleName,
+			Items:       plan.Items,
+			Diagnostics: plan.Diagnostics,
 		})
 	}
 
@@ -315,7 +454,9 @@ func readModulePath(moduleRoot string) (string, error) {
 	return "", fmt.Errorf("go.mod: no module path found")
 }
 
-func walkCmdMains(moduleRoot string, byName map[string]PlanItem) error {
+// collectCmdMains appends package-main RelPaths under moduleRoot/cmd keyed by BinName
+// (directory base name). Multiple paths per name are kept for ambiguity detection.
+func collectCmdMains(moduleRoot string, byName map[string][]string) error {
 	cmdRoot := filepath.Join(moduleRoot, "cmd")
 	info, err := os.Stat(cmdRoot)
 	if err != nil {
@@ -358,16 +499,14 @@ func walkCmdMains(moduleRoot string, byName map[string]PlanItem) error {
 		}
 		relSlash := filepath.ToSlash(rel)
 		binName := filepath.Base(path)
-		byName[binName] = PlanItem{
-			BinName: binName,
-			RelPath: "./" + relSlash,
-			Method:  MethodGoInstall,
-		}
+		byName[binName] = append(byName[binName], "./"+relSlash)
 		return nil
 	})
 }
 
-func walkScriptInstalls(moduleRoot, moduleName string, byName map[string]PlanItem) error {
+// collectScriptInstalls appends package-main RelPaths under script/**/install
+// keyed by BinName (parent dir, or ModuleName for bare ./script/install).
+func collectScriptInstalls(moduleRoot, moduleName string, byName map[string][]string) error {
 	scriptRoot := filepath.Join(moduleRoot, "script")
 	info, err := os.Stat(scriptRoot)
 	if err != nil {
@@ -408,9 +547,6 @@ func walkScriptInstalls(moduleRoot, moduleName string, byName map[string]PlanIte
 		binName := parent
 		// bare ./script/install → parent base is "script" → use module basename
 		if parent == "script" {
-			// Ensure parent dir is actually the script root (not .../something/script/install
-			// where something/script is not moduleRoot/script — still: parent base "script"
-			// is the rule from the spec: if parent is `script` (path is `script/install`)).
 			// Spec: "if parent is script (path is script/install) → BinName = ModuleName"
 			// So only when the install dir's parent is exactly moduleRoot/script.
 			if filepath.Clean(filepath.Dir(path)) == filepath.Clean(scriptRoot) {
@@ -422,12 +558,7 @@ func walkScriptInstalls(moduleRoot, moduleName string, byName map[string]PlanIte
 			return err
 		}
 		relSlash := filepath.ToSlash(rel)
-		// Script wins over cmd for same BinName.
-		byName[binName] = PlanItem{
-			BinName: binName,
-			RelPath: "./" + relSlash,
-			Method:  MethodGoRunInstall,
-		}
+		byName[binName] = append(byName[binName], "./"+relSlash)
 		return nil
 	})
 }
@@ -487,14 +618,15 @@ func binAction(binDir, binName string) Action {
 	return ActionSkip
 }
 
-// runReinstallLocal implements wrk --reinstall-local [--dry-run] [--main].
+// runReinstallLocal implements wrk --reinstall-local [--dry-run] [--main] [--color].
 // dry-run prints the plan and does not run go install/run.
 // Without --dry-run, installs run sequentially (continue on failure).
 //
 // Planning uses PlanLocalReinstallsFromWorkDir(workDir, binDir, useMain).
 // useMain=false scans the worktree toplevel (or walk-up); useMain=true
 // (from --main) scans the main repository of this checkout.
-func runReinstallLocal(workDir string, dryRun bool, useMain bool) error {
+// colorFlag forces ANSI on diagnostic prefixes when true.
+func runReinstallLocal(workDir string, dryRun bool, useMain bool, colorFlag bool) error {
 	binDir, err := resolveLocalReinstallBinDir()
 	if err != nil {
 		return err
@@ -503,10 +635,20 @@ func runReinstallLocal(workDir string, dryRun bool, useMain bool) error {
 	if err != nil {
 		return err
 	}
+	colorOn := reinstallDiagColorEnabled(colorFlag)
 	if dryRun {
-		return printMultiLocalReinstallDryRun(plan)
+		return printMultiLocalReinstallDryRun(plan, colorOn)
 	}
-	return executeMultiLocalReinstalls(plan)
+	return executeMultiLocalReinstalls(plan, colorOn)
+}
+
+// reinstallDiagColorEnabled reports whether diagnostic prefix tokens should use ANSI.
+// --color forces on; otherwise on only when stderr is a TTY and NO_COLOR is empty.
+func reinstallDiagColorEnabled(colorFlag bool) bool {
+	if colorFlag {
+		return true
+	}
+	return term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == ""
 }
 
 // findModuleRootWalking walks up from start looking for a go.mod file.
@@ -565,7 +707,8 @@ func goEnvGOPATH() (string, error) {
 
 // printLocalReinstallDryRun writes would:/skip: lines and a summary to stdout
 // for a single-module plan (legacy helper; CLI uses printMultiLocalReinstallDryRun).
-func printLocalReinstallDryRun(plan *LocalReinstallPlan) error {
+func printLocalReinstallDryRun(plan *LocalReinstallPlan, colorOn bool) error {
+	printReinstallDiagnostics(plan.Diagnostics, colorOn)
 	nInstall, nSkip := 0, 0
 	if err := printPlanItemsDryRun(plan.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
 		return err
@@ -576,12 +719,17 @@ func printLocalReinstallDryRun(plan *LocalReinstallPlan) error {
 
 // printMultiLocalReinstallDryRun prints a multi-module dry-run plan.
 //
+// Diagnostics (if any) are printed to stderr first, then plan lines on stdout.
 // K==1: same format as single-module dry-run (no # module headers; summary
 // without "across").
 // K>1: for each module in plan order, "# module <ModulePath> (<RelDir>)" then
 // that module's would:/skip: lines; summary ends with " across K modules".
-func printMultiLocalReinstallDryRun(plan *MultiLocalReinstallPlan) error {
+func printMultiLocalReinstallDryRun(plan *MultiLocalReinstallPlan, colorOn bool) error {
 	k := len(plan.Modules)
+	// Print all diagnostics first (module order, already sorted within each).
+	for _, mod := range plan.Modules {
+		printReinstallDiagnostics(mod.Diagnostics, colorOn)
+	}
 	nInstall, nSkip := 0, 0
 	for _, mod := range plan.Modules {
 		if k > 1 {
@@ -605,6 +753,70 @@ func printMultiLocalReinstallDryRun(plan *MultiLocalReinstallPlan) error {
 		fmt.Printf("would: reinstall %d binaries (%d skipped)\n", nInstall, nSkip)
 	}
 	return nil
+}
+
+// printReinstallDiagnostics writes one stderr line per diagnostic.
+// Color (when colorOn) applies only to the "notice:" / "warning:" prefix.
+func printReinstallDiagnostics(diags []ReinstallDiagnostic, colorOn bool) {
+	for _, d := range diags {
+		fmt.Fprint(os.Stderr, formatReinstallDiagnosticLine(d, colorOn))
+	}
+}
+
+// formatReinstallDiagnosticLine returns the full stderr line including trailing \n.
+func formatReinstallDiagnosticLine(d ReinstallDiagnostic, colorOn bool) string {
+	var prefix string
+	var body string
+	switch d.Kind {
+	case DiagKindPreferScript:
+		prefix = "notice:"
+		scriptPath, cmdPath := preferScriptPaths(d.Paths)
+		body = fmt.Sprintf(" bin %s: preferring %s over %s", d.BinName, scriptPath, cmdPath)
+	case DiagKindAmbiguousCmd:
+		prefix = "warning:"
+		body = fmt.Sprintf(" bin %s: ambiguous under cmd (%s); skipping", d.BinName, strings.Join(d.Paths, ", "))
+	case DiagKindAmbiguousScript:
+		prefix = "warning:"
+		body = fmt.Sprintf(" bin %s: ambiguous under script (%s); skipping", d.BinName, strings.Join(d.Paths, ", "))
+	default:
+		prefix = "warning:"
+		body = fmt.Sprintf(" bin %s: %s", d.BinName, d.Kind)
+	}
+	if colorOn {
+		switch d.Level {
+		case DiagLevelNotice:
+			prefix = colorize(prefix, ansiGrey)
+		case DiagLevelWarning:
+			prefix = colorize(prefix, ansiOrange)
+		default:
+			// Fall back by kind tokens already set.
+			if d.Kind == DiagKindPreferScript {
+				prefix = colorize("notice:", ansiGrey)
+			} else {
+				prefix = colorize(prefix, ansiOrange)
+			}
+		}
+	}
+	return prefix + body + "\n"
+}
+
+// preferScriptPaths picks the script and cmd RelPaths from a prefer-script Paths list.
+// Message order is script then cmd (not necessarily Paths sort order).
+func preferScriptPaths(paths []string) (scriptPath, cmdPath string) {
+	for _, p := range paths {
+		if isScriptRelPath(p) {
+			scriptPath = p
+		} else {
+			cmdPath = p
+		}
+	}
+	return scriptPath, cmdPath
+}
+
+// isScriptRelPath reports whether a ./relative path is under script/.
+func isScriptRelPath(rel string) bool {
+	rel = strings.TrimPrefix(rel, "./")
+	return rel == "script" || strings.HasPrefix(rel, "script/")
 }
 
 // printPlanItemsDryRun writes would:/skip: lines for items; accumulates counters.
@@ -636,7 +848,8 @@ func printPlanItemsDryRun(items []PlanItem, binDir string, nInstall, nSkip *int)
 // Skip items print the same skip: line as dry-run and do not invoke go.
 // Child stdout/stderr are streamed to the process. Continues after failures.
 // Summary: reinstalled N, skipped M, failed F. Exit 1 iff failed > 0.
-func executeLocalReinstalls(plan *LocalReinstallPlan) error {
+func executeLocalReinstalls(plan *LocalReinstallPlan, colorOn bool) error {
+	printReinstallDiagnostics(plan.Diagnostics, colorOn)
 	nReinstalled, nSkip, nFailed := 0, 0, 0
 	if err := executePlanItems(plan.ModuleRoot, plan.BinDir, plan.Items, &nReinstalled, &nSkip, &nFailed); err != nil {
 		return err
@@ -651,7 +864,10 @@ func executeLocalReinstalls(plan *LocalReinstallPlan) error {
 // executeMultiLocalReinstalls runs installs for every module in the multi plan
 // (module order, then BinName order within each module). Same progress/skip
 // lines and summary as single-module execute. Continues after failures.
-func executeMultiLocalReinstalls(plan *MultiLocalReinstallPlan) error {
+func executeMultiLocalReinstalls(plan *MultiLocalReinstallPlan, colorOn bool) error {
+	for _, mod := range plan.Modules {
+		printReinstallDiagnostics(mod.Diagnostics, colorOn)
+	}
 	nReinstalled, nSkip, nFailed := 0, 0, 0
 	for _, mod := range plan.Modules {
 		if err := executePlanItems(mod.ModuleRoot, plan.BinDir, mod.Items, &nReinstalled, &nSkip, &nFailed); err != nil {

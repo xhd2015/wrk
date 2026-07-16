@@ -25,8 +25,8 @@ import (
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/replace"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/resolve"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/pathfmt"
-	"github.com/xhd2015/wrk/wrkcli/storage"
 	lessflags "github.com/xhd2015/less-flags"
+	"github.com/xhd2015/wrk/wrkcli/storage"
 	"golang.org/x/term"
 )
 
@@ -793,7 +793,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// Bare / --main --reinstall-local before bare --main so compose does not open a nested shell.
 	// With --done / --merge-back, reinstall is a post-success tail on the primary path.
 	if reinstallLocal && !done && !mergeBack {
-		return runReinstallLocal(workDir, dryRun, mainFlag)
+		return runReinstallLocal(workDir, dryRun, mainFlag, colorFlag)
 	}
 	if mainFlag {
 		return runMain(workDir)
@@ -824,7 +824,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			return err
 		}
 		runPrimary := func() error {
-			return runDone(workDir, wrkHome, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun)
+			return runDone(workDir, wrkHome, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
 		}
 		// Dry-run gen-commit pre would commit staged dirt; MergeBack --rm still
 		// requires a clean tree today. Stash staged only for the dry plan, then restore.
@@ -838,7 +838,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			return err
 		}
 		// merge-back keeps the worktree (Remove=false); dirty is allowed by MergeBack.
-		return runMergeBack(workDir, wrkHome, confirmFromStdin, assumeYes, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun)
+		return runMergeBack(workDir, wrkHome, confirmFromStdin, assumeYes, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
 	}
 	// Bare compose: --tag-next --propagate-tags [--push] [--dry-run].
 	// Fixed stage order tag-next → push? → propagate-tags.
@@ -1219,7 +1219,7 @@ func runList(workDir string) error {
 	return nil
 }
 
-func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool) error {
+func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool) error {
 	// Shell process cwd (inherited from interactive shell), not merely workDir.
 	// Used after remove to decide whether auto-cd is needed.
 	shellCwd, _ := os.Getwd()
@@ -1295,12 +1295,12 @@ func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleRep
 		if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, withPropagateTags, true); err != nil {
 			return err
 		}
-		return runComposeReinstallLocal(result, withReinstallLocal, true)
+		return runComposeReinstallLocal(result, withReinstallLocal, true, colorFlag)
 	}
 	if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, withPropagateTags, false); err != nil {
 		return err
 	}
-	if err := runComposeReinstallLocal(result, withReinstallLocal, false); err != nil {
+	if err := runComposeReinstallLocal(result, withReinstallLocal, false, colorFlag); err != nil {
 		return err
 	}
 	if err := runExecInDir(result.TargetPath, execArgs); err != nil {
@@ -1316,7 +1316,7 @@ func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleRep
 	return nil
 }
 
-func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool) error {
+func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -1356,14 +1356,14 @@ func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync
 	if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, withPropagateTags, dryRun); err != nil {
 		return err
 	}
-	return runComposeReinstallLocal(result, withReinstallLocal, dryRun)
+	return runComposeReinstallLocal(result, withReinstallLocal, dryRun, colorFlag)
 }
 
 // runComposeReinstallLocal runs the optional post-merge reinstall tail from main
 // (result.TargetPath). useMain=true so the scan is main-repo modules after merge,
 // not a removed worktree. Blank line before the stage when other stages may have
 // printed. Empty / skip-only plans exit 0 (do not fail the ship).
-func runComposeReinstallLocal(result *worktree.MergeBackResult, withReinstallLocal, dryRun bool) error {
+func runComposeReinstallLocal(result *worktree.MergeBackResult, withReinstallLocal, dryRun bool, colorFlag bool) error {
 	if !withReinstallLocal {
 		return nil
 	}
@@ -1373,7 +1373,7 @@ func runComposeReinstallLocal(result *worktree.MergeBackResult, withReinstallLoc
 	}
 	fmt.Println() // blank line before reinstall stage
 	// Scan main tip after merge (useMain equivalent from main path).
-	return runReinstallLocal(mainPath, dryRun, true)
+	return runReinstallLocal(mainPath, dryRun, true, colorFlag)
 }
 
 // runComposePostStages runs optional post-merge stages in fixed order:
@@ -2651,7 +2651,6 @@ func createWorktree(sourceDir, wtPath, branch string) error {
 	cmd := gitCommand("-C", sourceDir, "worktree", "add", "-b", branch, wtPath)
 	return runGitWorktreeAdd(cmd)
 }
-
 
 // hasArg returns true if args contains the given flag.
 func hasArg(args []string, flag string) bool {

@@ -158,10 +158,12 @@ func Setup(t *testing.T, req *Request) error {
 }
 
 // reinstallLocalCLIEnv isolates WRK_HOME and forces GOBIN to the leaf bin dir.
+// Strips ambient NO_COLOR so leaves own color policy (pipe = plain; --color on).
 // ExtraEnv is appended last so leaf overrides can win on duplicate keys where
 // the OS takes the last occurrence.
 func reinstallLocalCLIEnv(req *Request) []string {
-	env := append(os.Environ(),
+	base := filterEnvKeys(os.Environ(), "NO_COLOR")
+	env := append(base,
 		"WRK_HOME="+req.WrkHome,
 		"GOBIN="+req.BinDir,
 	)
@@ -169,6 +171,26 @@ func reinstallLocalCLIEnv(req *Request) []string {
 		env = append(env, req.ExtraEnv...)
 	}
 	return env
+}
+
+// filterEnvKeys drops KEY=… entries whose key is in drop (case-sensitive).
+func filterEnvKeys(env []string, drop ...string) []string {
+	dropSet := make(map[string]struct{}, len(drop))
+	for _, k := range drop {
+		dropSet[k] = struct{}{}
+	}
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		key := e
+		if i := strings.IndexByte(e, '='); i >= 0 {
+			key = e[:i]
+		}
+		if _, skip := dropSet[key]; skip {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 func writeGoMod(t *testing.T, moduleRoot, modulePath string) {
@@ -310,6 +332,30 @@ func assertNotContains(t *testing.T, s, substr string) {
 	if strings.Contains(s, substr) {
 		t.Fatalf("expected %q not in %q", substr, s)
 	}
+}
+
+func assertNoANSI(t *testing.T, s string) {
+	t.Helper()
+	if strings.Contains(s, "\x1b[") {
+		t.Fatalf("output must not contain ANSI escapes, got:\n%s", s)
+	}
+}
+
+func assertStderrExact(t *testing.T, stderr, want string) {
+	t.Helper()
+	if stderr != want {
+		t.Fatalf("stderr mismatch\n got: %q\nwant: %q", stderr, want)
+	}
+}
+
+// coloredNoticePrefix is assert.Output v2 markup for grey notice: token (#90).
+func coloredNoticePrefix() string {
+	return "<ansi-color gray>notice:</ansi-color>"
+}
+
+// coloredWarningPrefix is assert.Output v2 markup for orange warning: token (#33).
+func coloredWarningPrefix() string {
+	return "<ansi-color #33>warning:</ansi-color>"
 }
 
 func assertEmptyStdout(t *testing.T, stdout string) {
@@ -516,6 +562,10 @@ func ensureReinstallLocalCLIHelpersUsed() {
 	_ = assertMutualExclusion
 	_ = assertNotContains
 	_ = assertContains
+	_ = assertNoANSI
+	_ = assertStderrExact
+	_ = coloredNoticePrefix
+	_ = coloredWarningPrefix
 	_ = assertEmptyStdout
 	_ = assertExitZero
 	_ = assertExitNonZero
@@ -526,5 +576,6 @@ func ensureReinstallLocalCLIHelpersUsed() {
 	_ = eventArgsContain
 	_ = resolvePath
 	_ = eventsJSONLPath
+	_ = filterEnvKeys
 }
 ```

@@ -3,12 +3,13 @@
 **Feature**: pure plan builder discovers cmd/script package mains and filters by binDir
 
 ```
-# moduleRoot + binDir -> PlanLocalReinstalls -> sorted Plan items
+# moduleRoot + binDir -> PlanLocalReinstalls -> sorted Plan items + Diagnostics
 # cmd package main -> go-install; script/.../install -> go-run-install
-# script wins same BinName; missing $binDir/<bin> -> Action=skip
+# unique×unique → script wins + prefer-script notice; ambiguous tree skipped with warning
+# missing $binDir/<bin> -> Action=skip (survivors only)
 moduleRoot + binDir
   -> wrkcli.PlanLocalReinstalls
-  -> LocalReinstallPlan{ModuleName, Items sorted by BinName}
+  -> LocalReinstallPlan{ModuleName, Items sorted by BinName, Diagnostics}
 ```
 
 ## Preconditions
@@ -24,17 +25,19 @@ moduleRoot + binDir
 
 1. Root `Setup` creates isolated `WorkRoot`, empty `ModuleRoot`, and empty `BinDir`.
 2. Leaves write `go.mod`, optional `package main` trees, and optional bin stubs.
-3. Leaves set `WantError` / `WantModuleName` / `WantItems`.
+3. Leaves set `WantError` / `WantModuleName` / `WantItems` / `WantDiagnostics`.
 4. Root `Run` calls `wrkcli.PlanLocalReinstalls(ModuleRoot, BinDir)`.
 
 ## Context
 
 - **Method strings**: `go-install` (cmd), `go-run-install` (script install dirs).
 - **Action strings**: `install` when `$binDir/<bin>` is a present file (or
-  symlink-to-file); `skip` otherwise. Plan keeps skip rows.
+  symlink-to-file); `skip` otherwise. Plan keeps skip rows for survivors only.
 - **RelPath**: always slash-form relative to module root, e.g. `./cmd/foo`,
   `./script/foo/install`, `./script/install`.
 - **Module basename**: last segment of the `module` path in `go.mod`.
+- **Diagnostic Level/Kind**: `notice`/`prefer-script`; `warning`/`ambiguous-cmd`;
+  `warning`/`ambiguous-script`. Paths sorted slash-form `./…`.
 - Helpers below write fixtures; Assert helpers compare plan structure.
 
 ```go
@@ -51,6 +54,12 @@ const (
 	methodGoRunInstall = "go-run-install"
 	actionInstall      = "install"
 	actionSkip         = "skip"
+
+	diagLevelNotice   = "notice"
+	diagLevelWarning  = "warning"
+	diagKindPrefer    = "prefer-script"
+	diagKindAmbCmd    = "ambiguous-cmd"
+	diagKindAmbScript = "ambiguous-script"
 )
 
 func Setup(t *testing.T, req *Request) error {
@@ -69,6 +78,9 @@ func Setup(t *testing.T, req *Request) error {
 	}
 	if req.WantItems == nil {
 		req.WantItems = []WantPlanItem{}
+	}
+	if req.WantDiagnostics == nil {
+		req.WantDiagnostics = []WantDiagnostic{}
 	}
 	return nil
 }
@@ -144,6 +156,9 @@ func assertPlanOK(t *testing.T, req *Request, resp *Response, err error) {
 	}
 	if !reflect.DeepEqual(resp.Items, req.WantItems) {
 		t.Fatalf("Items mismatch\n got: %#v\nwant: %#v", resp.Items, req.WantItems)
+	}
+	if !reflect.DeepEqual(resp.Diagnostics, req.WantDiagnostics) {
+		t.Fatalf("Diagnostics mismatch\n got: %#v\nwant: %#v", resp.Diagnostics, req.WantDiagnostics)
 	}
 }
 

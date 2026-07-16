@@ -4,6 +4,8 @@
 - Exactly one item for `foo`.
 - Method is `go-run-install` and RelPath is `./script/foo/install` (script wins).
 - No separate `./cmd/foo` item.
+- One `prefer-script` notice diagnostic with sorted Paths
+  `./cmd/foo`, `./script/foo/install`.
 
 ## Side Effects
 

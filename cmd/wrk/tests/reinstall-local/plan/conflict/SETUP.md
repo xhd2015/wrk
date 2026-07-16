@@ -1,31 +1,40 @@
 # Scenario
 
-**Feature**: same bin name from cmd and script → script wins (single item)
+**Feature**: cmd×script merge, prefer-script notice, and ambiguity skip/fallback
 
 ```
-# dedup: script go-run-install replaces cmd go-install for that BinName
-./cmd/foo + ./script/foo/install
-  -> one PlanItem Method=go-run-install RelPath=./script/foo/install
+# unique cmd + unique script → script item + notice prefer-script
+# ambiguous cmd/script → drop that tree; unique other side falls back
+# both ambiguous / ambiguous alone → omit bin from Items + warning(s)
+./cmd/... + ./script/.../install
+  -> PlanLocalReinstalls
+  -> Items (survivors) + Diagnostics
 ```
 
 ## Preconditions
 
-- Leaves under this branch create both a cmd main and a script install main
-  that would share a bin name.
+- Leaves under this branch create discovery fixtures that share BinNames across
+  cmd and/or script trees (unique or ambiguous).
+- Bin stubs present when Action=install is expected for a survivor.
 
 ## Steps
 
-1. Leaves write both discovery sources and bin stubs as needed.
-2. Assert a single plan item for the contested name.
+1. Leaves write cmd and/or script package mains and bin stubs as needed.
+2. Assert Items (possibly empty for pure ambiguity) and Diagnostics.
 
 ## Context
 
-- No dual listing; order rules still apply if other bins exist.
+- Prefer-script notice only when **both** sides are unique.
+- Ambiguous drop is not a binDir skip row — the bin is omitted from Items.
+- Diagnostic Paths are sorted slash-form `./…` relative paths.
 
 ```go
 func Setup(t *testing.T, req *Request) error {
 	if req.WantItems == nil {
 		req.WantItems = []WantPlanItem{}
+	}
+	if req.WantDiagnostics == nil {
+		req.WantDiagnostics = []WantDiagnostic{}
 	}
 	return nil
 }
