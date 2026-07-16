@@ -8,9 +8,10 @@ wrk --done|--merge-back [--sync] [--tag-next] [--push] [--propagate-tags] [--dry
   -> flag layer accepts composition
   -> later stage may still error (e.g. not a linked worktree on main)
 
-# illegal: --json with primary; bare --push; non-composed exclusives
-wrk --done --json / wrk --push / wrk --tag-next --list
+# illegal: --json with primary; non-composed exclusives
+wrk --done --json / wrk --tag-next --list
   -> non-zero, clear stderr
+# bare wrk --push is standalone (cmd/wrk/tests/push/), not rejected here
 
 # user-facing help: composition documented in usage()
 wrk --help

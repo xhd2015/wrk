@@ -2,14 +2,41 @@ package wrkcli
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
+
+	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 )
+
+// runBarePush implements wrk --push [--dry-run]: push the current checkout's
+// branch (option R — ShowToplevel of cwd, not always main).
+func runBarePush(workDir string, dryRun bool) error {
+	cwd, err := filepath.Abs(workDir)
+	if err != nil {
+		return fmt.Errorf("resolve cwd: %w", err)
+	}
+	if !worktree.IsInsideWorkTree(cwd) {
+		return fmt.Errorf("%s is not a git repository", cwd)
+	}
+	checkoutRoot, err := worktree.ShowToplevel(cwd)
+	if err != nil {
+		return fmt.Errorf("%s is not a git repository", cwd)
+	}
+	return runPushMain(checkoutRoot, dryRun, nil)
+}
 
 // runPushMain pushes the current branch of mainRepo to its upstream remote
 // (preferred) or origin + branch name (fallback). When tags is non-empty,
 // also pushes those tag refs to the same remote. dryRun prints would: lines
-// only and does not push.
+// only and does not push. Human confirmation / would: lines are printed on stdout.
 func runPushMain(mainRepo string, dryRun bool, tags []string) error {
+	return runPushMainWithOutput(mainRepo, dryRun, tags, true)
+}
+
+// runPushMainWithOutput is like runPushMain. When printOutput is false (e.g.
+// --tag-next --push --json), git push still runs but stdout stays clean of
+// human would:/pushed lines so JSON output is not mixed with confirmations.
+func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOutput bool) error {
 	branch, err := gitOutputDir(mainRepo, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return fmt.Errorf("wrk: resolve current branch for push: %w", err)
@@ -25,9 +52,11 @@ func runPushMain(mainRepo string, dryRun bool, tags []string) error {
 	}
 
 	if dryRun {
-		fmt.Printf("would: git push %s %s\n", remote, branch)
-		for _, tag := range tags {
-			fmt.Printf("would: git push %s %s\n", remote, tag)
+		if printOutput {
+			fmt.Printf("would: git push %s %s\n", remote, branch)
+			for _, tag := range tags {
+				fmt.Printf("would: git push %s %s\n", remote, tag)
+			}
 		}
 		return nil
 	}
@@ -50,7 +79,9 @@ func runPushMain(mainRepo string, dryRun bool, tags []string) error {
 		}
 	}
 
-	fmt.Printf("pushed %s → %s/%s\n", branch, remote, remoteBranch)
+	if printOutput {
+		fmt.Printf("pushed %s → %s/%s\n", branch, remote, remoteBranch)
+	}
 	return nil
 }
 

@@ -7,8 +7,9 @@ Decision tree for **composing** root modes `wrk --tag-next --propagate-tags`
 `[--push] [--dry-run]`. Fixed stage order:
 
 1. **tag-next** — plan/create lightweight release tags at source HEAD
-2. **push** (only when `--push`) — publish newly created tags to origin (same as
-   bare `wrk --tag-next --push`)
+2. **push** (only when `--push`) — publish **branch tip + newly created tags** to
+   origin with human confirm `pushed <branch> → origin/<branch>` (same as bare
+   `wrk --tag-next --push` / `runPushMain`)
 3. **propagate-tags** — resolve source releases (including tags just created, or
    **planned** next tags under `--dry-run`) and bump consumers
 
@@ -32,9 +33,9 @@ parent `propagate-tags/`). No shared Setup/Run with the parent tree.
   done-pipeline multi-stage composition).
 - **tag-next stage** — same as bare `wrk --tag-next` / `--dry-run` / `--push`
   (tagscope plan/apply human lines; footer `N tag planned` / `N tag created`).
-- **push stage** — when `--push` and not dry-run: push each newly created tag to
-  origin (existing tagscope/`--tag-next --push` behavior). Dry-run: no remote
-  mutation.
+- **push stage** — when `--push` and not dry-run: `runPushMain` semantics —
+  branch tip + each newly created tag, plus human confirm line between major
+  stages. Dry-run: `would: git push` for branch/tags; no remote mutation.
 - **propagate-tags stage** — same as bare `wrk --propagate-tags` apply/dry-run,
   but source release set is:
   - **apply**: after local tags exist (including tags just created)
@@ -61,7 +62,7 @@ parent `propagate-tags/`). No shared Setup/Run with the parent tree.
 compose/                                 # nested root (this DOCTEST.md)
 ├── tag-then-propagate/                  # apply: create tag then bump consumer + commit
 ├── dry-run/                             # plan both stages; no tag; go.mod unchanged
-├── push-then-propagate/                 # --push: tag on origin, then propagate
+├── push-then-propagate/                 # --push: branch+tag on origin + confirm, then propagate
 └── json-rejected/                       # --tag-next --propagate-tags --json → error
 ```
 
@@ -77,7 +78,7 @@ Split factor (MECE, significance-first):
 |---|------|-------------|
 | C1 | tag-then-propagate | `--tag-next --propagate-tags`: source gets next tag; app require bumps to that version; consumer commit with `chore(deps):` |
 | C2 | dry-run | `--tag-next --propagate-tags --dry-run`: both stages planned; no new tag; consumer go.mod/HEAD unchanged |
-| C3 | push-then-propagate | `--tag-next --propagate-tags --push`: new tag local + origin; then consumer bump+commit |
+| C3 | push-then-propagate | `--tag-next --propagate-tags --push`: branch+tag on origin; confirm line; then consumer bump+commit |
 | C4 | json-rejected | `--tag-next --propagate-tags --json` → non-zero; stderr mentions json + propagate-tags |
 
 ## How to Run

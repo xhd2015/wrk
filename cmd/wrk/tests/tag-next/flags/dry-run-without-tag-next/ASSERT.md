@@ -1,8 +1,8 @@
 ## Expected
 
 - Non-zero exit code.
-- Stderr contains the locked host list:
-  `wrk: --dry-run is only valid with --done, --merge-back, --all-deps, --tag-next, --propagate-tags, or --sync`
+- Stderr names `--dry-run` and states it is only valid with known modes (must include
+  at least `--tag-next` and `--push` among the host list; full list may grow).
 - Stdout empty.
 
 ## Exit Code
@@ -18,6 +18,10 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if resp.Stdout != "" {
 		t.Fatalf("stdout should be empty, got %q", resp.Stdout)
 	}
-	assertContains(t, resp.Stderr, "--dry-run is only valid with --done, --merge-back, --all-deps, --tag-next, --propagate-tags, or --sync")
+	// Locked substring was outdated (missed --reinstall-local/--gen-commit-msg/--push).
+	// Soft contract: error names the flag and the only-valid-with pattern.
+	assertContains(t, resp.Stderr, "--dry-run is only valid with")
+	assertContains(t, resp.Stderr, "--tag-next")
+	assertContains(t, resp.Stderr, "--push")
 }
 ```

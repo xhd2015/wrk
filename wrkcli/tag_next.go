@@ -22,10 +22,9 @@ type tagNextResult struct {
 }
 
 // runTagNext plans/applies per-scope release tags at HEAD of the resolved main
-// repo. Returns created tag names (or planned names on dry-run). When push is
-// true, tagscope.Apply pushes each new tag to origin (standalone --tag-next --push).
-// Callers composing with runPushMain should pass push=false and push tags via
-// runPushMain(main, dryRun, tags).
+// repo. Returns created tag names (or planned names on dry-run). The push
+// parameter is passed to tagscope.Apply; bare --tag-next --push and pipeline
+// composition pass push=false and publish branch+tags via runPushMain instead.
 func runTagNext(workDir string, dryRun, push, jsonOut bool) ([]string, error) {
 	res, err := runTagNextAtResult(workDir, "HEAD", dryRun, push, jsonOut)
 	if err != nil {
@@ -129,17 +128,22 @@ func plannedTagNames(plan tagscope.ChangePlan) []string {
 
 // runTagNextPropagateCompose runs bare composition:
 //
-//	tag-next (optional --push via tagscope, same as bare --tag-next --push)
-//	→ blank line
-//	→ propagate-tags (using new tags, or planned next tags on --dry-run)
+//	tag-next → optional push (branch + tags via runPushMain) → propagate-tags
 //
 // Flag order is free; stage order is fixed. --json is rejected at the flag layer.
+// Matches done-pipeline: tags created locally, then runPushMain for branch+tags.
 func runTagNextPropagateCompose(workDir, wrkHome string, dryRun, push bool) error {
-	// Match bare --tag-next --push: tagscope pushes tags with no separate
-	// "pushed main → …" confirmation line (push-then-propagate contract).
-	tagRes, err := runTagNextAtResult(workDir, "HEAD", dryRun, push, false)
+	// Create tags locally only; push (if any) is via runPushMain with tag list.
+	tagRes, err := runTagNextAtResult(workDir, "HEAD", dryRun, false, false)
 	if err != nil {
 		return err
+	}
+
+	if push {
+		fmt.Println() // blank line before push confirmation
+		if err := runPushMain(tagRes.MainRepo, dryRun, tagRes.Tags); err != nil {
+			return err
+		}
 	}
 
 	fmt.Println() // blank line between major stages

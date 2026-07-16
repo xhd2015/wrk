@@ -17,8 +17,10 @@ flag validation, mutual exclusion, events.jsonl, and non-git cwd errors.
   with `--list`, `--status`, `--all-deps`, create, and other non-composed modes.
 - **tagscope (dot-pkgs)** — `Plan(repoRoot, headRef)` runs Collect +
   LoadOwnedTrees + Evaluate; `Apply(repoRoot, plan, opts)` creates lightweight
-  tags (`git tag <name> <head>`) and optionally pushes each new tag
-  (`git push origin <tag>`). DryRun logs/plans only; Push pushes tag refs only.
+  tags (`git tag <name> <head>`). Standalone `wrk --tag-next --push` targets
+  **branch + tags** via `runPushMain` (not tags-only): human tag-next block,
+  blank line, then `pushed <branch> → origin/<branch>`. Dry-run plans tags and
+  `would: git push` for branch and each planned tag.
 - **Scope decisions** — per collected scope: skip (`-> skip` with reason) or
   plan next tag (`owned changed -> <next>`). Skip reasons include
   `prerelease-head`, `same-commit`, `no-changes`. Child scopes (e.g. `sub/`)
@@ -54,7 +56,8 @@ tag-next/
 ├── json/
 │   └── dry-run-root-bump/        # --tag-next --dry-run --json → JSON plan, no tag
 ├── push/
-│   └── pushes-tag/               # bare origin + --push → tag on origin
+│   ├── pushes-tag/               # bare origin + --push → branch tip + tag + confirm line
+│   └── dry-run/                  # --tag-next --push --dry-run → plan + would: branch/tag pushes
 ├── flags/
 │   └── dry-run-without-tag-next/ # wrk --dry-run alone → error (hosts incl. propagate-tags)
 ├── events/
@@ -76,7 +79,8 @@ Note: `--tag-next` + `--done`/`--merge-back` composition flag matrix lives under
 | 4 | apply/skip-prerelease | v0.0.3-alpha newest → skip; no tag created |
 | 5 | exclude/sub-scope-only | sub/ file changed → sub/v0.2.4; root skips |
 | 6 | json/dry-run-root-bump | `--json` stdout is JSON with planned v0.0.2; no tag ref |
-| 7 | push/pushes-tag | `--push` creates v0.0.2 locally and on bare origin |
+| 7 | push/pushes-tag | `--push` creates v0.0.2 locally+on origin; branch tip on origin; confirm line |
+| 7b | push/dry-run | `--tag-next --push --dry-run`: plan v0.0.2 + would push main/tag; no mutations |
 | 8 | flags/dry-run-without-tag-next | bare `wrk --dry-run` → non-zero; stderr host list includes `--propagate-tags` |
 | 9 | events/command-tag-next | bare success → events.jsonl `command: "tag-next"` |
 | 10 | events/command-tag-next-with-propagate | `--tag-next --propagate-tags` → still `command: "tag-next"` |

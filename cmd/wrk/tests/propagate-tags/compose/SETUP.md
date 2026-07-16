@@ -7,7 +7,7 @@
 source (cwd) + registered consumers
   -> wrk --tag-next --propagate-tags [--push] [--dry-run]
   -> (1) tag-next plan/apply at source HEAD
-  -> (2) push new tags when --push (non-dry-run)
+  -> (2) push branch+tags + confirm when --push (non-dry-run)
   -> (3) propagate-tags using new/local tags (or planned next tags on dry-run)
 
 # reject
@@ -36,7 +36,7 @@ wrk --propagate-tags alone does NOT auto tag-next  # parent tree
 |------------|----------|
 | `--tag-next --propagate-tags` | Create next tag(s) on source; then bump consumers to those versions; build+commit consumers as bare propagate apply |
 | `--tag-next --propagate-tags --dry-run` | Plan tag-next **and** propagate (using planned next versions); zero mutations |
-| `--tag-next --propagate-tags --push` | Same as apply + push new tags to origin before/as tag-next push; then propagate |
+| `--tag-next --propagate-tags --push` | Same as apply + push **branch + tags** with confirm line between stages; then propagate |
 | `--tag-next --propagate-tags --json` | Hard error naming `--json` and `--propagate-tags` |
 | `--propagate-tags` alone | Unchanged: uses existing tags only (no auto tag-next) |
 

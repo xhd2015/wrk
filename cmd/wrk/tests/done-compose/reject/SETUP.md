@@ -1,16 +1,15 @@
 # Scenario
 
-**Feature**: illegal flag combinations with primary (or bare invalid modifiers) are rejected
+**Feature**: illegal flag combinations with primary are rejected
 
 ```
 wrk --done|--merge-back --json -> non-zero; --json not valid with primary
-wrk --push (alone)             -> non-zero; still invalid
 ```
 
 ## Preconditions
 
 - `--json` is not a valid post-modifier of `--done` / `--merge-back`.
-- Bare `--push` remains invalid (push requires `--tag-next` **or** a primary).
+- Bare `wrk --push` is a **standalone mode** (see `cmd/wrk/tests/push/`); not rejected here.
 
 ## Steps
 

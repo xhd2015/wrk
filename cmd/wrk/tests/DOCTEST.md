@@ -282,6 +282,14 @@ wrk tests
 │   ├── pushes-main/              # bare origin; after done, origin/main == main HEAD
 │   ├── flag-order-push-first/    # --push --done -y same as --done -y --push
 │   └── no-remote/                # no origin → non-zero; clear remote error
+├── push/                         # bare wrk --push (standalone branch push; option R)
+│   ├── pushes-branch/            # main + origin → pushed main → origin/main
+│   ├── dry-run/                  # --push --dry-run → would: git push; no mutation
+│   ├── no-remote/                # no origin → non-zero
+│   ├── from-linked-worktree/     # option R: push worktree branch tip
+│   ├── exclusive-with-list/      # --push --list mutually exclusive
+│   ├── json-rejected/            # --push --json alone still invalid
+│   └── events/                   # events.jsonl command=push
 ├── done-pipeline/                # done post-pipeline sync → tag-next → push → propagate-tags
 │   ├── tag-next-local/           # --done -y --tag-next → local v0.0.2 at main HEAD
 │   ├── tag-next-push/            # --done -y --tag-next --push → local+origin tags + branch
@@ -324,8 +332,7 @@ wrk tests
 │   │       └── with-propagate-tags/ # P7: --merge-back --propagate-tags allowed
 │   ├── reject/                   # illegal combos
 │   │   ├── done-with-json/       # --done --json rejected (json only with bare tag-next)
-│   │   ├── merge-back-with-json/ # --merge-back --json rejected
-│   │   └── bare-push/            # wrk --push alone still rejected
+│   │   └── merge-back-with-json/ # --merge-back --json rejected
 │   ├── still-exclusive/
 │   │   └── tag-next-with-list/   # --tag-next --list remains exclusive (non-composed modes)
 │   └── help/                     # wrk --help documents composition (P7 smoke; RED if usage stale)
@@ -854,7 +861,7 @@ wrk tests
 | 68k2 | done-compose/allow/merge-back/with-propagate-tags | P7: `--merge-back --propagate-tags` flag layer accepts |
 | 68l | done-compose/reject/done-with-json | `--done --json` → non-zero; names json + done |
 | 68m | done-compose/reject/merge-back-with-json | `--merge-back --json` → non-zero; names both |
-| 68n | done-compose/reject/bare-push | bare `--push` still non-zero |
+| 68n | *(retired)* done-compose/reject/bare-push | bare `--push` is standalone — see `push/` |
 | 68o | done-compose/still-exclusive/tag-next-with-list | `--tag-next --list` still mutually exclusive |
 | 68o2 | done-compose/help | `wrk --help` → exit 0; `--done`/`--merge-back` list optional `--tag-next`/`--push`; `--push` dual meaning (not only tag-next); no tag-next exclusive-with-done claim |
 | 68p | done-push/pushes-main | `--done -y --push`: origin/main == post-merge main HEAD; push confirmation line |

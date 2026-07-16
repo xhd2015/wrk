@@ -238,7 +238,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	} else if scanGitRepos {
 		ctx.command = "scan-git-repos"
 	} else {
-		ctx.command = resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, depPath, bringPath, allDeps, reinstallLocal, tagNext, propagateTags, syncFlag, cd, mainFlag)
+		ctx.command = resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, depPath, bringPath, allDeps, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, cd, mainFlag)
 	}
 	ctx.eventArgs = extractEventArgs(args, remaining)
 
@@ -433,7 +433,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	// Resolve sourceDir to absolute; default to process cwd when absent.
 	// Passed to every sub-command as workDir instead of using os.Getwd/Chdir.
-	createMode := isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status, depPath, bringPath, allDeps, reinstallLocal, tagNext, propagateTags, syncFlag, list, done, mergeBack, cd, mainFlag)
+	createMode := isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status, depPath, bringPath, allDeps, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, list, done, mergeBack, cd, mainFlag)
 	uxFlags := createUXFlags{
 		newWindow:     newWindow,
 		noNewWindow:   noNewWindow,
@@ -686,9 +686,17 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			return fmt.Errorf("wrk: --sync is mutually exclusive with other modes")
 		}
 	}
-	// --push is valid with --tag-next or a primary (--done / --merge-back).
+	// --push is a bare primary (option R: push current checkout branch), or a
+	// composition stage with --tag-next / --done / --merge-back.
+	// Bare --push is exclusive with other modes (same pattern as bare --sync).
+	// --json is rejected separately so the error names --json.
 	if pushFlag && !tagNext && !done && !mergeBack {
-		return fmt.Errorf("wrk: --push is only valid with --tag-next")
+		otherMode := depPath != "" || bringPath != "" || list || allDeps || reinstallLocal || cd || mainFlag ||
+			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
+			taskFlagSet || setTaskFlagSet || spawnTarget != "" || syncFlag || propagateTags
+		if otherMode {
+			return fmt.Errorf("wrk: --push is mutually exclusive with other modes")
+		}
 	}
 	// --json is only valid with bare --tag-next; never with --done / --merge-back /
 	// --propagate-tags (compose or bare).
@@ -705,10 +713,10 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return fmt.Errorf("wrk: --json is only valid with --tag-next")
 	}
 	// --dry-run is valid with bare --sync / --all-deps / --tag-next / --propagate-tags /
-	// --reinstall-local, with --done / --merge-back composition (full multi-stage plan is later phases),
+	// --reinstall-local / --push, with --done / --merge-back composition (full multi-stage plan is later phases),
 	// and with --gen-commit-msg (handled early via runGenCommitMsg).
-	if dryRun && !done && !mergeBack && !allDeps && !tagNext && !propagateTags && !syncFlag && !reinstallLocal {
-		return fmt.Errorf("wrk: --dry-run is only valid with --done, --merge-back, --all-deps, --tag-next, --propagate-tags, --sync, --reinstall-local, or --gen-commit-msg")
+	if dryRun && !done && !mergeBack && !allDeps && !tagNext && !propagateTags && !syncFlag && !reinstallLocal && !pushFlag {
+		return fmt.Errorf("wrk: --dry-run is only valid with --done, --merge-back, --all-deps, --tag-next, --propagate-tags, --sync, --reinstall-local, --push, or --gen-commit-msg")
 	}
 
 	// spawnTarget only applies to the create path. Reject for any other mode.
@@ -783,19 +791,38 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runMergeBack(workDir, wrkHome, confirmFromStdin, assumeYes, syncFlag, tagNext, pushFlag, propagateTags, dryRun)
 	}
 	// Bare compose: --tag-next --propagate-tags [--push] [--dry-run].
-	// Fixed stage order tag-next → push? → propagate-tags (push inside tag-next).
+	// Fixed stage order tag-next → push? → propagate-tags.
 	if tagNext && propagateTags {
 		return runTagNextPropagateCompose(workDir, wrkHome, dryRun, pushFlag)
 	}
 	if tagNext {
-		_, err := runTagNext(workDir, dryRun, pushFlag, jsonFlag)
-		return err
+		// Create tags locally only; push (if any) is via runPushMain with tag list
+		// so branch + tags are published (not tagscope tags-only push).
+		tagRes, err := runTagNextAtResult(workDir, "HEAD", dryRun, false, jsonFlag)
+		if err != nil {
+			return err
+		}
+		if pushFlag {
+			if !jsonFlag {
+				fmt.Println() // blank line between tag-next block and push confirm
+			}
+			// With --json: still push branch+tags, but keep stdout JSON-clean.
+			if err := runPushMainWithOutput(tagRes.MainRepo, dryRun, tagRes.Tags, !jsonFlag); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	if propagateTags {
 		return runPropagateTags(workDir, wrkHome, dryRun)
 	}
 	if syncFlag {
 		return runSync(workDir, dryRun)
+	}
+	// Bare --push: option R — push current checkout branch (linked worktree →
+	// that worktree's branch; main → main's branch).
+	if pushFlag {
+		return runBarePush(workDir, dryRun)
 	}
 	task := ""
 	if taskDesc != nil {
@@ -884,9 +911,10 @@ Flags:
                                   compose dry-run uses planned next tags when with --tag-next)
   --sync [--dry-run]              FF-only bi-directional sync main ↔ linked worktrees
                                   (also: after successful --done / --merge-back)
-  --dry-run                       with --done/--merge-back/--all-deps/--tag-next/--propagate-tags/--sync/--reinstall-local/--gen-commit-msg: plan only
-  --push                          with --tag-next: push each new tag to origin;
-                                  with --done/--merge-back: push main branch (and tags when with --tag-next)
+  --dry-run                       with --done/--merge-back/--all-deps/--tag-next/--propagate-tags/--sync/--push/--reinstall-local/--gen-commit-msg: plan only
+  --push                          push current checkout branch to upstream/origin;
+                                  with --done/--merge-back: push main branch (and tags when with --tag-next);
+                                  with --tag-next: also push newly created tags (branch + tags)
   --json                          with bare --tag-next only: machine-readable plan/result on stdout
                                   (not valid with --propagate-tags)
   --task <desc>                   append task slug to worktree/branch names
