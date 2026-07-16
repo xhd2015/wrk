@@ -103,6 +103,9 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		}
 		return fmt.Errorf("wrk: --version is mutually exclusive with other modes")
 	}
+	if hasArg(args, "--gen-commit-msg") {
+		return runGenCommitMsg(args, ctx)
+	}
 
 	if err := validateWhereFlagArg(args); err != nil {
 		return err
@@ -702,9 +705,10 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return fmt.Errorf("wrk: --json is only valid with --tag-next")
 	}
 	// --dry-run is valid with bare --sync / --all-deps / --tag-next / --propagate-tags /
-	// --reinstall-local, and with --done / --merge-back composition (full multi-stage plan is later phases).
+	// --reinstall-local, with --done / --merge-back composition (full multi-stage plan is later phases),
+	// and with --gen-commit-msg (handled early via runGenCommitMsg).
 	if dryRun && !done && !mergeBack && !allDeps && !tagNext && !propagateTags && !syncFlag && !reinstallLocal {
-		return fmt.Errorf("wrk: --dry-run is only valid with --done, --merge-back, --all-deps, --tag-next, --propagate-tags, --sync, or --reinstall-local")
+		return fmt.Errorf("wrk: --dry-run is only valid with --done, --merge-back, --all-deps, --tag-next, --propagate-tags, --sync, --reinstall-local, or --gen-commit-msg")
 	}
 
 	// spawnTarget only applies to the create path. Reject for any other mode.
@@ -880,7 +884,7 @@ Flags:
                                   compose dry-run uses planned next tags when with --tag-next)
   --sync [--dry-run]              FF-only bi-directional sync main ↔ linked worktrees
                                   (also: after successful --done / --merge-back)
-  --dry-run                       with --done/--merge-back/--all-deps/--tag-next/--propagate-tags/--sync/--reinstall-local: plan only
+  --dry-run                       with --done/--merge-back/--all-deps/--tag-next/--propagate-tags/--sync/--reinstall-local/--gen-commit-msg: plan only
   --push                          with --tag-next: push each new tag to origin;
                                   with --done/--merge-back: push main branch (and tags when with --tag-next)
   --json                          with bare --tag-next only: machine-readable plan/result on stdout
@@ -900,6 +904,9 @@ Flags:
   --no-open-in-agent              disable agent UX for this run
   --no-config                     do not read $WRK_HOME/config.json for this run
   --exec <cmd> [args...]          after success, run command in the mode target directory
+  --gen-commit-msg [--dir DIR] [--model MODEL] [--agent-runner RUNNER]
+                  [--agent-runner-binary PATH] [--commit] [--no-verify] [--dry-run]
+                                  generate a commit message for staged changes (AI)
   --web                           start local web UI (React SPA + API on 127.0.0.1)
   --port PORT                     listen port for --web only (default: free port from 8080)
   --dev                           with --web: proxy UI to Vite (wrk-react/) for HMR
