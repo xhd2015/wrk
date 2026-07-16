@@ -39,6 +39,7 @@ skill/
 │   └── alias-short/              # wrk skill -l → stdout wrk\n
 ├── show/
 │   ├── basic/                    # wrk skill --show → embedded SKILL.md
+│   ├── documents-new-flags/      # SKILL.md names --propagate-tags + --projects-dep-graph
 │   ├── header/                   # --show --header → YAML block
 │   ├── header-flag-order/        # --header --show → same as header
 │   └── unknown-option/           # --show --nope → exit ≠0
@@ -61,6 +62,7 @@ skill/
 | A1 | list/basic | `wrk skill --list` → exit 0; stdout `wrk\n` |
 | A2 | list/alias-short | `wrk skill -l` → exit 0; stdout `wrk\n` |
 | A3 | show/basic | `wrk skill --show` → exit 0; marker + `name: wrk`; trailing `\n` |
+| A3b | show/documents-new-flags | `wrk skill --show` → documents `--propagate-tags` and `--projects-dep-graph` |
 | A4 | show/header | `wrk skill --show --header` → YAML frontmatter; trailing `\n` |
 | A5 | show/header-flag-order | `wrk skill --header --show` → same as A4 |
 | A6 | install/dry-run-cursor | `wrk skill --install --cursor --dry-run` → dry-run, no writes |

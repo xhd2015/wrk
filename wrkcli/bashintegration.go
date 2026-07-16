@@ -111,6 +111,7 @@ var wrkCompletionFlags = []string{
 	"--status",
 	"--repos",
 	"--projects",
+	"--projects-dep-graph",
 	"--scan-git-repos",
 	"--no-cache",
 	"--fetch",
@@ -125,6 +126,7 @@ var wrkCompletionFlags = []string{
 	"--bring",
 	"--all-deps",
 	"--tag-next",
+	"--propagate-tags",
 	"--sync",
 	"--dry-run",
 	"-t", "--task",
@@ -154,11 +156,12 @@ var wrkCompletionFlags = []string{
 
 var bashIntegrationDisallowedFlags = []string{
 	"--done", "--merge-back", "-l", "--list", "--repos", "--projects",
+	"--projects-dep-graph",
 	"--scan-git-repos", "--no-cache",
 	"--fetch", "-v", "--verbose", "--color", "--add", "--rm", "--where",
 	"--cd",
 	"--main",
-	"--dep", "--bring", "--all-deps", "--tag-next", "--sync", "-t", "--task", "--set-task", "-y", "--yes",
+	"--dep", "--bring", "--all-deps", "--tag-next", "--propagate-tags", "--sync", "-t", "--task", "--set-task", "-y", "--yes",
 	"--confirm-from-stdin", "--no-in-module-replace",
 }
 

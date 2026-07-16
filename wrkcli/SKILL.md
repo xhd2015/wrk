@@ -31,12 +31,17 @@ wrk myrepo -t 'fix login bug'    # basename + task slug in branch/dir names
 wrk --done                       # merge back and remove worktree
 wrk --merge-back                 # merge back without removing
 wrk --done --sync --tag-next --push   # after success: sync, tag, push main (+ tags)
+wrk --done --tag-next --propagate-tags   # after success: tag then bump consumer require lines
 wrk --merge-back --tag-next --push --dry-run  # plan post-pipeline only
+wrk --tag-next --propagate-tags --dry-run     # plan tag then consumer bumps
+wrk --propagate-tags --dry-run                # plan consumer go.mod bumps from source release tags
 ```
 
-Optional post-modifiers on `--done` / `--merge-back`: `--sync`, `--tag-next`, `--push`, `--dry-run`.
+Optional post-modifiers on `--done` / `--merge-back`: `--sync`, `--tag-next`, `--push`, `--propagate-tags`, `--dry-run`.
+Post-pipeline order is fixed: **sync → tag-next → push → propagate-tags** (then exec/land on `--done` only).
+`--propagate-tags` bumps consumer `go.mod` require versions to source release tags (compose with `--tag-next` to use newly planned/created tags; alone uses existing source tags).
 `--push` with a primary pushes the main branch (and tags when combined with `--tag-next`).
-`--json` is only for bare `--tag-next`, not with `--done` / `--merge-back`.
+`--json` is only for bare `--tag-next`, not with `--done` / `--merge-back` or `--propagate-tags`.
 
 ## Inspect
 
@@ -44,6 +49,7 @@ Optional post-modifiers on `--done` / `--merge-back`: `--sync`, `--tag-next`, `-
 wrk --status                     # status for git repos under this checkout
 wrk -l                           # list worktrees (alias: --list)
 wrk --projects                   # recorded main repository paths
+wrk --projects-dep-graph         # module-level dep graph across registered projects
 wrk --where <basename>           # look up saved project path(s) by basename
 wrk --main                       # nested shell at main repository root
 ```

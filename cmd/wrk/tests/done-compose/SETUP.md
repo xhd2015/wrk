@@ -4,7 +4,7 @@
 
 ```
 # primary + allowed modifiers pass flag validation (no mutex / only-valid-with for those pairs)
-wrk --done|--merge-back [--sync] [--tag-next] [--push] [--dry-run]
+wrk --done|--merge-back [--sync] [--tag-next] [--push] [--propagate-tags] [--dry-run]
   -> flag layer accepts composition
   -> later stage may still error (e.g. not a linked worktree on main)
 
@@ -12,7 +12,7 @@ wrk --done|--merge-back [--sync] [--tag-next] [--push] [--dry-run]
 wrk --done --json / wrk --push / wrk --tag-next --list
   -> non-zero, clear stderr
 
-# user-facing help (P7): composition documented in usage()
+# user-facing help: composition documented in usage()
 wrk --help
   -> --done/--merge-back list optional post modifiers; --push dual meaning
 ```
@@ -22,7 +22,8 @@ wrk --help
 - Reuses root `cmd/wrk/tests` harness (`Request` / `Response` / `Run`).
 - Git available for flag-layer leaves; **`help/`** leaf is help-only (no git).
 - Flag-layer leaves use a **main** repo checkout so mutex checks fire **before** heavy merge-back / tagscope work.
-- Flag validation leaves: not full merge+tag+push e2e; `help/` asserts `usage()` substrings only.
+- Flag validation leaves: not full merge+tag+push+propagate e2e; `help/` asserts `usage()` substrings only.
+- **P7**: `--propagate-tags` is an allowed post modifier with primary (Classic RED until unlocked).
 
 ## Steps
 

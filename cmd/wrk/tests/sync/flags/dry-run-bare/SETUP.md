@@ -3,14 +3,14 @@
 **Feature**: bare wrk --dry-run rejected unless paired with an allowed mode (incl. --sync)
 
 ```
-# wrk --dry-run alone -> error mentioning --all-deps and --sync
+# wrk --dry-run alone -> error listing all dry-run hosts incl. --sync and --propagate-tags
 wrk --dry-run -> validation error before any mode body
 ```
 
 ## Steps
 
 1. `initMainOnlyRepo` (valid git cwd).
-2. Run `wrk --dry-run` without `--sync`, `--all-deps`, or `--tag-next`.
+2. Run `wrk --dry-run` without any dry-run host mode.
 
 ```go
 func Setup(t *testing.T, req *Request) error {

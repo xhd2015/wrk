@@ -11,8 +11,8 @@ wrk --sync [--dry-run] | invalid combos -> summary or flag error
 ## Preconditions
 
 - `--sync` is a standalone mode; no positionals.
-- `--dry-run` is valid with `--sync` (and existing modes such as `--all-deps` / `--tag-next`).
-- Bare `wrk --dry-run` remains rejected; message keeps `--dry-run is only valid with --all-deps` substring.
+- `--dry-run` is valid with `--sync` (and existing modes such as `--all-deps` / `--tag-next` / `--propagate-tags`).
+- Bare `wrk --dry-run` remains rejected; host list includes `--done`, `--merge-back`, `--all-deps`, `--tag-next`, `--propagate-tags`, and `--sync`.
 
 ## Steps
 

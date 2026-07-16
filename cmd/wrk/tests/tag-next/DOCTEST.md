@@ -27,14 +27,15 @@ flag validation, mutual exclusion, events.jsonl, and non-git cwd errors.
   `tagged <name> @ <short-hash>` lines; footer `N tag planned` (dry-run) or
   `N tag created` (apply). Colors when TTY/`--color` (doctest uses pipes → plain).
 - **JSON stdout** — `--json` emits machine-readable plan/result on stdout (no ANSI).
-- **--dry-run validation** — valid with `--all-deps`, `--tag-next`, `--sync`,
-  and primary composition (`--done` / `--merge-back`); bare `wrk --dry-run` →
-  non-zero, stderr lists those hosts (includes `--all-deps` and `--tag-next`).
+- **--dry-run validation** — valid with `--all-deps`, `--tag-next`,
+  `--propagate-tags`, `--sync`, and primary composition (`--done` /
+  `--merge-back`); bare `wrk --dry-run` → non-zero, stderr lists those hosts.
   Primary + `--dry-run` multi-stage plans live under monotree
   `done-pipeline/dry-run/` and `merge-back-pipeline/dry-run/`.
 - **WRK_HOME** — isolated per test at `{WorkRoot}/.wrk`; auto-record + events on
   every invocation.
-- **events.jsonl** — successful `--tag-next` appends `command: "tag-next"`.
+- **events.jsonl** — successful `--tag-next` appends `command: "tag-next"`;
+  composed `--tag-next --propagate-tags` still records primary `tag-next`.
 - **Git fixtures** — isolated repos via `git_isolated`; `initTaggedRepo` seeds
   tags at commits and optional post-tag commits.
 
@@ -55,9 +56,10 @@ tag-next/
 ├── push/
 │   └── pushes-tag/               # bare origin + --push → tag on origin
 ├── flags/
-│   └── dry-run-without-tag-next/ # wrk --dry-run alone → error (done|merge-back|all-deps|tag-next|sync)
+│   └── dry-run-without-tag-next/ # wrk --dry-run alone → error (hosts incl. propagate-tags)
 ├── events/
-│   └── command-tag-next/         # events.jsonl command=tag-next on success
+│   ├── command-tag-next/                 # events.jsonl command=tag-next (bare)
+│   └── command-tag-next-with-propagate/  # --tag-next --propagate-tags → still tag-next
 └── not-git-cwd/                  # cwd not a git repo → error
 ```
 
@@ -75,9 +77,10 @@ Note: `--tag-next` + `--done`/`--merge-back` composition flag matrix lives under
 | 5 | exclude/sub-scope-only | sub/ file changed → sub/v0.2.4; root skips |
 | 6 | json/dry-run-root-bump | `--json` stdout is JSON with planned v0.0.2; no tag ref |
 | 7 | push/pushes-tag | `--push` creates v0.0.2 locally and on bare origin |
-| 8 | flags/dry-run-without-tag-next | bare `wrk --dry-run` → non-zero; stderr lists done, merge-back, all-deps, tag-next, sync |
-| 9 | events/command-tag-next | success → events.jsonl `command: "tag-next"` |
-| 10 | not-git-cwd | non-git cwd → non-zero, not a git repository |
+| 8 | flags/dry-run-without-tag-next | bare `wrk --dry-run` → non-zero; stderr host list includes `--propagate-tags` |
+| 9 | events/command-tag-next | bare success → events.jsonl `command: "tag-next"` |
+| 10 | events/command-tag-next-with-propagate | `--tag-next --propagate-tags` → still `command: "tag-next"` |
+| 11 | not-git-cwd | non-git cwd → non-zero, not a git repository |
 
 ## How to Run
 

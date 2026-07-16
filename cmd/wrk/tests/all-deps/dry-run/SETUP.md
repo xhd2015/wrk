@@ -4,13 +4,13 @@
 
 ```
 # bare --dry-run without a host mode -> error before any planning
-wrk --dry-run -> error (host list includes --all-deps, --done, --merge-back, --tag-next, --sync)
+wrk --dry-run -> error (host list: done|merge-back|all-deps|tag-next|propagate-tags|sync)
 ```
 
 ## Preconditions
 
-- Bare `--dry-run` (no host) is rejected; stderr still contains `--dry-run is only valid with --all-deps` as a substring of the full host list.
-- Other hosts (`--done` / `--merge-back` / `--tag-next` / `--sync`) are covered outside this all-deps subtree.
+- Bare `--dry-run` (no host) is rejected; stderr lists hosts including `--all-deps` and `--propagate-tags`.
+- Other hosts (`--done` / `--merge-back` / `--tag-next` / `--propagate-tags` / `--sync`) are covered outside this all-deps subtree.
 - Registered-project dry-run planning leaves live under `registered/dry-run/`.
 
 ## Steps

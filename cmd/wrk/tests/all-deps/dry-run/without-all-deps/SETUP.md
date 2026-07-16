@@ -3,8 +3,8 @@
 **Feature**: wrk --dry-run without --all-deps is rejected before any planning
 
 ```
-# bare --dry-run (no --all-deps) -> non-zero exit, stderr mentions --dry-run is only valid with --all-deps
-wrk --dry-run -> error (--dry-run is only valid with --all-deps)
+# bare --dry-run (no host) -> non-zero; host list includes --all-deps and --propagate-tags
+wrk --dry-run -> error (host list: done|merge-back|all-deps|tag-next|propagate-tags|sync)
 ```
 
 ## Steps

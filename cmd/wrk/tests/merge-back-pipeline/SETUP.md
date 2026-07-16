@@ -1,15 +1,16 @@
 # Scenario
 
-**Feature**: after successful `--merge-back`, optional post steps run in fixed order: sync → tag-next → push (source worktree kept)
+**Feature**: after successful `--merge-back`, optional post steps run in fixed order: sync → tag-next → push → propagate-tags (source worktree kept)
 
 ```
 # primary --merge-back succeeds (not aborted) then ordered post-pipeline; Remove=false
-linked wt (ahead, root-bump seed: v0.0.1) [+ optional wtB] [+ bare origin]
-  -> wrk --merge-back -y [--sync] [--tag-next] [--push]
+linked wt (ahead) [+ optional wtB] [+ bare origin] [+ registered consumer]
+  -> wrk --merge-back -y [--sync] [--tag-next] [--push] [--propagate-tags]
   -> merge without remove (message on stdout; no "worktree removed:")
   -> blank line + runSync(main)? when --sync
   -> blank line + tag-next apply on main (local tags)? when --tag-next
   -> blank line + runPushMain(main, tags=created)? when --push
+  -> blank line + runPropagateTags(main, WRK_HOME)? when --propagate-tags
   -> source wt stays on disk; branch kept
   -> event command stays "merge-back"
 ```
@@ -21,11 +22,13 @@ linked wt (ahead, root-bump seed: v0.0.1) [+ optional wtB] [+ bare origin]
 - **Real apply** post-pipeline after merge-back (composition dry-run under `dry-run/`; done twin under `done-pipeline/`).
 - Reuses done-pipeline fixture shape (root-bump seed, bare origin, two-wt sync) but
   **Remove false → worktree remains**.
-- Locked behavior (docs + GREEN leaves):
-  1. dispatch prefers **merge-back** over bare `runTagNext` when both flags set,
-  2. `runMergeBack` runs tag-next after sync and before push (same order as done),
+- **P7 propagate leaf** needs Go + offline module proxy (ExtraEnv).
+- Locked behavior (docs + GREEN leaves for sync/tag/push; Classic RED for propagate until P7):
+  1. dispatch prefers **merge-back** over bare `runTagNext` / `runPropagateTags` when primary set,
+  2. `runMergeBack` post order: sync → tag-next → push → **propagate-tags**,
   3. with `--push`, `runPushMain(..., createdTags)` pushes branch + tags,
-  4. source worktree is never removed on this path.
+  4. source worktree is never removed on this path,
+  5. event command stays `"merge-back"`.
 
 ## Steps
 
@@ -33,11 +36,15 @@ linked wt (ahead, root-bump seed: v0.0.1) [+ optional wtB] [+ bare origin]
 
 ```go
 import (
+	"archive/zip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/xhd2015/gitops/git/git_isolated"
 )
@@ -306,12 +313,318 @@ func assertLocalTagAtMainHEAD(t *testing.T, mainRepo, tag string) {
 	}
 }
 
+// --- P7: merge-back + --propagate-tags (mirror done-pipeline helpers; no inheritance across trees) ---
+
+const (
+	mbPipelinePropOldTag     = "v0.0.1"
+	mbPipelinePropNextTag    = "v0.0.2"
+	mbPipelinePropModulePath = "example.com/lib"
+	mbPipelinePropAppModule  = "example.com/app"
+)
+
+type mbPipelineProjectsJSONEntry struct {
+	Path    string `json:"path"`
+	AddedAt string `json:"added_at"`
+	Source  string `json:"source"`
+}
+
+type mbPipelineProjectsJSONFile struct {
+	Version  int                           `json:"version"`
+	Projects []mbPipelineProjectsJSONEntry `json:"projects"`
+}
+
+func mbPipelineWriteProjectsJSON(t *testing.T, wrkHome string, paths ...string) {
+	t.Helper()
+	var projects []mbPipelineProjectsJSONEntry
+	for _, p := range paths {
+		projects = append(projects, mbPipelineProjectsJSONEntry{
+			Path:    p,
+			AddedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339),
+			Source:  "manual",
+		})
+	}
+	pf := mbPipelineProjectsJSONFile{Version: 1, Projects: projects}
+	data, err := json.MarshalIndent(pf, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal projects.json: %v", err)
+	}
+	if err := os.MkdirAll(wrkHome, 0o755); err != nil {
+		t.Fatalf("mkdir WRK_HOME: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wrkHome, "projects.json"), append(data, '\n'), 0o644); err != nil {
+		t.Fatalf("write projects.json: %v", err)
+	}
+}
+
+func mbPipelineInitGitRepo(t *testing.T, path string) {
+	t.Helper()
+	mkdirAll(t, path)
+	runGitIsolated(t, path, "-c", "init.templateDir=", "init", "-b", "main")
+	runGitIsolated(t, path, "config", "user.email", "test@test.com")
+	runGitIsolated(t, path, "config", "user.name", "Test")
+}
+
+func mbPipelineWriteGoMod(t *testing.T, dir, modulePath string, requires []string) {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("module ")
+	b.WriteString(modulePath)
+	b.WriteString("\n\ngo 1.22\n")
+	if len(requires) > 0 {
+		b.WriteString("\nrequire (\n")
+		for _, r := range requires {
+			parts := strings.SplitN(r, "@", 2)
+			if len(parts) != 2 {
+				t.Fatalf("require %q must be path@version", r)
+			}
+			fmt.Fprintf(&b, "\t%s %s\n", parts[0], parts[1])
+		}
+		b.WriteString(")\n")
+	}
+	writeFile(t, filepath.Join(dir, "go.mod"), b.String())
+}
+
+func mbPipelineWriteConsumerMain(t *testing.T, dir string, importPaths ...string) {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("package main\n\nimport (\n")
+	for _, p := range importPaths {
+		fmt.Fprintf(&b, "\t_ %q\n", p)
+	}
+	b.WriteString(")\n\nfunc main() {}\n")
+	writeFile(t, filepath.Join(dir, "main.go"), b.String())
+}
+
+func mbPipelineLibGo(version string) string {
+	return "package lib\n\nfunc Version() string { return \"" + version + "\" }\n"
+}
+
+func mbPipelineReadFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
+}
+
+func mbPipelineSeedFileModuleProxy(t *testing.T, proxyRoot, modulePath, version, srcDir string) {
+	t.Helper()
+	vDir := filepath.Join(append([]string{proxyRoot}, strings.Split(modulePath, "/")...)...)
+	vDir = filepath.Join(vDir, "@v")
+	mkdirAll(t, vDir)
+	writeFile(t, filepath.Join(vDir, version+".mod"), mbPipelineReadFile(t, filepath.Join(srcDir, "go.mod")))
+	writeFile(t, filepath.Join(vDir, version+".info"),
+		fmt.Sprintf(`{"Version":%q,"Time":"2026-07-01T00:00:00Z"}`+"\n", version))
+	listPath := filepath.Join(vDir, "list")
+	existing := ""
+	if data, err := os.ReadFile(listPath); err == nil {
+		existing = string(data)
+	}
+	if !strings.Contains(existing, version) {
+		writeFile(t, listPath, existing+version+"\n")
+	}
+	zipPath := filepath.Join(vDir, version+".zip")
+	if err := mbPipelineWriteModuleZip(zipPath, modulePath, version, srcDir); err != nil {
+		t.Fatalf("write module zip %s: %v", zipPath, err)
+	}
+}
+
+func mbPipelineWriteModuleZip(zipPath, modulePath, version, srcDir string) error {
+	f, err := os.Create(zipPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	zw := zip.NewWriter(f)
+	prefix := modulePath + "@" + version + "/"
+	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if path != srcDir && filepath.Base(path) == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(rel, ".git"+string(filepath.Separator)) || rel == ".git" {
+			return nil
+		}
+		w, err := zw.Create(prefix + filepath.ToSlash(rel))
+		if err != nil {
+			return err
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(w, in)
+		_ = in.Close()
+		return copyErr
+	})
+	if err != nil {
+		_ = zw.Close()
+		return err
+	}
+	return zw.Close()
+}
+
+func mbPipelineEnableFileModuleProxy(t *testing.T, req *Request, proxyRoot string) {
+	t.Helper()
+	abs, err := filepath.Abs(proxyRoot)
+	if err != nil {
+		t.Fatalf("abs proxy: %v", err)
+	}
+	req.ExtraEnv = append(req.ExtraEnv,
+		"GOPROXY=file://"+abs,
+		"GOSUMDB=off",
+		"GONOSUMDB=*",
+	)
+}
+
+func mbPipelineSeedOldModuleProxyFromContent(t *testing.T, proxyRoot, modulePath, version, libGo string) {
+	t.Helper()
+	tmp := filepath.Join(filepath.Dir(proxyRoot), "seed-old-"+version)
+	mkdirAll(t, tmp)
+	mbPipelineWriteGoMod(t, tmp, modulePath, nil)
+	writeFile(t, filepath.Join(tmp, "lib.go"), libGo)
+	mbPipelineSeedFileModuleProxy(t, proxyRoot, modulePath, version, tmp)
+}
+
+func mbPipelineRequireGo(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not available")
+	}
+}
+
+func mbPipelineSnapshotAppBaseline(t *testing.T, req *Request) {
+	t.Helper()
+	dir := filepath.Join(req.WorkRoot, "_prop_baseline")
+	mkdirAll(t, dir)
+	writeFile(t, filepath.Join(dir, "app.gomod"), mbPipelineReadFile(t, filepath.Join(req.SecondRepo, "go.mod")))
+	writeFile(t, filepath.Join(dir, "app.head"), revParseHEAD(t, req.SecondRepo)+"\n")
+}
+
+func mbPipelineReadAppBaseline(t *testing.T, req *Request, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(req.WorkRoot, "_prop_baseline", name))
+	if err != nil {
+		t.Fatalf("read prop baseline %s: %v", name, err)
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// setupMergeBackPipelinePropagateTagNext: same multi-project shape as done twin; wt kept after apply.
+func setupMergeBackPipelinePropagateTagNext(t *testing.T, req *Request) {
+	t.Helper()
+	skipIfNoGit(t)
+	mbPipelineRequireGo(t)
+
+	libPath := filepath.Join(req.WorkRoot, "repos", "lib")
+	appPath := filepath.Join(req.WorkRoot, "repos", "app")
+
+	mbPipelineInitGitRepo(t, libPath)
+	mbPipelineWriteGoMod(t, libPath, mbPipelinePropModulePath, nil)
+	writeFile(t, filepath.Join(libPath, "lib.go"), mbPipelineLibGo(mbPipelinePropOldTag))
+	runGitIsolated(t, libPath, "add", ".")
+	runGitIsolated(t, libPath, "commit", "-m", "init lib "+mbPipelinePropOldTag)
+	createLightweightTag(t, libPath, mbPipelinePropOldTag, "")
+	libPath = compositionResolvePath(t, libPath)
+	req.MainRepo = libPath
+	req.DepModulePath = mbPipelinePropModulePath
+
+	mbPipelineInitGitRepo(t, appPath)
+	mbPipelineWriteGoMod(t, appPath, mbPipelinePropAppModule, []string{
+		mbPipelinePropModulePath + "@" + mbPipelinePropOldTag,
+	})
+	mbPipelineWriteConsumerMain(t, appPath, mbPipelinePropModulePath)
+	runGitIsolated(t, appPath, "add", ".")
+	runGitIsolated(t, appPath, "commit", "-m", "init app")
+	appPath = compositionResolvePath(t, appPath)
+	req.SecondRepo = appPath
+
+	mbPipelineWriteProjectsJSON(t, req.WrkHome, libPath, appPath)
+
+	wtDir := runWrkFrom(t, req, libPath)
+	wtDir = compositionResolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchName("main", wrkDate, 0)
+
+	writeFile(t, filepath.Join(wtDir, "lib.go"), mbPipelineLibGo(mbPipelinePropNextTag))
+	runGitIsolated(t, wtDir, "add", "lib.go")
+	runGitIsolated(t, wtDir, "commit", "-m", "bump lib for next tag")
+	commitAheadOnWorktree(t, wtDir, "feature-work", "ahead of main")
+
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	mbPipelineSeedFileModuleProxy(t, proxyRoot, mbPipelinePropModulePath, mbPipelinePropNextTag, wtDir)
+	mbPipelineSeedOldModuleProxyFromContent(t, proxyRoot, mbPipelinePropModulePath, mbPipelinePropOldTag,
+		mbPipelineLibGo(mbPipelinePropOldTag))
+	mbPipelineEnableFileModuleProxy(t, req, proxyRoot)
+
+	req.RepoDir = wtDir
+	mbPipelineSnapshotAppBaseline(t, req)
+}
+
+func mbPropDepsBumpSubject(depModule, version string) string {
+	return fmt.Sprintf("chore(deps): bump %s to %s", depModule, version)
+}
+
+func mbPropStageApplyStdout(sourceAbs, modulePath, oldTag, nextTag, appBase, appShort, subject string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "source: %s\n", sourceAbs)
+	fmt.Fprintf(&b, "  %s  @ %s  (tag %s)\n\n", modulePath, nextTag, nextTag)
+	fmt.Fprintf(&b, "updated %s  (project %s)\n", mbPipelinePropAppModule, appBase)
+	fmt.Fprintf(&b, "  %s  %s -> %s\n", modulePath, oldTag, nextTag)
+	b.WriteString("  go build ./... ok\n")
+	fmt.Fprintf(&b, "  committed %s  %s\n\n", appShort, subject)
+	b.WriteString("updated 1 module across 1 project\n")
+	return b.String()
+}
+
+func mbAssertGoModRequireVersion(t *testing.T, goMod, modulePath, version string) {
+	t.Helper()
+	for _, line := range strings.Split(goMod, "\n") {
+		trim := strings.TrimSpace(line)
+		fields := strings.Fields(trim)
+		if strings.HasPrefix(trim, "require ") && len(fields) >= 3 && fields[1] == modulePath && fields[2] == version {
+			return
+		}
+		if len(fields) >= 2 && fields[0] == modulePath && fields[1] == version {
+			return
+		}
+	}
+	t.Fatalf("go.mod missing require %s %s\n%s", modulePath, version, goMod)
+}
+
+func mbAssertAppBumpedAndCommitted(t *testing.T, req *Request, wantVersion, wantSubject string) {
+	t.Helper()
+	app := req.SecondRepo
+	gotMod := mbPipelineReadFile(t, filepath.Join(app, "go.mod"))
+	mbAssertGoModRequireVersion(t, gotMod, req.DepModulePath, wantVersion)
+	before := mbPipelineReadAppBaseline(t, req, "app.head")
+	gotHEAD := revParseHEAD(t, app)
+	if gotHEAD == before {
+		t.Fatalf("app HEAD did not advance after propagate (still %s)", gotHEAD)
+	}
+	subject := strings.TrimSpace(gitOutputIsolated(t, app, "log", "-1", "--format=%s"))
+	if subject != wantSubject {
+		t.Fatalf("commit subject want %q got %q", wantSubject, subject)
+	}
+}
+
 // keep helpers referenced for inheritance compilation
 var (
 	_ = setupMergeBackPipelineLocal
 	_ = setupMergeBackPipelineWithOrigin
 	_ = setupMergeBackPipelineSync
 	_ = setupMergeBackPipelineSyncWithOrigin
+	_ = setupMergeBackPipelinePropagateTagNext
 	_ = joinMajorStages
 	_ = tagNextRootBumpApplyStdout
 	_ = mergeBackPushConfirmLine
@@ -322,6 +635,9 @@ var (
 	_ = assertOriginMainEqualsLocalMain
 	_ = remoteTagExists
 	_ = shortHEAD
+	_ = mbPropStageApplyStdout
+	_ = mbPropDepsBumpSubject
+	_ = mbAssertAppBumpedAndCommitted
 	_ = fmt.Sprintf
 )
 ```

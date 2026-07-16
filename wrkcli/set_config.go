@@ -12,10 +12,10 @@ import (
 
 // set-config is mutually exclusive with these mode / create-flow flags.
 var setConfigDisallowedFlags = []string{
-	"--done", "--merge-back", "-l", "--list", "--status", "--repos", "--projects",
+	"--done", "--merge-back", "-l", "--list", "--status", "--repos", "--projects", "--projects-dep-graph",
 	"--scan-git-repos", "--no-cache",
 	"--fetch", "--add", "--rm", "--where", "--cd", "--main",
-	"--dep", "--bring", "--all-deps", "--tag-next", "--sync", "--dry-run",
+	"--dep", "--bring", "--all-deps", "--tag-next", "--propagate-tags", "--sync", "--dry-run",
 	"-t", "--task", "--set-task",
 	"--exec",
 	"--bash-integration", "--interceptor",
