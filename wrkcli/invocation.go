@@ -73,6 +73,12 @@ func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTa
 	case status:
 		// status wins over main when both set (wrk --main --status)
 		return "status"
+	case done:
+		// Prefer done / merge-back over reinstall-local / tag-next / sync so
+		// composition keeps primary command identity (event "done", not tail).
+		return "done"
+	case mergeBack:
+		return "merge-back"
 	case reinstallLocal:
 		// reinstall-local wins over main when both set (wrk --main --reinstall-local)
 		return "reinstall-local"
@@ -90,12 +96,6 @@ func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTa
 		return "all-deps"
 	case list:
 		return "list"
-	case done:
-		// Prefer done / merge-back over tag-next / sync so composition keeps
-		// primary command identity (event command "done", not "tag-next").
-		return "done"
-	case mergeBack:
-		return "merge-back"
 	case tagNext:
 		return "tag-next"
 	case propagateTags:

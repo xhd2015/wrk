@@ -3,13 +3,14 @@
 **Feature**: `--done` primary accepts composition modifiers at flag layer
 
 ```
-wrk --done [--tag-next|--push|--sync|--dry-run...] from main
+wrk --done [--gen-commit-msg --commit …] [--tag-next|--push|--sync|--reinstall-local|--dry-run...] from main
   -> not mutually exclusive / not only-valid-with-tag-next
 ```
 
 ## Steps
 
-- Leaves under this node always include `--done` plus one or more allowed modifiers.
+- Leaves under this node always include `--done` plus one or more allowed modifiers
+  (post stages and/or P2 `--gen-commit-msg --commit` pre-stage).
 
 ```go
 func Setup(t *testing.T, req *Request) error {

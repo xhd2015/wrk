@@ -1,11 +1,11 @@
 # Scenario
 
-**Feature**: after successful `--done`, optional post steps run in fixed order: sync → tag-next → push → propagate-tags
+**Feature**: after successful `--done`, optional post steps run in fixed order: sync → tag-next → push → propagate-tags → reinstall-local
 
 ```
-# primary --done succeeds (not aborted) then ordered post-pipeline
-linked wt (ahead) [+ optional wtB] [+ bare origin] [+ registered consumer]
-  -> wrk --done -y [--sync] [--tag-next] [--push] [--propagate-tags]
+# primary --done succeeds (not aborted) then ordered post-pipeline + reinstall tail
+linked wt (ahead) [+ optional wtB] [+ bare origin] [+ registered consumer] [+ GOBIN stubs]
+  -> wrk --done -y [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local]
   -> merge-back --rm (message on stdout)
   -> blank line + runSync(main)? when --sync
   -> blank line + tag-next apply on main (local tags)? when --tag-next
@@ -13,6 +13,8 @@ linked wt (ahead) [+ optional wtB] [+ bare origin] [+ registered consumer]
   -> blank line + runPropagateTags(main, WRK_HOME)? when --propagate-tags
        (uses new tags after tag-next, or existing source tags without --tag-next;
         dry-run threads planned next tags into propagate plan)
+  -> blank line + runReinstallLocal(main tip / result.TargetPath)? when --reinstall-local
+       (after post stages; before --exec / land; empty/skip-only plan exits 0)
   -> event command stays "done"
 ```
 
@@ -23,11 +25,12 @@ linked wt (ahead) [+ optional wtB] [+ bare origin] [+ registered consumer]
 - **Real apply** post-pipeline after done (composition dry-run lives under `dry-run/`; merge-back twin under `merge-back-pipeline/`).
 - **P7 propagate leaves** need Go toolchain + offline `file://` module proxy (ExtraEnv) so
   consumer `go mod tidy` / `go build` succeed without network.
-- Locked behavior (docs + GREEN leaves for sync/tag/push; Classic RED for propagate until P7):
-  1. dispatch prefers **done** over bare `runTagNext` / `runPropagateTags` when primary set,
-  2. `runDone` post order: sync → tag-next → push → **propagate-tags**,
+- Locked behavior (docs + GREEN leaves for sync/tag/push/propagate; Classic RED for reinstall tail until P1):
+  1. dispatch prefers **done** over bare `runTagNext` / `runPropagateTags` / reinstall when primary set,
+  2. `runDone` post order: sync → tag-next → push → **propagate-tags** → **reinstall-local** → exec → land,
   3. with `--push`, `runPushMain(..., createdTags)` pushes branch + tags,
-  4. `--propagate-tags` may compose with primary (± `--tag-next`); event stays `"done"`.
+  4. `--propagate-tags` may compose with primary (± `--tag-next`); event stays `"done"`,
+  5. reinstall scans **main tip** after merge (`result.TargetPath`), not the removed worktree.
 
 ## Steps
 

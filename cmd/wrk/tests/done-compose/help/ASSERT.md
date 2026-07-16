@@ -3,17 +3,29 @@
 - Exit code 0.
 - Help text (stdout and/or stderr) documents composition for finish modes:
   - The **`--done`** flag synopsis line includes optional **`--tag-next`** and **`--push`**
-    (and still documents optional **`--sync`**).
-  - The **`--merge-back`** flag synopsis line similarly includes optional **`--tag-next`**
-    and **`--push`** (composition parity with `--done`).
+    (and still documents optional **`--sync`**), plus **`--reinstall-local`** (P1 tail),
+    and **`--gen-commit-msg`** (P2 pre-stage).
+  - The **`--merge-back`** flag synopsis line similarly includes optional **`--tag-next`**,
+    **`--push`**, **`--reinstall-local`**, and **`--gen-commit-msg`** (composition parity).
+  - **`--gen-commit-msg`** definition (or nearby window) documents pre-stage use with
+    `--done` / `--merge-back` and/or that **`--commit`** is required when composed with primary.
+  - **`--reinstall-local`** flag docs mention validity after successful primary
+    (`--done` / `--merge-back`) and still document bare / `--main` use.
   - **`--push`** is not documented only as “with `--tag-next`”: help must also indicate
     validity with a primary (`--done` and/or `--merge-back`).
   - Help must **not** claim that `--tag-next` is mutually exclusive with `--done`.
   - **`--json`** remains tagged as for bare `--tag-next` (not a primary composition flag);
     help must not claim `--json` is valid with `--done`.
 - Prefer implementer wording (soft, not asserted verbatim):
-  - `--done [--sync] [--tag-next] [--push] [--dry-run] …`
+  - `--done [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] …`
+  - `--gen-commit-msg`: also as pre-stage before `--done` / `--merge-back` (requires `--commit`)
+  - `--reinstall-local` also: after successful `--done` / `--merge-back`
   - `--push` dual meaning: tags with `--tag-next`; branch (and tags when combined) with primary.
+- **P3 fluent recipes** (soft preference for `usage()` / SKILL examples; hard asserts stay flag-list based above):
+  - `wrk --done --sync --tag-next --push -y`
+  - `wrk --done --sync --tag-next --push --reinstall-local -y`
+  - `wrk --gen-commit-msg --commit --model=M --done --sync --tag-next --push -y`
+  - Pre requires `--commit`; reinstall after primary from main.
 
 ## Side Effects
 
@@ -39,26 +51,69 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatal("expected non-empty help text")
 	}
 
-	// --done synopsis must list composition post-modifiers on the same flag line.
+	// --done synopsis must list composition pre/post-modifiers on the same flag line.
 	doneLine := firstFlagLine(help, "--done")
 	if doneLine == "" {
 		t.Fatalf("help must document --done; got %q", help)
 	}
-	for _, flag := range []string{"--sync", "--tag-next", "--push"} {
+	for _, flag := range []string{"--sync", "--tag-next", "--push", "--reinstall-local", "--gen-commit-msg"} {
 		if !strings.Contains(doneLine, flag) {
 			t.Fatalf("--done help line must mention optional %s for composition; line=%q\nfull help:\n%s", flag, doneLine, help)
 		}
 	}
 
-	// --merge-back synopsis parity (same post-modifier composition).
+	// --merge-back synopsis parity (same pre/post-modifier composition).
 	mergeLine := firstFlagLine(help, "--merge-back")
 	if mergeLine == "" {
 		t.Fatalf("help must document --merge-back; got %q", help)
 	}
-	for _, flag := range []string{"--tag-next", "--push"} {
+	for _, flag := range []string{"--tag-next", "--push", "--reinstall-local", "--gen-commit-msg"} {
 		if !strings.Contains(mergeLine, flag) {
 			t.Fatalf("--merge-back help line must mention optional %s for composition; line=%q\nfull help:\n%s", flag, mergeLine, help)
 		}
+	}
+
+	// --gen-commit-msg documents pre-stage with primary (and preferably --commit when composed).
+	genLine := firstFlagLine(help, "--gen-commit-msg")
+	if genLine == "" {
+		t.Fatalf("help must document --gen-commit-msg; got %q", help)
+	}
+	genWindow := genLine
+	if idx := strings.Index(help, genLine); idx >= 0 {
+		end := idx + 600
+		if end > len(help) {
+			end = len(help)
+		}
+		genWindow = help[idx:end]
+	}
+	if !strings.Contains(genWindow, "--done") && !strings.Contains(genWindow, "--merge-back") {
+		// Accept either gen-commit definition mentioning primary, or done/merge synopsis
+		// already requiring --gen-commit-msg (asserted above) plus a nearby "pre"/"commit" hint.
+		if !strings.Contains(doneLine, "--gen-commit-msg") {
+			t.Fatalf("--gen-commit-msg help should document pre-stage with --done/--merge-back; window=%q\nfull help:\n%s",
+				genWindow, help)
+		}
+	}
+
+	// --reinstall-local documents primary compose (after done/merge-back).
+	// Done/merge-back synopsis lines already require the flag; also require the
+	// reinstall definition (or nearby description) to mention a primary mode.
+	reinstallLine := firstFlagLine(help, "--reinstall-local")
+	if reinstallLine == "" {
+		t.Fatalf("help must document --reinstall-local; got %q", help)
+	}
+	reinstallWindow := reinstallLine
+	if idx := strings.Index(help, reinstallLine); idx >= 0 {
+		end := idx + 500
+		if end > len(help) {
+			end = len(help)
+		}
+		reinstallWindow = help[idx:end]
+	}
+	if !strings.Contains(reinstallWindow, "--done") &&
+		!strings.Contains(reinstallWindow, "--merge-back") {
+		t.Fatalf("--reinstall-local help should document validity after --done/--merge-back; window=%q\nfull help:\n%s",
+			reinstallWindow, help)
 	}
 
 	// --push dual meaning: not only "with --tag-next".

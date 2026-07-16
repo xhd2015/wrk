@@ -318,7 +318,7 @@ wrk tests
 │   ├── flag-order-full/          # --push --tag-next --sync --merge-back -y same as full combo
 │   └── dry-run/                  # composition dry-run (zero mutations, no prompts)
 │       └── tag-next/             # --merge-back --tag-next --dry-run → keep wt; tag planned
-├── done-compose/                 # flag matrix: primary + post modifiers (+ propagate-tags P7)
+├── done-compose/                 # flag matrix: primary + pre gen-commit (P2) + post modifiers
 │   ├── allow/                    # flag layer accepts composition (not exclusive with primary)
 │   │   ├── done/
 │   │   │   ├── with-tag-next/    # --done --tag-next allowed (not mutually exclusive)
@@ -326,16 +326,23 @@ wrk tests
 │   │   │   ├── with-sync-tag-next-push/ # multi-modifier combo accepted
 │   │   │   ├── with-dry-run/     # --done --dry-run allowed (composition host)
 │   │   │   ├── with-propagate-tags/ # P7: --done --propagate-tags allowed
-│   │   │   └── with-tag-next-propagate/ # P7: --done --tag-next --propagate-tags allowed
+│   │   │   ├── with-tag-next-propagate/ # P7: --done --tag-next --propagate-tags allowed
+│   │   │   ├── with-gen-commit-msg/ # P2: --gen-commit-msg --commit --done allowed
+│   │   │   └── with-gen-commit-msg-sync-tag-next-push/ # P2 pre + posts
 │   │   └── merge-back/
 │   │       ├── with-tag-next/    # --merge-back --tag-next allowed
-│   │       └── with-propagate-tags/ # P7: --merge-back --propagate-tags allowed
+│   │       ├── with-propagate-tags/ # P7: --merge-back --propagate-tags allowed
+│   │       └── with-gen-commit-msg/ # P2: --gen-commit-msg --commit --merge-back
 │   ├── reject/                   # illegal combos
 │   │   ├── done-with-json/       # --done --json rejected (json only with bare tag-next)
-│   │   └── merge-back-with-json/ # --merge-back --json rejected
+│   │   ├── merge-back-with-json/ # --merge-back --json rejected
+│   │   ├── gen-commit-msg-done-without-commit/ # P2: missing --commit with primary
+│   │   ├── gen-commit-msg-model-done-without-commit/
+│   │   └── gen-commit-msg-dir-with-done/ # composed --dir rejected
 │   ├── still-exclusive/
-│   │   └── tag-next-with-list/   # --tag-next --list remains exclusive (non-composed modes)
-│   └── help/                     # wrk --help documents composition (P7 smoke; RED if usage stale)
+│   │   ├── tag-next-with-list/   # --tag-next --list remains exclusive
+│   │   └── gen-commit-msg-with-sync/ # bare --gen-commit-msg --sync exclusive
+│   └── help/                     # wrk --help documents gen-commit pre + post composition
 ├── list/                         # wrk --list (git worktree list wrapper)
 │   ├── main-only/                # single main checkout, no linked worktrees
 │   ├── with-linked/              # main + one linked worktree
@@ -863,7 +870,14 @@ wrk tests
 | 68m | done-compose/reject/merge-back-with-json | `--merge-back --json` → non-zero; names both |
 | 68n | *(retired)* done-compose/reject/bare-push | bare `--push` is standalone — see `push/` |
 | 68o | done-compose/still-exclusive/tag-next-with-list | `--tag-next --list` still mutually exclusive |
-| 68o2 | done-compose/help | `wrk --help` → exit 0; `--done`/`--merge-back` list optional `--tag-next`/`--push`; `--push` dual meaning (not only tag-next); no tag-next exclusive-with-done claim |
+| 68o2 | done-compose/help | `wrk --help` → exit 0; `--done`/`--merge-back` list optional `--tag-next`/`--push`/`--gen-commit-msg`; `--push` dual meaning (not only tag-next); no tag-next exclusive-with-done claim |
+| 68o3 | done-compose/allow/done/with-gen-commit-msg | P2: `--gen-commit-msg --commit --model=m --done` not mutually exclusive (Classic RED) |
+| 68o4 | done-compose/allow/done/with-gen-commit-msg-sync-tag-next-push | P2: gen-commit pre + posts flag layer accepts (Classic RED) |
+| 68o5 | done-compose/allow/merge-back/with-gen-commit-msg | P2: `--gen-commit-msg --commit --merge-back` not mutually exclusive (Classic RED) |
+| 68o6 | done-compose/reject/gen-commit-msg-done-without-commit | P2: missing `--commit` with primary → require-commit error (Classic RED) |
+| 68o7 | done-compose/reject/gen-commit-msg-model-done-without-commit | P2: `--model` without `--commit` + primary rejected (Classic RED) |
+| 68o8 | done-compose/reject/gen-commit-msg-dir-with-done | P2: composed `--dir` with primary rejected (Classic RED) |
+| 68o9 | done-compose/still-exclusive/gen-commit-msg-with-sync | bare `--gen-commit-msg --sync` still exclusive (GREEN pin) |
 | 68p | done-push/pushes-main | `--done -y --push`: origin/main == post-merge main HEAD; push confirmation line |
 | 68q | done-push/flag-order-push-first | `--push --done -y` same composition as `--done -y --push` |
 | 68r | done-push/no-remote | `--done -y --push` without origin → non-zero; stderr mentions remote |
@@ -876,6 +890,7 @@ wrk tests
 | 68w3 | done-pipeline/propagate-existing | P7: `--done -y --propagate-tags` on existing tags; event done |
 | 68x | done-pipeline/flag-order-full | `--push --tag-next --sync --done -y` same as full combo |
 | 68y | done-pipeline/dry-run/alone | `--done --dry-run`: MergeBack plan only; zero mutations; no post stages |
+| 68y2 | done-pipeline/dry-run/with-gen-commit-msg | P2: gen-commit dry plan + done dry plan; HEAD/subject unchanged (Classic RED) |
 | 68z | done-pipeline/dry-run/full-combo | `--done --sync --tag-next --push --dry-run`: full plan; zero mutations; no `-y` |
 | 68z2 | done-pipeline/dry-run/tag-next-propagate | P7: dry-run plans tag + would-propagate; zero mutations |
 | 68za | done-pipeline/dry-run/cascade-external | cascade `would: cascade merge-back`; external still present |

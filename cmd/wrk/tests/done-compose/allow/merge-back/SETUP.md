@@ -3,13 +3,14 @@
 **Feature**: `--merge-back` primary accepts composition modifiers at flag layer
 
 ```
-wrk --merge-back [--tag-next|…] from main
+wrk --merge-back [--gen-commit-msg --commit …] [--tag-next|…] from main
   -> not mutually exclusive with allowed modifiers
 ```
 
 ## Steps
 
-- Leaves under this node always include `--merge-back` plus allowed modifiers.
+- Leaves under this node always include `--merge-back` plus allowed modifiers
+  (including P2 `--gen-commit-msg --commit` pre-stage).
 
 ```go
 func Setup(t *testing.T, req *Request) error {

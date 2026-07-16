@@ -1,16 +1,23 @@
 # wrk --gen-commit-msg — CLI wire to agent-pro commit_msg
 
 ## Version
-0.0.3
+0.0.4
 
 Decision tree for `wrk --gen-commit-msg`: top-level wrk mode that forwards to
 `github.com/xhd2015/agent-pro/agent/commit_msg.RunGenCommitMsg`. Coverage backfill
 for offline dry-run plan paths and non–dry-run generate/commit via fake-opencode.
 
+**P2 primary compose** (pre-stage before `--done` / `--merge-back`) lives primarily in
+monotree flag matrix `cmd/wrk/tests/done-compose/` and pipeline dry-run
+`cmd/wrk/tests/done-pipeline/dry-run/with-gen-commit-msg/`. This tree keeps bare-mode
+mutex pins (`--status`, bare `--sync`) and standalone generate/commit/dry-run.
+
 # DSN (Domain Specific Notion)
 
-- **wrk CLI** — session-built binary; `--gen-commit-msg` is a standalone mode
-  mutually exclusive with other wrk modes (`--status`, `--list`, create, etc.).
+- **wrk CLI** — session-built binary; bare `--gen-commit-msg` is a standalone mode
+  mutually exclusive with other wrk modes (`--status`, bare `--sync`, `--list`, create, etc.).
+  **P2**: with `--commit` it may compose as a **pre-stage** before `--done` / `--merge-back`
+  (coverage under `done-compose/` + `done-pipeline/dry-run/with-gen-commit-msg/`).
 - **Library path** — wrk imports only `agent/commit_msg` and calls
   `RunGenCommitMsg` with remaining gen-commit-msg flags (`--model`, `--dry-run`,
   `--commit`, `--no-verify`, `--agent-runner`, `--agent-runner-binary`, …).
@@ -57,7 +64,8 @@ gen-commit-msg/
 │   ├── succeeds/                      # --commit; HEAD subject = mock title
 │   └── no-verify/                     # failing pre-commit + --commit --no-verify → succeeds
 ├── mutual-exclusion/
-│   └── with-status/                   # --gen-commit-msg --status → mutex error
+│   ├── with-status/                   # --gen-commit-msg --status → mutex error
+│   └── with-sync/                     # bare --gen-commit-msg --sync → mutex (no primary)
 └── validation/
     ├── no-verify-requires-commit/     # --no-verify without --commit → error
     └── unknown-agent-runner/          # --agent-runner codex → unsupported
@@ -77,6 +85,7 @@ gen-commit-msg/
 | C1 | commit/succeeds | `--commit` + fake-opencode → HEAD subject `feat: add feature` |
 | C2 | commit/no-verify | failing pre-commit + `--commit --no-verify` → subject `feat: skip hooks` |
 | M1 | mutual-exclusion/with-status | `--gen-commit-msg --status` → non-zero; mutually exclusive |
+| M2 | mutual-exclusion/with-sync | bare `--gen-commit-msg --sync` → non-zero; mutually exclusive (GREEN pin) |
 | V1 | validation/no-verify-requires-commit | `--no-verify` alone → non-zero; requires --commit |
 | V2 | validation/unknown-agent-runner | `--dry-run --agent-runner codex` → unsupported runner |
 
@@ -92,9 +101,14 @@ doctest test -v ./cmd/wrk/tests/gen-commit-msg/generate/succeeds
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/commit/succeeds
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/commit/no-verify
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/mutual-exclusion/with-status
+doctest test -v ./cmd/wrk/tests/gen-commit-msg/mutual-exclusion/with-sync
+# P2 primary compose (flag + pipeline) — separate monotree roots:
+doctest test -v ./cmd/wrk/tests/done-compose
+doctest test -v ./cmd/wrk/tests/done-pipeline/dry-run/with-gen-commit-msg
 ```
 
-Expect **GREEN** for all leaves (dry-run + fake-opencode generate/commit; no live LLM).
+Expect **GREEN** for standalone leaves (dry-run + fake-opencode generate/commit; no live LLM).
+P2 compose allow/reject/help/dry-run leaves under monotree expect **RED** until implemented.
 
 ```go
 import (

@@ -5,10 +5,13 @@ import (
 	"strings"
 
 	"github.com/xhd2015/agent-pro/agent/commit_msg"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 )
 
 // genCommitMsgDisallowedFlags are wrk mode / create-flow flags that cannot
-// appear with --gen-commit-msg (library-owned flags like --dry-run are allowed).
+// appear with bare --gen-commit-msg (library-owned flags like --dry-run are allowed).
+// When composed with --done / --merge-back, those primaries are peeled as pre-stage
+// partners instead of hitting this exclusive path.
 var genCommitMsgDisallowedFlags = []string{
 	"--done", "--merge-back", "-l", "--list", "--status", "--repos", "--projects",
 	"--projects-dep-graph",
@@ -31,7 +34,127 @@ var genCommitMsgDisallowedFlags = []string{
 	"--color", "-v", "--verbose",
 }
 
-// runGenCommitMsg handles wrk --gen-commit-msg [...].
+// genCommitMsgValueFlags are library flags that take a value (separate arg or =form).
+// --dry-run is intentionally not peeled: it is a shared wrk primary modifier.
+var genCommitMsgValueFlags = map[string]struct{}{
+	"--dir":                  {},
+	"--model":                {},
+	"--agent-runner":         {},
+	"--agent-runner-binary":  {},
+}
+
+// genCommitMsgBoolFlags are library bool flags peeled when composing with a primary.
+var genCommitMsgBoolFlags = map[string]struct{}{
+	"--commit":    {},
+	"--no-verify": {},
+}
+
+// peelGenCommitMsgForCompose removes --gen-commit-msg and its library-owned flags
+// from args so lessflags can parse the remaining wrk primary/post flags.
+// Returned genArgs do not include the --gen-commit-msg token itself.
+func peelGenCommitMsgForCompose(args []string) (has bool, genArgs []string, rest []string) {
+	rest = make([]string, 0, len(args))
+	skipNext := false
+	for i := 0; i < len(args); i++ {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		arg := args[i]
+		name := arg
+		if j := strings.IndexByte(arg, '='); j >= 0 {
+			name = arg[:j]
+		}
+
+		if name == "--gen-commit-msg" {
+			has = true
+			continue
+		}
+		if _, ok := genCommitMsgBoolFlags[name]; ok {
+			genArgs = append(genArgs, arg)
+			continue
+		}
+		if _, ok := genCommitMsgValueFlags[name]; ok {
+			if strings.Contains(arg, "=") {
+				genArgs = append(genArgs, arg)
+				continue
+			}
+			genArgs = append(genArgs, arg)
+			if i+1 < len(args) {
+				genArgs = append(genArgs, args[i+1])
+				skipNext = true
+			}
+			continue
+		}
+		rest = append(rest, arg)
+	}
+	return has, genArgs, rest
+}
+
+func genArgsHasFlag(genArgs []string, flag string) bool {
+	for _, a := range genArgs {
+		name := a
+		if j := strings.IndexByte(a, '='); j >= 0 {
+			name = a[:j]
+		}
+		if name == flag {
+			return true
+		}
+	}
+	return false
+}
+
+// runGenCommitMsgPreStage runs library gen-commit-msg on the source worktree
+// before --done / --merge-back. Requires --commit; rejects composed --dir
+// (wrk workDir wins). Forwards peeled library flags and --dry-run when set.
+func runGenCommitMsgPreStage(workDir string, enabled bool, genArgs []string, dryRun bool, primaryFlag string) error {
+	if !enabled {
+		return nil
+	}
+	if !genArgsHasFlag(genArgs, "--commit") {
+		return fmt.Errorf("wrk: --commit is required with --gen-commit-msg when used with %s", primaryFlag)
+	}
+	if genArgsHasFlag(genArgs, "--dir") {
+		return fmt.Errorf("wrk: --dir is not valid with --gen-commit-msg when used with %s", primaryFlag)
+	}
+
+	forwarded := make([]string, 0, len(genArgs)+3)
+	forwarded = append(forwarded, genArgs...)
+	// Pin to primary workDir; user --dir was rejected above.
+	forwarded = append(forwarded, "--dir", workDir)
+	if dryRun {
+		forwarded = append(forwarded, "--dry-run")
+	}
+	return commit_msg.RunGenCommitMsg(forwarded)
+}
+
+// withStashedStagedForDryPlan temporarily stashes only the index (staged
+// changes) so MergeBack --rm dry-run can plan as if --gen-commit-msg --commit
+// had already created a clean tree. Restores the staged set afterward (zero
+// permanent mutation). Unstaged dirt is left in place so MergeBack still fails
+// when a real commit would leave the worktree dirty.
+func withStashedStagedForDryPlan(workDir string, fn func() error) error {
+	if err := worktree.IsClean(workDir); err == nil {
+		return fn()
+	}
+	// Stash staged only (git ≥2.35 --staged). Quiet message avoids noisy stdout.
+	if err := gitRunDir(workDir, "stash", "push", "--staged", "-m", "wrk-gen-commit-msg-dry-run"); err != nil {
+		// No staged changes to stash (or older git): run as-is; MergeBack may fail dirty.
+		return fn()
+	}
+	fnErr := fn()
+	// Always try to restore staged set for zero-mutation dry-run contract.
+	popOut, popErr := gitCombinedRunDir(workDir, nil, "stash", "pop")
+	if fnErr != nil {
+		return fnErr
+	}
+	if popErr != nil {
+		return fmt.Errorf("wrk: restore staged after gen-commit dry plan: %w\n%s", popErr, string(popOut))
+	}
+	return nil
+}
+
+// runGenCommitMsg handles bare wrk --gen-commit-msg [...] (no primary).
 // Remaining flags are forwarded to agent-pro commit_msg.RunGenCommitMsg.
 func runGenCommitMsg(args []string, ctx *invocationContext) error {
 	for _, arg := range args {

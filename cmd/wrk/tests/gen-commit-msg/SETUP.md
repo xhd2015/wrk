@@ -25,11 +25,15 @@ staged + FAKE_OPENCODE_MOCK_CONFIG + --agent-runner-binary <fake-opencode>
   -> stdout: parsed title + description
   -> optional --commit / --commit --no-verify
 
-# validation / mutex
+# validation / mutex (bare mode — no primary)
 wrk --gen-commit-msg --status              -> mutually exclusive
+wrk --gen-commit-msg --sync                -> mutually exclusive (no primary)
 wrk --gen-commit-msg --no-verify           -> requires --commit
 wrk --gen-commit-msg --dry-run --agent-runner codex
   -> unsupported agent runner
+
+# P2 primary compose is under monotree done-compose/ + done-pipeline/dry-run/
+# (not this nested root): --gen-commit-msg --commit --done|… 
 ```
 
 ## Preconditions

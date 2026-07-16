@@ -103,11 +103,19 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		}
 		return fmt.Errorf("wrk: --version is mutually exclusive with other modes")
 	}
+	// Bare --gen-commit-msg (no primary): exclusive early path.
+	// With --done / --merge-back: peel library flags and run as pre-stage later.
+	var genCommitMsg bool
+	var genCommitArgs []string
+	parseArgs := args
 	if hasArg(args, "--gen-commit-msg") {
-		return runGenCommitMsg(args, ctx)
+		if !hasArg(args, "--done") && !hasArg(args, "--merge-back") {
+			return runGenCommitMsg(args, ctx)
+		}
+		genCommitMsg, genCommitArgs, parseArgs = peelGenCommitMsgForCompose(args)
 	}
 
-	if err := validateWhereFlagArg(args); err != nil {
+	if err := validateWhereFlagArg(parseArgs); err != nil {
 		return err
 	}
 
@@ -211,7 +219,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		Cut("--exec", &execArgs).
 		Help("-h,--help", usage()).
 		HelpNoExit().
-		Parse(args)
+		Parse(parseArgs)
 	if err != nil {
 		if errors.Is(err, lessflags.ErrHelp) {
 			// Help text already printed by Parse; exit 0.
@@ -397,15 +405,20 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	// --sync takes no positionals when used alone. It may compose with --done /
 	// --merge-back (post-success pipeline); those modes may take a source dir.
-	// With a primary, --sync may also compose with --tag-next / --push / --propagate-tags / --dry-run.
+	// With a primary, --sync may also compose with --tag-next / --push / --propagate-tags /
+	// --reinstall-local / --dry-run.
 	// Prefer mode-clash errors over unexpected args when combined with other modes
 	// (checked later alongside tag-next family).
 	if syncFlag {
 		// done and mergeBack are intentionally excluded so composition is allowed.
+		// reinstallLocal is a post-success tail only with a primary (not otherMode then).
 		otherMode := list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" ||
-			allDeps || reinstallLocal || jsonFlag || taskFlagSet || setTaskFlagSet ||
+			allDeps || jsonFlag || taskFlagSet || setTaskFlagSet ||
 			cd || mainFlag || fetchFlag || spawnTarget != ""
+		if reinstallLocal && !done && !mergeBack {
+			otherMode = true
+		}
 		// tag-next / push / propagate-tags compose with --sync only when a primary is present.
 		if (tagNext || pushFlag || propagateTags) && !done && !mergeBack {
 			otherMode = true
@@ -526,7 +539,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if allDeps {
 			return fmt.Errorf("wrk: --exec is not valid with --all-deps")
 		}
-		if reinstallLocal {
+		// --exec is valid with --done --reinstall-local (reinstall then exec); bare reinstall+exec is not.
+		if reinstallLocal && !done {
 			return fmt.Errorf("wrk: --exec is not valid with --reinstall-local")
 		}
 		if tagNext {
@@ -626,24 +640,37 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if allDeps && (depPath != "" || bringPath != "" || done || list || mergeBack || tagNext || propagateTags || syncFlag || cd || mainFlag || reinstallLocal) {
 		return fmt.Errorf("wrk: --all-deps is mutually exclusive with --dep, --bring, --done, --merge-back and --list")
 	}
-	// --reinstall-local is exclusive with other modes except --main (and dry-run modifier).
+	// --reinstall-local is exclusive with other modes except:
+	//   - --main (and dry-run modifier), and
+	//   - post-success tail after --done / --merge-back (then also with post stages + dry-run
+	//     and done modifiers such as confirm-from-stdin / no-in-module-replace / no-cd / force-cd).
 	if reinstallLocal {
-		otherMode := done || list || mergeBack || status || repos || projects || projectsDepGraph ||
+		otherMode := list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" ||
-			allDeps || tagNext || propagateTags || syncFlag || cd || taskFlagSet || setTaskFlagSet ||
-			spawnTarget != "" || pushFlag || jsonFlag || confirmFromStdin || noInModuleReplace ||
-			fetchFlag || noCd || forceCd
+			allDeps || cd || taskFlagSet || setTaskFlagSet ||
+			spawnTarget != "" || jsonFlag || fetchFlag
+		if done || mergeBack {
+			// Primary compose: post stages and done modifiers are allowed.
+			// merge-back has no exec/land modifiers noCd/forceCd beyond what's already gated.
+		} else {
+			// Bare / --main reinstall: exclusive with post stages and primary-only modifiers.
+			otherMode = otherMode || tagNext || propagateTags || syncFlag || pushFlag ||
+				confirmFromStdin || noInModuleReplace || noCd || forceCd
+		}
 		if otherMode {
 			return fmt.Errorf("wrk: --reinstall-local is mutually exclusive with other modes")
 		}
 	}
 	// --tag-next may compose with --done / --merge-back (and then with --sync / --push /
-	// --propagate-tags / --dry-run), and with bare --propagate-tags (tag-then-propagate).
+	// --propagate-tags / --reinstall-local / --dry-run), and with bare --propagate-tags (tag-then-propagate).
 	// Without those it remains exclusive with other command modes.
 	if tagNext {
-		otherMode := depPath != "" || bringPath != "" || list || allDeps || reinstallLocal || cd || mainFlag ||
+		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != ""
+		if reinstallLocal && !done && !mergeBack {
+			otherMode = true
+		}
 		if !done && !mergeBack {
 			// bare --tag-next: still exclusive with --sync (composition needs a primary)
 			otherMode = otherMode || syncFlag
@@ -654,13 +681,16 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	}
 	// --propagate-tags may compose with:
 	//   - bare --tag-next (and then --push / --dry-run), or
-	//   - primary --done / --merge-back (post-pipeline; ± sync / tag-next / push / dry-run).
+	//   - primary --done / --merge-back (post-pipeline; ± sync / tag-next / push / reinstall / dry-run).
 	// Still exclusive with list/status/repos and other modes. Bare propagate+sync needs primary.
 	// --json is rejected separately so the error names both flags.
 	if propagateTags {
-		otherMode := depPath != "" || bringPath != "" || list || allDeps || reinstallLocal || cd || mainFlag ||
+		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != ""
+		if reinstallLocal && !done && !mergeBack {
+			otherMode = true
+		}
 		if !done && !mergeBack {
 			// bare --propagate-tags: exclusive with --sync (needs primary for that combo)
 			otherMode = otherMode || syncFlag
@@ -674,11 +704,14 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		}
 	}
 	// --sync may compose with --done / --merge-back (and then with --tag-next / --push /
-	// --propagate-tags); still exclusive with other modes and with --json.
+	// --propagate-tags / --reinstall-local); still exclusive with other modes and with --json.
 	if syncFlag {
-		otherMode := depPath != "" || bringPath != "" || list || allDeps || reinstallLocal || cd || mainFlag ||
+		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != "" || jsonFlag
+		if reinstallLocal && !done && !mergeBack {
+			otherMode = true
+		}
 		if !done && !mergeBack {
 			otherMode = otherMode || tagNext || pushFlag || propagateTags
 		}
@@ -757,8 +790,9 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		}
 		return runStatus(statusRoot, workDir, colorEnabled, fetchFlag)
 	}
-	// --reinstall-local before bare --main so compose does not open a nested shell.
-	if reinstallLocal {
+	// Bare / --main --reinstall-local before bare --main so compose does not open a nested shell.
+	// With --done / --merge-back, reinstall is a post-success tail on the primary path.
+	if reinstallLocal && !done && !mergeBack {
 		return runReinstallLocal(workDir, dryRun, mainFlag)
 	}
 	if mainFlag {
@@ -783,12 +817,28 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runList(workDir)
 	}
 	// Prefer done / merge-back over bare tag-next / propagate / sync so composition
-	// runs the primary path (post-pipeline: sync → tag-next → push → propagate-tags).
+	// runs the primary path (post-pipeline: sync → tag-next → push → propagate-tags → reinstall-local).
+	// Optional pre-stage: --gen-commit-msg --commit … on the source worktree.
 	if done {
-		return runDone(workDir, wrkHome, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, propagateTags, dryRun)
+		if err := runGenCommitMsgPreStage(workDir, genCommitMsg, genCommitArgs, dryRun, "--done"); err != nil {
+			return err
+		}
+		runPrimary := func() error {
+			return runDone(workDir, wrkHome, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun)
+		}
+		// Dry-run gen-commit pre would commit staged dirt; MergeBack --rm still
+		// requires a clean tree today. Stash staged only for the dry plan, then restore.
+		if dryRun && genCommitMsg {
+			return withStashedStagedForDryPlan(workDir, runPrimary)
+		}
+		return runPrimary()
 	}
 	if mergeBack {
-		return runMergeBack(workDir, wrkHome, confirmFromStdin, assumeYes, syncFlag, tagNext, pushFlag, propagateTags, dryRun)
+		if err := runGenCommitMsgPreStage(workDir, genCommitMsg, genCommitArgs, dryRun, "--merge-back"); err != nil {
+			return err
+		}
+		// merge-back keeps the worktree (Remove=false); dirty is allowed by MergeBack.
+		return runMergeBack(workDir, wrkHome, confirmFromStdin, assumeYes, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun)
 	}
 	// Bare compose: --tag-next --propagate-tags [--push] [--dry-run].
 	// Fixed stage order tag-next → push? → propagate-tags.
@@ -875,12 +925,12 @@ Positional arguments:
                    - missing parent            -> error
 
 Flags:
-  --done [--sync] [--tag-next] [--push] [--propagate-tags] [--dry-run] [--confirm-from-stdin]
+  --done [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm-from-stdin]
                                   merge worktree branch back and remove it
-                                  (optional post-success: --sync, --tag-next, --push, --propagate-tags from main)
-  --merge-back [--sync] [--tag-next] [--push] [--propagate-tags] [--dry-run] [--confirm-from-stdin]
+                                  (optional pre: --gen-commit-msg --commit … on worktree; optional post-success: --sync, --tag-next, --push, --propagate-tags, --reinstall-local from main)
+  --merge-back [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm-from-stdin]
                                   merge worktree branch back WITHOUT removing it
-                                  (optional post-success: --sync, --tag-next, --push, --propagate-tags from main)
+                                  (optional pre: --gen-commit-msg --commit … on worktree; optional post-success: --sync, --tag-next, --push, --propagate-tags, --reinstall-local from main)
   --done --no-in-module-replace   block --done on ANY local replace (strict)
   --list                          list worktrees (git worktree list)
   --status                        show status for git repos under this checkout
@@ -902,7 +952,8 @@ Flags:
   --bring <path>                  like --dep, but soft-skip go.mod replace when not a module dep
   --all-deps                      link every required dep from registered projects
   --reinstall-local [--dry-run]   reinstall local module binaries already in GOBIN/GOPATH/bin
-                                  (with --main: scan main repository modules for this checkout)
+                                  (with --main: scan main repository modules for this checkout;
+                                   also: after successful --done / --merge-back, scan main tip)
   --tag-next [--dry-run] [--push] [--json]  plan/apply per-scope release tags
                                   (also: after successful --done / --merge-back; --json only bare)
                                   (also: with --propagate-tags: tag then bump consumers)
@@ -934,7 +985,9 @@ Flags:
   --exec <cmd> [args...]          after success, run command in the mode target directory
   --gen-commit-msg [--dir DIR] [--model MODEL] [--agent-runner RUNNER]
                   [--agent-runner-binary PATH] [--commit] [--no-verify] [--dry-run]
-                                  generate a commit message for staged changes (AI)
+                                  generate a commit message for staged changes (AI);
+                                  also: pre-stage before --done / --merge-back (requires --commit;
+                                  --dir not valid when composed with primary)
   --web                           start local web UI (React SPA + API on 127.0.0.1)
   --port PORT                     listen port for --web only (default: free port from 8080)
   --dev                           with --web: proxy UI to Vite (wrk-react/) for HMR
@@ -1166,7 +1219,7 @@ func runList(workDir string) error {
 	return nil
 }
 
-func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync, withTagNext, withPush, withPropagateTags, dryRun bool) error {
+func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool) error {
 	// Shell process cwd (inherited from interactive shell), not merely workDir.
 	// Used after remove to decide whether auto-cd is needed.
 	shellCwd, _ := os.Getwd()
@@ -1235,13 +1288,19 @@ func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleRep
 	if result.Action == "aborted" {
 		return nil
 	}
-	// Post-pipeline: sync → tag-next → push → propagate-tags → exec → land.
+	// Post-pipeline: sync → tag-next → push → propagate-tags → reinstall-local → exec → land.
 	// Dry-run: still print post stages in dry mode; skip exec/land.
 	// Real success: apply post stages then exec/land.
 	if dryRun {
-		return runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, withPropagateTags, true)
+		if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, withPropagateTags, true); err != nil {
+			return err
+		}
+		return runComposeReinstallLocal(result, withReinstallLocal, true)
 	}
 	if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, withPropagateTags, false); err != nil {
+		return err
+	}
+	if err := runComposeReinstallLocal(result, withReinstallLocal, false); err != nil {
 		return err
 	}
 	if err := runExecInDir(result.TargetPath, execArgs); err != nil {
@@ -1257,7 +1316,7 @@ func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleRep
 	return nil
 }
 
-func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync, withTagNext, withPush, withPropagateTags, dryRun bool) error {
+func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -1294,7 +1353,27 @@ func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync
 		return nil
 	}
 	// Post-pipeline same order as runDone (no exec/land). Worktree kept.
-	return runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, withPropagateTags, dryRun)
+	if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, withPropagateTags, dryRun); err != nil {
+		return err
+	}
+	return runComposeReinstallLocal(result, withReinstallLocal, dryRun)
+}
+
+// runComposeReinstallLocal runs the optional post-merge reinstall tail from main
+// (result.TargetPath). useMain=true so the scan is main-repo modules after merge,
+// not a removed worktree. Blank line before the stage when other stages may have
+// printed. Empty / skip-only plans exit 0 (do not fail the ship).
+func runComposeReinstallLocal(result *worktree.MergeBackResult, withReinstallLocal, dryRun bool) error {
+	if !withReinstallLocal {
+		return nil
+	}
+	mainPath := result.TargetPath
+	if mainPath == "" {
+		return fmt.Errorf("wrk: merge-back result missing target path")
+	}
+	fmt.Println() // blank line before reinstall stage
+	// Scan main tip after merge (useMain equivalent from main path).
+	return runReinstallLocal(mainPath, dryRun, true)
 }
 
 // runComposePostStages runs optional post-merge stages in fixed order:

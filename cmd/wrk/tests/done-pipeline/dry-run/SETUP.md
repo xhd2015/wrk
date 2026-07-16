@@ -1,28 +1,34 @@
 # Scenario
 
-**Feature**: composition `--dry-run` for `--done` plans primary (+ cascade + post stages) with zero mutations and no prompts
+**Feature**: composition `--dry-run` for `--done` plans optional gen-commit pre + primary (+ cascade + post stages + reinstall tail) with zero mutations and no prompts
 
 ```
-# P5: dry-run plans the full requested pipeline; never mutates refs / worktrees / remotes
-linked wt (ahead) [+ cascade] [+ origin] [+ post flags]
-  -> wrk --done --dry-run [--sync] [--tag-next] [--push]
+# P5 + P1 reinstall tail + P2 gen-commit pre: dry-run plans the full requested pipeline;
+# never mutates refs / worktrees / remotes / GOBIN / HEAD subject
+linked wt (ahead) [+ staged for gen-commit] [+ cascade] [+ origin] [+ post flags] [+ GOBIN stubs]
+  -> wrk [--gen-commit-msg --commit] --done --dry-run [--sync] [--tag-next] [--push] [--reinstall-local]
+  -> gen-commit (if set): mock B / would: git commit (no real commit)
   -> primary: MergeBack DryRun planned git -C commands (no Proceed?)
   -> cascade (if any): compact would: cascade merge-back <path> per cascaded wt
   -> blank line between major stages
   -> post: would: sync / tag planned / would: git push … (requested only)
-  -> wt still linked; no new tags; origin unchanged; no cascade remove
+  -> reinstall: would: go install|skip: … / would: reinstall N binaries (after other post stages)
+  -> wt still linked; no new tags; origin unchanged; no cascade remove; no bin install
 ```
 
 ## Preconditions
 
 - Parent `done-pipeline/` helpers: root-bump seed, bare origin, two-wt sync fixtures,
   `joinMajorStages`, `primaryMergeMsg`, tag helpers, …
-- Locked composition dry-run behavior (GREEN):
-  1. `dryRun` is plumbed into `runDone` / cascade / MergeBack / post stages,
+- Locked composition dry-run behavior (GREEN for sync/tag/push/reinstall/gen-commit after P1+P2):
+  1. `dryRun` is plumbed into `runDone` / cascade / MergeBack / post stages / reinstall tail,
   2. dry-run still **prints** post-stage plans (not skipped solely because Action is dry-run),
   3. post stages plan against **would-be main tip** after planned merge (wt HEAD for ahead/FF),
   4. cascade dry-run does not remove nested linked worktrees,
-  5. dry-run never requires confirm TTY / `-y`.
+  5. dry-run never requires confirm TTY / `-y`,
+  6. reinstall dry plan scans main tip path; empty/skip-only plan is exit 0,
+  7. **P3** full order leaf `full-combo-gen-commit-reinstall/`:
+     gen-commit → primary → sync → tag-next → push → reinstall (zero mutations).
 
 ## Steps
 
@@ -173,6 +179,69 @@ func assertNoConfirmPromptNoise(t *testing.T, resp *Response) {
 	assertNotContains(t, resp.Stdout, "cannot prompt")
 }
 
+// seedDonePipelineReinstallPresent: add ./cmd/present package main on main tip +
+// GOBIN/present stub so composed --reinstall-local dry-run can print would: go install.
+// Stores gobin under WorkRoot/gobin and sets ExtraEnv GOBIN=… .
+func seedDonePipelineReinstallPresent(t *testing.T, req *Request) string {
+	t.Helper()
+	if req.MainRepo == "" {
+		t.Fatal("seedDonePipelineReinstallPresent: MainRepo empty")
+	}
+	// Avoid doctest anti-pattern of "package main" + "func main()" in one literal.
+	src := fmt.Sprintf("package %s\n\nfunc main() {}\n", "main")
+	cmdDir := filepath.Join(req.MainRepo, "cmd", "present")
+	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
+		t.Fatalf("mkdir cmd/present: %v", err)
+	}
+	writeFile(t, filepath.Join(cmdDir, "main.go"), src)
+
+	binDir := filepath.Join(req.WorkRoot, "gobin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir gobin: %v", err)
+	}
+	writeFile(t, filepath.Join(binDir, "present"), "stub-binary\n")
+	// Ensure executable bit for install target discovery.
+	if err := os.Chmod(filepath.Join(binDir, "present"), 0o755); err != nil {
+		t.Fatalf("chmod present stub: %v", err)
+	}
+	req.ExtraEnv = append(req.ExtraEnv, "GOBIN="+binDir)
+	return binDir
+}
+
+func reinstallPresentDryRunStdout() string {
+	return "would: go install ./cmd/present\nwould: reinstall 1 binaries (0 skipped)\n"
+}
+
+func assertReinstallDryRunPresent(t *testing.T, stdout string) {
+	t.Helper()
+	if !strings.Contains(stdout, "would: go install ./cmd/present") {
+		t.Fatalf("stdout missing reinstall would: go install ./cmd/present\nfull:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "would: reinstall 1 binaries (0 skipped)") {
+		t.Fatalf("stdout missing reinstall summary would: reinstall 1 binaries\nfull:\n%s", stdout)
+	}
+}
+
+func assertStubPresentUnchanged(t *testing.T, binDir string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(binDir, "present"))
+	if err != nil {
+		t.Fatalf("read present stub: %v", err)
+	}
+	if string(data) != "stub-binary\n" {
+		t.Fatalf("present bin mutated under dry-run: %q", string(data))
+	}
+}
+
+func assertNoReinstallStageStdout(t *testing.T, stdout string) {
+	t.Helper()
+	assertNotContains(t, stdout, "would: go install")
+	assertNotContains(t, stdout, "would: go run")
+	assertNotContains(t, stdout, "would: reinstall ")
+	assertNotContains(t, stdout, "reinstalled ")
+	// skip: lines alone are weak; require no reinstall summary vocabulary
+}
+
 var (
 	_ = recordComposeDryRunBaseline
 	_ = readBaselineSHA
@@ -182,6 +251,11 @@ var (
 	_ = assertPrimaryMergeBackDryRunPlanned
 	_ = assertDoneDryRunZeroMutations
 	_ = assertNoConfirmPromptNoise
+	_ = seedDonePipelineReinstallPresent
+	_ = reinstallPresentDryRunStdout
+	_ = assertReinstallDryRunPresent
+	_ = assertStubPresentUnchanged
+	_ = assertNoReinstallStageStdout
 	_ = fmt.Sprintf
 )
 ```

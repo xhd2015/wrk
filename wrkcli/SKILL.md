@@ -37,10 +37,31 @@ wrk --tag-next --propagate-tags --dry-run     # plan tag then consumer bumps
 wrk --propagate-tags --dry-run                # plan consumer go.mod bumps from source release tags
 ```
 
-Optional post-modifiers on `--done` / `--merge-back`: `--sync`, `--tag-next`, `--push`, `--propagate-tags`, `--dry-run`.
-Post-pipeline order is fixed: **sync → tag-next → push → propagate-tags** (then exec/land on `--done` only).
+### Compose pipeline (fixed stage order; flag order free)
+
+```text
+# [pre]  --gen-commit-msg --commit [--model …]   # requires --commit with primary
+# [main] --done | --merge-back
+# [post] --sync → --tag-next → --push → --propagate-tags
+# [tail] --reinstall-local   # from main tip after merge; empty plan succeeds
+```
+
+Fluent recipes:
+
+```sh
+wrk --done --sync --tag-next --push -y
+wrk --done --sync --tag-next --push --reinstall-local -y
+wrk --gen-commit-msg --commit --model=MODEL --done --sync --tag-next --push -y
+# full:
+wrk --gen-commit-msg --commit --model=MODEL --done --sync --tag-next --push --reinstall-local -y
+```
+
+Optional pre-stage on `--done` / `--merge-back`: `--gen-commit-msg --commit …` (on the source worktree; with primary, `--commit` is required; `--dir` is not valid when composed).
+Optional post-modifiers: `--sync`, `--tag-next`, `--push`, `--propagate-tags`, `--reinstall-local`, `--dry-run`.
+Post-pipeline order is fixed: **sync → tag-next → push → propagate-tags → reinstall-local** (then exec/land on `--done` only).
 `--propagate-tags` bumps consumer `go.mod` require versions to source release tags (compose with `--tag-next` to use newly planned/created tags; alone uses existing source tags).
 `--push` with a primary pushes the main branch (and tags when combined with `--tag-next`).
+`--reinstall-local` after a successful primary scans modules from the main tip (empty reinstall plan still succeeds).
 `--json` is only for bare `--tag-next`, not with `--done` / `--merge-back` or `--propagate-tags`.
 
 ## Inspect
