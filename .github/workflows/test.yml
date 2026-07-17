@@ -13,6 +13,8 @@ jobs:
       GOFLAGS: -buildvcs=false
       NO_COLOR: "1"
       FORCE_COLOR: "0"
+      # Serialize light doctest trees: parallel go mod tidy races on shared genDir go.mod
+      GOMAXPROCS: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Go test
