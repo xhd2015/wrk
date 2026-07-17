@@ -71,6 +71,7 @@ Post-pipeline order is fixed: **sync → tag-next → push → propagate-tags �
 wrk --status                     # status for git repos under this checkout
 wrk -l                           # list worktrees (alias: --list)
 wrk --projects                   # recorded main repository paths
+wrk --projects --github          # only projects whose origin is github.com
 wrk --projects-dep-graph         # module-level dep graph across registered projects
 wrk --where <basename>           # look up saved project path(s) by basename
 wrk --main                       # nested shell at main repository root

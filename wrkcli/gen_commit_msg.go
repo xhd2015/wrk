@@ -17,7 +17,7 @@ var genCommitMsgDisallowedFlags = []string{
 	"--done", "--merge-back", "-l", "--list", "--status", "--repos", "--projects",
 	"--projects-dep-graph",
 	"--scan-git-repos", "--no-cache",
-	"--fetch", "--add", "--rm", "--where", "--cd", "--main",
+	"--fetch", "--github", "--add", "--rm", "--where", "--cd", "--main",
 	"--dep", "--bring", "--all-deps", "--reinstall-local", "--tag-next",
 	"--propagate-tags", "--sync",
 	"-t", "--task", "--set-task",

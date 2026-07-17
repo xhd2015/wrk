@@ -39,6 +39,7 @@ var wrkModeFlags = map[string]struct{}{
 	"--scan-git-repos":       {},
 	"--no-cache":             {},
 	"--fetch":                {},
+	"--github":               {},
 	"--color":                {},
 	"--add":                  {},
 	"--rm":                   {},

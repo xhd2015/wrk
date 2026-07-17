@@ -131,6 +131,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	var projectsDepGraph bool
 	var colorFlag bool
 	var fetchFlag bool
+	var githubFlag bool
 	var verbose bool
 	var addPath *string
 	var removePath *string
@@ -182,6 +183,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		Bool("--projects", &projects).
 		Bool("--projects-dep-graph", &projectsDepGraph).
 		Bool("--fetch", &fetchFlag).
+		Bool("--github", &githubFlag).
 		Bool("-v,--verbose", &verbose).
 		Bool("--color", &colorFlag).
 		Bool("--web", &webFlag).
@@ -269,6 +271,9 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	if fetchFlag && !projects && !status && !webFlag {
 		return fmt.Errorf("wrk: --fetch is only valid with --projects or --status")
+	}
+	if githubFlag && !projects {
+		return fmt.Errorf("wrk: --github is only valid with --projects")
 	}
 
 	// remaining holds 0, 1, or 2 positionals for most modes:
@@ -733,7 +738,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	if projects {
 		colorEnabled := term.IsTerminal(int(os.Stdout.Fd())) || colorFlag
-		return runProjects(wrkHome, colorEnabled, fetchFlag)
+		return runProjects(wrkHome, colorEnabled, fetchFlag, githubFlag)
 	}
 	if projectsDepGraph {
 		return runProjectsDepGraph(wrkHome)
@@ -950,6 +955,7 @@ Flags:
   --projects-dep-graph            module-level dep graph across registered projects
   --scan-git-repos [ROOT...]      discover main git repos under roots and record them (default: ~)
   --no-cache                      with --scan-git-repos: disable scan cache read/write
+  --github                        with --projects: only show projects whose origin is github.com
   --fetch                         with --projects or --status: fetch upstream before Remote: compare
   -v, --verbose                   log major git commands to stderr
   --add <dir>                     manually record a main repository path
@@ -1023,13 +1029,16 @@ Environment:
 `
 }
 
-func runProjects(wrkHome string, colorEnabled bool, fetchEnabled bool) error {
+func runProjects(wrkHome string, colorEnabled bool, fetchEnabled bool, githubOnly bool) error {
 	endPerf := beginProjectsPerfRun()
 	defer endPerf()
 
 	paths, err := storage.ListProjects(wrkHome)
 	if err != nil {
 		return err
+	}
+	if githubOnly {
+		paths = filterGitHubProjectPaths(paths)
 	}
 	if len(paths) == 0 {
 		return nil
