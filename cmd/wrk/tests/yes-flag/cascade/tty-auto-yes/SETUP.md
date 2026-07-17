@@ -57,8 +57,9 @@ func Setup(t *testing.T, req *Request) error {
 	// Remove replace so consumer merge-back succeeds after cascade.
 	runYesCascadeGoMod(t, wtDir, "edit", "-dropreplace="+yesCascadeDepModule)
 	runYesCascadeGoMod(t, wtDir, "edit", "-droprequire="+yesCascadeDepModule)
-	runGitIsolated(t, wtDir, "add", "go.mod")
-	runGitIsolated(t, wtDir, "commit", "-m", "drop dep replace for done")
+	// go mod edit can leave go.sum / external/ dirty; --done refuses uncommitted changes.
+	runGitIsolated(t, wtDir, "add", "-A")
+	runGitIsolated(t, wtDir, "commit", "-m", "drop dep replace for done", "--allow-empty")
 
 	req.RepoDir = wtDir
 	req.Args = []string{"--done", "-y"}

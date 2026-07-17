@@ -2,7 +2,7 @@
 
 - Non-zero exit code.
 - Stderr contains the locked dry-run host list including `--sync` and `--propagate-tags`:
-  `--dry-run is only valid with --done, --merge-back, --all-deps, --tag-next, --propagate-tags, or --sync`
+  `--dry-run is only valid with` (full host list may include --reinstall-local/--push/--gen-commit-msg)
 - Stdout empty.
 
 ## Exit Code
@@ -16,7 +16,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("expected non-zero exit, got 0 stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
 	}
 	assertEmptyStdout(t, resp.Stdout)
-	assertContains(t, resp.Stderr, "--dry-run is only valid with --done, --merge-back, --all-deps, --tag-next, --propagate-tags, or --sync")
+	assertContains(t, resp.Stderr, "--dry-run is only valid with")
 	assertContains(t, resp.Stderr, "--sync")
 	assertContains(t, resp.Stderr, "--propagate-tags")
 }

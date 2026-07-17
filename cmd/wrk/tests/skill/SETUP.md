@@ -262,7 +262,7 @@ func installDryRunCursorStdoutV2(t *testing.T, workRoot string) string {
 	}
 	skillDir := filepath.Join(absWorkRoot, ".cursor", "skills", "wrk")
 	skillFile := filepath.Join(skillDir, "SKILL.md")
-	body := fmt.Sprintf("[dry-run] Installed skill to: %s\n[dry-run]   create: %s\n",
+	body := fmt.Sprintf("\\[dry-run\\] Installed skill to: %s\n\\[dry-run\\]   create: %s\n",
 		skillDir, skillFile)
 	return v2StdoutTemplate(body)
 }

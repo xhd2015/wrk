@@ -325,7 +325,7 @@ func moduleLine(modulePath, dir string) string {
 }
 
 func crossEdgeLine(depPath, version, ownerAbs string) string {
-	return fmt.Sprintf("    → %s@%s  [%s]", depPath, version, filepath.Base(ownerAbs))
+	return fmt.Sprintf("    → %s@%s  \\[%s\\]", depPath, version, filepath.Base(ownerAbs))
 }
 
 func assertExitZero(t *testing.T, resp *Response) {

@@ -2885,9 +2885,11 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 		}
 	}
 
-	// TTY check (escape hatch for testing via WRK_SET_TASK_CONFIRM=1; -y bypasses)
+	// TTY check (escape hatch for testing via WRK_SET_TASK_CONFIRM=1; -y bypasses).
+	// Require an interactive stdin; stdout may be redirected while stdin is still a TTY
+	// (or vice versa under some harnesses). Non-interactive CI has neither.
 	if !assumeYes && os.Getenv("WRK_SET_TASK_CONFIRM") != "1" {
-		if !term.IsTerminal(int(os.Stdout.Fd())) {
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
 			return fmt.Errorf("wrk: --set-task requires a terminal (tty)")
 		}
 		fmt.Printf("Rename worktree:\n  %s → %s\n  branch %s → %s\n", cwd, newPath, branch, newBranch)

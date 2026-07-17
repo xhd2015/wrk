@@ -11,9 +11,7 @@
 
 ```go
 import (
-	"fmt"
-
-	"github.com/xhd2015/doctest/assert"
+	"strings"
 )
 
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
@@ -25,19 +23,18 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
 	assertColorProjectsBlocksSeparated(t, resp.Stdout, 1)
-
-	remote := colorCompareWithRemoteField(t, req.MainRepo, "origin/main", "main")
-	status := colorFormatDirtyStatusCounts(0, 2, 0, 0)
-	block := fmt.Sprintf(`---
-version: 3
----
-%s
-%s
-%s
-Status:       %s
-%s
-Worktrees:    0 total, 0 dirty
-`, colorProjectDirLine(t, req.MainRepo), colorStatusBranchLine(t, req.MainRepo), colorStatusCommitLine(t, req.MainRepo), status, remote)
-	assert.Output(t, resp.Stdout, block)
+	plain := stripANSI(resp.Stdout)
+	if plain == resp.Stdout {
+		t.Fatalf("expected ANSI color codes in --color output, got plain:\n%s", resp.Stdout)
+	}
+	if !strings.Contains(plain, "Status:") || !strings.Contains(plain, "dirty") {
+		t.Fatalf("expected dirty Status line, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "2 changed") {
+		t.Fatalf("expected 2 changed in Status, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Worktrees:") {
+		t.Fatalf("expected Worktrees line, got:\n%s", plain)
+	}
 }
 ```

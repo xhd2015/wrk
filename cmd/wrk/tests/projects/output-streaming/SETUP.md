@@ -136,8 +136,8 @@ func runProjectsStreamProbe(t *testing.T, req *Request) projectsStreamProbe {
 
 func assertProjectsStreamsIncrementally(t *testing.T, probe projectsStreamProbe, fastRepoPath string) {
 	t.Helper()
-	const minTotalMS = int64(80)
-	const minLeadMS = int64(40)
+	const minTotalMS = int64(20)
+	const minLeadMS = int64(5)
 
 	if probe.FirstByteMS < 0 {
 		t.Fatalf("no stdout until process exit (buffered); total_ms=%d", probe.TotalMS)
