@@ -3,24 +3,39 @@
 **Feature**: wrk --scan-git-repos discovers main git repos and records them in projects.json
 
 ```
-# standalone mode: scan roots for main repos, record with source=scan
+# standalone mode: scan roots for main repos; record+print as found (OnRepo)
 wrk --scan-git-repos [ROOT...] [--no-cache]
-  -> scan_repo.Scan(Roots, NoCache)
+  -> scan_repo.Scan(Roots, NoCache, OnRepo)
   -> filter RepoTypeMain only
-  -> storage.RecordProject(wrkHome, path, source="scan") for each main
-  -> stdout: newly recorded absolute main paths (one per line)
+  -> storage.RecordProject(wrkHome, path, source="scan") as each main is found
+  -> stdout: newly recorded absolute main paths in discovery order (not post-scan sort)
+
+# default root when no ROOT... (see defaults/)
+wrk --scan-git-repos  -> roots = [$HOME] if home is a directory (not ~/Projects)
+wrk --scan-git-repos  (HOME missing/not a dir)  -> non-zero; error about home/~
 
 # already recorded
 wrk --scan-git-repos ROOT (2nd run)
   -> exit 0; no duplicate projects.json entries; no newly-added stdout lines
 
+# streaming / interrupt (see streaming/ and interrupt/ leaves)
+wrk --scan-git-repos ROOT_B ROOT_A  -> discovery-order stdout (CLI root order)
+wrk --scan-git-repos --no-cache ROOT_FIRST ROOT_LATER  -> first path before finish
+SIGINT mid-scan  -> exit 130; stderr warning: interrupted + progress saved; partial projects kept
+
 # cache flag
 wrk --scan-git-repos --no-cache ROOT  -> still discovers + records (NoCache to scan_repo)
 wrk --no-cache (no --scan-git-repos)  -> non-zero; only valid with --scan-git-repos
 
+# debug wiring (see debug/ leaves) — implemented P3
+wrk --scan-git-repos -v ROOT  -> Options.Debug=true; stderr scan: + mode=
+WRK_SCAN_DEBUG=1 wrk --scan-git-repos ROOT  -> Debug=true without -v; scan: present
+wrk --scan-git-repos ROOT (no -v, no env)  -> zero scan: markers
+# truthy env: 1, true, yes (case-insensitive); product CacheRoot under FakeHome
+
 # mutual exclusion / help
 wrk --scan-git-repos --projects  -> non-zero; mutually exclusive
-wrk -h  -> documents --scan-git-repos and --no-cache
+wrk -h  -> documents --scan-git-repos, --no-cache, and default root ~
 ```
 
 ## Preconditions
@@ -28,7 +43,8 @@ wrk -h  -> documents --scan-git-repos and --no-cache
 - Git must be available for discovery leaves.
 - Each test isolates `WRK_HOME` at `{WorkRoot}/.wrk` (root Setup).
 - Process cwd is `{WorkRoot}` (non-git) so auto-record does not pollute `projects.json`.
-- Explicit scan roots under `{WorkRoot}` — do not rely on `$HOME/Projects`.
+- Explicit-root leaves use roots under `{WorkRoot}` — do not rely on `$HOME/Projects`.
+- Bare-flag default-root leaves (`defaults/`) isolate `HOME` via `FakeHome` and must not create `Projects`.
 
 ## Steps
 
@@ -41,7 +57,8 @@ wrk -h  -> documents --scan-git-repos and --no-cache
 - `projects.json` entries use `source: "scan"` for paths first seen via `--scan-git-repos`.
 - Re-recording is idempotent (first `source` wins; no duplicate paths).
 - Linked worktrees may appear under the scan root; only `RepoTypeMain` paths are recorded.
-- Stdout prefers **newly** recorded absolute main paths only (one per line, trailing `\n`); already-known stays silent on stdout.
+- Stdout prefers **newly** recorded absolute main paths only, printed **as found** in discovery order (one per line, trailing `\n`); already-known stays silent on stdout. Not batch-sorted after the full scan.
+- Mid-scan SIGINT/SIGTERM → exit 130, stderr progress-saved warning, partial projects/cache retained.
 
 ```go
 import (

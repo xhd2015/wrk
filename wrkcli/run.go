@@ -8,12 +8,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -349,7 +351,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if err := ctx.autoRecord(); err != nil {
 			return err
 		}
-		return runScanGitRepos(wrkHome, remaining, noCache)
+		return runScanGitRepos(wrkHome, remaining, noCache, verbose)
 	}
 
 	// --cd requires exactly one path positional before defaulting workDir to cwd.
@@ -938,7 +940,7 @@ Flags:
   --repos                         list git repos under this checkout
   --projects                      list recorded main repository paths
   --projects-dep-graph            module-level dep graph across registered projects
-  --scan-git-repos [ROOT...]      discover main git repos under roots and record them
+  --scan-git-repos [ROOT...]      discover main git repos under roots and record them (default: ~)
   --no-cache                      with --scan-git-repos: disable scan cache read/write
   --fetch                         with --projects or --status: fetch upstream before Remote: compare
   -v, --verbose                   log major git commands to stderr
@@ -1070,32 +1072,34 @@ func runProjects(wrkHome string, colorEnabled bool, fetchEnabled bool) error {
 	return nil
 }
 
+// envTruthy reports whether s is a truthy env value: 1, true, or yes
+// (case-insensitive). Empty and other values are false.
+func envTruthy(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 // runScanGitRepos discovers main git repositories under roots and records
 // newly seen paths in projects.json with source "scan". Already-known paths
-// are not re-printed. Empty CacheRoot uses the scan_repo library default.
-func runScanGitRepos(wrkHome string, roots []string, noCache bool) error {
+// are not re-printed. Each new main is recorded and printed as discovered
+// (discovery order via OnRepo), not sorted after the full scan.
+// Empty CacheRoot uses the scan_repo library default.
+// verbose (from -v/--verbose) and truthy WRK_SCAN_DEBUG enable scan_repo Debug
+// logs (phase-level "scan:" lines on stderr).
+func runScanGitRepos(wrkHome string, roots []string, noCache bool, verbose bool) error {
 	if len(roots) == 0 {
 		home, err := os.UserHomeDir()
 		if err != nil || home == "" {
-			return fmt.Errorf("wrk: --scan-git-repos requires at least one root (or ~/Projects)")
+			return fmt.Errorf("wrk: --scan-git-repos requires a home directory to use as default root")
 		}
-		defaultRoot := filepath.Join(home, "Projects")
-		if st, err := os.Stat(defaultRoot); err != nil || !st.IsDir() {
-			return fmt.Errorf("wrk: --scan-git-repos requires at least one root (or ~/Projects)")
+		if st, err := os.Stat(home); err != nil || !st.IsDir() {
+			return fmt.Errorf("wrk: --scan-git-repos requires a home directory to use as default root (~ is missing or not a directory)")
 		}
-		roots = []string{defaultRoot}
-	}
-
-	result, err := scan_repo.Scan(context.Background(), scan_repo.Options{
-		Roots:   roots,
-		NoCache: noCache,
-		// CacheRoot empty → product default when cache is enabled.
-	})
-	if err != nil {
-		return err
-	}
-	for _, re := range result.RootErrors {
-		fmt.Fprintf(os.Stderr, "warning: scan root %s: %s\n", re.Root, re.Error)
+		roots = []string{home}
 	}
 
 	pf, err := storage.LoadProjects(wrkHome)
@@ -1106,29 +1110,75 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool) error {
 	for _, p := range pf.Projects {
 		known[storage.NormalizePath(p.Path)] = true
 	}
+	knownAtStart := len(known)
 
-	var newly []string
-	for _, repo := range result.Repos {
-		if repo.RepoType != scan_repo.RepoTypeMain {
-			continue
+	debug := verbose || envTruthy(os.Getenv("WRK_SCAN_DEBUG"))
+
+	// Cancelable scan so Ctrl-C / SIGTERM stops the walk, keeps partial
+	// progress (already-recorded projects), and exits 130 with a warning.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	go func() {
+		select {
+		case <-sigCh:
+			cancel()
+		case <-ctx.Done():
 		}
-		if repo.Error != "" {
-			continue
+	}()
+
+	// scan_repo absorbs OnRepo errors into repo.Error and continues; capture
+	// RecordProject failures so the run still fails after Scan returns.
+	var recordErr error
+	var newly int
+	result, err := scan_repo.Scan(ctx, scan_repo.Options{
+		Roots:   roots,
+		NoCache: noCache,
+		Debug:   debug,
+		Stderr:  os.Stderr,
+		// CacheRoot empty → product default when cache is enabled.
+		OnRepo: func(repo scan_repo.Repo) error {
+			if recordErr != nil {
+				return recordErr
+			}
+			if repo.RepoType != scan_repo.RepoTypeMain {
+				return nil
+			}
+			if repo.Error != "" {
+				return nil
+			}
+			path := storage.NormalizePath(repo.Path)
+			if known[path] {
+				return nil
+			}
+			if err := storage.RecordProject(wrkHome, path, storage.SourceScan); err != nil {
+				recordErr = err
+				return err
+			}
+			known[path] = true
+			newly++
+			fmt.Println(path)
+			return nil
+		},
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			fmt.Fprintln(os.Stderr, "warning: scan interrupted; progress saved (cache and newly recorded projects)")
+			return ExitCodeError{Code: 130}
 		}
-		path := storage.NormalizePath(repo.Path)
-		if known[path] {
-			continue
-		}
-		if err := storage.RecordProject(wrkHome, path, storage.SourceScan); err != nil {
-			return err
-		}
-		known[path] = true
-		newly = append(newly, path)
+		return err
 	}
-	// Stable order for multi-root discoveries.
-	sort.Strings(newly)
-	for _, path := range newly {
-		fmt.Println(path)
+	if recordErr != nil {
+		return recordErr
+	}
+	if debug {
+		fmt.Fprintf(os.Stderr, "scan: record known=%d newly=%d\n", knownAtStart, newly)
+	}
+	for _, re := range result.RootErrors {
+		fmt.Fprintf(os.Stderr, "warning: scan root %s: %s\n", re.Root, re.Error)
 	}
 	return nil
 }

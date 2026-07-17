@@ -3,6 +3,8 @@
 - Exit code 0.
 - Help text (stdout and/or stderr) contains `--scan-git-repos`.
 - Help text also contains `--no-cache`.
+- Help documents that bare `--scan-git-repos` defaults to home (`~`) when no ROOT is given
+  (soft match common phrasings; existing `~/.wrk` alone is not enough).
 
 ## Exit Code
 
@@ -30,5 +32,28 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assert.Output(t, help, `<contains>
 --scan-git-repos
 </contains>`)
+	// P1: default scan root is ~ (home), not ~/Projects — document on help line.
+	// Soft forms so implementers can choose wording without false greens from ~/.wrk alone.
+	if !scanHelpMentionsDefaultHome(help) {
+		t.Fatalf("help for --scan-git-repos must document default root ~ (home); got %q", help)
+	}
+}
+
+// scanHelpMentionsDefaultHome is true when the --scan-git-repos help line itself
+// documents default root ~ / home. Whole-help search is too loose (WRK_HOME is
+// "default: ~/.wrk").
+func scanHelpMentionsDefaultHome(help string) bool {
+	for _, line := range strings.Split(help, "\n") {
+		if !strings.Contains(line, "--scan-git-repos") {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(line, "~") ||
+			strings.Contains(line, "$HOME") ||
+			strings.Contains(lower, "home") {
+			return true
+		}
+	}
+	return false
 }
 ```
