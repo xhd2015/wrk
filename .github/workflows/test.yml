@@ -10,13 +10,39 @@ jobs:
     container:
       image: golang:1.25.0
     env:
-      GOFLAGS: -buildvcs=false
+      # Stable asserts under ANSI / parallel tree races (not buildvcs).
       NO_COLOR: "1"
       FORCE_COLOR: "0"
       # Serialize light doctest trees: parallel go mod tidy races on shared genDir go.mod
       GOMAXPROCS: "1"
     steps:
       - uses: actions/checkout@v4
+
+      # Go stamps VCS into binaries by default. That fails in some CI checkouts
+      # (container ownership / incomplete git metadata: "error obtaining VCS status").
+      # Probe once; only then inject GOFLAGS so local/default stays clean.
+      - name: Detect whether -buildvcs=false is required
+        run: |
+          set -e
+          probe_dir=$(mktemp -d)
+          err_file=$(mktemp)
+          if go build -o "$probe_dir/wrk-vcs-probe" ./cmd/wrk 2>"$err_file"; then
+            echo "VCS stamping works; leaving GOFLAGS unset"
+            rm -rf "$probe_dir" "$err_file"
+            exit 0
+          fi
+          if grep -qiE 'error obtaining VCS status|Use -buildvcs=false|buildvcs' "$err_file"; then
+            echo "VCS stamping failed in this environment; enabling GOFLAGS=-buildvcs=false"
+            echo "GOFLAGS=-buildvcs=false" >> "$GITHUB_ENV"
+            cat "$err_file" || true
+            rm -rf "$probe_dir" "$err_file"
+            exit 0
+          fi
+          echo "go build failed for a non-VCS reason:" >&2
+          cat "$err_file" >&2
+          rm -rf "$probe_dir" "$err_file"
+          exit 1
+
       - name: Go test
         run: go test -v ./...
 

@@ -1,9 +1,10 @@
 # Scenario
 
-**Bug**: `-y` does not bypass cascade non-TTY guard for ahead external deps
+**Feature**: `wrk --done -y` cascades ahead external dep on non-TTY (then replace guard)
 
 ```
-consumer wt + ahead external dep -> wrk --done -y (non-TTY) -> non-zero; dep wt preserved
+consumer wt + ahead external dep -> wrk --done -y (non-TTY)
+  -> cascade merges dep; external gone; parent blocked by replace
 ```
 
 ## Steps

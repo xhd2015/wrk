@@ -1,14 +1,15 @@
 # Scenario
 
-**Feature**: `wrk --done -y` rejected when cascaded external dep is ahead (non-TTY)
+**Feature**: `wrk --done -y` cascades ahead external dep on non-TTY (then replace guard)
 
 ```
-consumer wt + ahead external dep -> wrk --done -y -> non-zero; external wt preserved
+consumer wt + ahead external dep -> wrk --done -y
+  -> cascade merges dep; external gone; parent blocked by replace
 ```
 
 ## Steps
 
-1. Build consumer wt with ahead external dep (shared `setupConsumerWithAheadExternalDep`).
+1. Build consumer wt with ahead external dep.
 2. Run `wrk --done -y` on non-TTY.
 
 ```go

@@ -5,7 +5,7 @@
 ```
 # user declines confirm → merge-back aborted; no post-pipeline / reinstall tail
 myrepo (v0.0.1) + wtA (ahead)
-  -> wrk --done --confirm-from-stdin --sync --tag-next --push --propagate-tags --reinstall-local  (stdin: n)
+  -> wrk --done --confirm --confirm-from-stdin --sync --tag-next --push --propagate-tags --reinstall-local  (stdin: n)
   -> merge-back aborted
   -> no synced:; no tag created; no pushed line; no propagate stage; no reinstall; wt remains
 ```
@@ -19,7 +19,7 @@ myrepo (v0.0.1) + wtA (ahead)
 ```go
 func Setup(t *testing.T, req *Request) error {
 	setupDonePipelineLocal(t, req)
-	req.Args = []string{"--done", "--confirm-from-stdin", "--sync", "--tag-next", "--push", "--propagate-tags", "--reinstall-local"}
+	req.Args = []string{"--done", "--confirm", "--confirm-from-stdin", "--sync", "--tag-next", "--push", "--propagate-tags", "--reinstall-local"}
 	req.StdinInput = "n\n"
 	return nil
 }

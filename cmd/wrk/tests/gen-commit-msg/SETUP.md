@@ -25,15 +25,15 @@ staged + FAKE_OPENCODE_MOCK_CONFIG + --agent-runner-binary <fake-opencode>
   -> stdout: parsed title + description
   -> optional --commit / --commit --no-verify
 
-# validation / mutex (bare mode — no primary)
+# validation / mutex vs pipeline compose
 wrk --gen-commit-msg --status              -> mutually exclusive
-wrk --gen-commit-msg --sync                -> mutually exclusive (no primary)
+wrk --gen-commit-msg --sync [--dry-run]     -> allowed multi-stage (activeRoot pipeline)
 wrk --gen-commit-msg --no-verify           -> requires --commit
 wrk --gen-commit-msg --dry-run --agent-runner codex
   -> unsupported agent runner
 
-# P2 primary compose is under monotree done-compose/ + done-pipeline/dry-run/
-# (not this nested root): --gen-commit-msg --commit --done|… 
+# P2 done/merge-back compose is under monotree done-compose/ + done-pipeline/dry-run/
+# (not this nested root): --gen-commit-msg --commit --done|…
 ```
 
 ## Preconditions
@@ -148,7 +148,7 @@ func getWrkBin(t *testing.T) string {
 		if modRoot == "" {
 			t.Fatal("find module root: no go.mod in ancestors")
 		}
-		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/wrk")
+		cmd := exec.Command("go", "build", "-o", bin, "./cmd/wrk")
 		cmd.Dir = modRoot
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -216,7 +216,7 @@ func getFakeOpencodeBin(t *testing.T) string {
 		if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
 			t.Fatalf("mkdir fake-opencode bin dir: %v", err)
 		}
-		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/fake-opencode")
+		cmd := exec.Command("go", "build", "-o", bin, "./cmd/fake-opencode")
 		cmd.Dir = agentProRoot(t)
 		out, err := cmd.CombinedOutput()
 		if err != nil {

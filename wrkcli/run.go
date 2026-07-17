@@ -8,12 +8,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -103,13 +105,14 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		}
 		return fmt.Errorf("wrk: --version is mutually exclusive with other modes")
 	}
-	// Bare --gen-commit-msg (no primary): exclusive early path.
-	// With --done / --merge-back: peel library flags and run as pre-stage later.
+	// Bare --gen-commit-msg (no pipeline partner): exclusive early path.
+	// With --done / --merge-back / other pipeline stages: peel library flags and
+	// run as stage 1 of activeRoot compose later.
 	var genCommitMsg bool
 	var genCommitArgs []string
 	parseArgs := args
 	if hasArg(args, "--gen-commit-msg") {
-		if !hasArg(args, "--done") && !hasArg(args, "--merge-back") {
+		if !hasGenCommitComposePartner(args) {
 			return runGenCommitMsg(args, ctx)
 		}
 		genCommitMsg, genCommitArgs, parseArgs = peelGenCommitMsgForCompose(args)
@@ -128,10 +131,12 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	var projectsDepGraph bool
 	var colorFlag bool
 	var fetchFlag bool
+	var githubFlag bool
 	var verbose bool
 	var addPath *string
 	var removePath *string
 	var confirmFromStdin bool
+	var forceConfirm bool
 	var assumeYes bool
 	var noInModuleReplace bool
 	var depPath string
@@ -178,6 +183,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		Bool("--projects", &projects).
 		Bool("--projects-dep-graph", &projectsDepGraph).
 		Bool("--fetch", &fetchFlag).
+		Bool("--github", &githubFlag).
 		Bool("-v,--verbose", &verbose).
 		Bool("--color", &colorFlag).
 		Bool("--web", &webFlag).
@@ -188,6 +194,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		String("--add", &addPath).
 		String("--rm", &removePath).
 		Bool("--confirm-from-stdin", &confirmFromStdin).
+		Bool("--confirm", &forceConfirm).
 		Bool("-y,--yes", &assumeYes).
 		Bool("--no-in-module-replace", &noInModuleReplace).
 		Bool("--no-cd", &noCd).
@@ -265,6 +272,9 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if fetchFlag && !projects && !status && !webFlag {
 		return fmt.Errorf("wrk: --fetch is only valid with --projects or --status")
 	}
+	if githubFlag && !projects {
+		return fmt.Errorf("wrk: --github is only valid with --projects")
+	}
 
 	// remaining holds 0, 1, or 2 positionals for most modes:
 	//   remaining[0] = sourceDir (valid for ALL modes — cwd when absent)
@@ -309,7 +319,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		otherMode := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || allDeps || reinstallLocal || tagNext || propagateTags || syncFlag ||
 			dryRun || pushFlag || jsonFlag || taskFlagSet || setTaskFlagSet || fetchFlag || noCd || forceCd ||
-			cd || mainFlag || confirmFromStdin || noInModuleReplace || scanGitRepos ||
+			cd || mainFlag || confirmFromStdin || forceConfirm || noInModuleReplace || scanGitRepos ||
 			newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
 			noNewTerminal || openInAgent || noOpenInAgent || len(execArgs) > 0
 		ctx.workDir = origWd
@@ -335,7 +345,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" ||
 			allDeps || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || taskFlagSet ||
 			setTaskFlagSet || fetchFlag || noCd || forceCd || cd || mainFlag ||
-			confirmFromStdin || noInModuleReplace || webFlag ||
+			confirmFromStdin || forceConfirm || noInModuleReplace || webFlag ||
 			newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
 			noNewTerminal || openInAgent || noOpenInAgent || noConfig || len(execArgs) > 0
 		ctx.workDir = origWd
@@ -348,7 +358,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if err := ctx.autoRecord(); err != nil {
 			return err
 		}
-		return runScanGitRepos(wrkHome, remaining, noCache)
+		return runScanGitRepos(wrkHome, remaining, noCache, verbose)
 	}
 
 	// --cd requires exactly one path positional before defaulting workDir to cwd.
@@ -404,23 +414,18 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	}
 
 	// --sync takes no positionals when used alone. It may compose with --done /
-	// --merge-back (post-success pipeline); those modes may take a source dir.
-	// With a primary, --sync may also compose with --tag-next / --push / --propagate-tags /
-	// --reinstall-local / --dry-run.
-	// Prefer mode-clash errors over unexpected args when combined with other modes
-	// (checked later alongside tag-next family).
+	// --merge-back and with other pipeline stages (activeRoot model; no primary required).
+	// Prefer mode-clash errors over unexpected args when combined with non-pipeline modes.
+	// --json multi-stage is rejected later with a --json-named error (not here).
 	if syncFlag {
-		// done and mergeBack are intentionally excluded so composition is allowed.
-		// reinstallLocal is a post-success tail only with a primary (not otherMode then).
+		// Pipeline partners (done/merge-back/tag-next/push/propagate/reinstall/gen-commit/exec)
+		// are intentionally excluded so multi-stage composition is allowed.
 		otherMode := list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" ||
-			allDeps || jsonFlag || taskFlagSet || setTaskFlagSet ||
+			allDeps || taskFlagSet || setTaskFlagSet ||
 			cd || mainFlag || fetchFlag || spawnTarget != ""
-		if reinstallLocal && !done && !mergeBack {
-			otherMode = true
-		}
-		// tag-next / push / propagate-tags compose with --sync only when a primary is present.
-		if (tagNext || pushFlag || propagateTags) && !done && !mergeBack {
+		// Bare --sync --json (no tag-next) still exclusive; multi-stage +json named later.
+		if jsonFlag && !tagNext {
 			otherMode = true
 		}
 		// noCd/forceCd are done/create modifiers: exclusive with bare/sync+merge-back,
@@ -509,6 +514,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	hasExec := len(execArgs) > 0
 	if hasExec {
+		// --exec is the last pipeline stage of any activeRoot compose (with or without
+		// --done/--merge-back). Still invalid with non-pipeline modes.
 		if list {
 			return fmt.Errorf("wrk: --exec is not valid with --list")
 		}
@@ -533,25 +540,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if whereFlagSet {
 			return fmt.Errorf("wrk: --exec is not valid with --where")
 		}
-		if mergeBack {
-			return fmt.Errorf("wrk: --exec is not valid with --merge-back")
-		}
 		if allDeps {
 			return fmt.Errorf("wrk: --exec is not valid with --all-deps")
-		}
-		// --exec is valid with --done --reinstall-local (reinstall then exec); bare reinstall+exec is not.
-		if reinstallLocal && !done {
-			return fmt.Errorf("wrk: --exec is not valid with --reinstall-local")
-		}
-		if tagNext {
-			return fmt.Errorf("wrk: --exec is not valid with --tag-next")
-		}
-		if propagateTags {
-			return fmt.Errorf("wrk: --exec is not valid with --propagate-tags")
-		}
-		// --exec is valid with --done --sync (runs after sync); invalid with bare --sync.
-		if syncFlag && !done {
-			return fmt.Errorf("wrk: --exec is not valid with --sync")
 		}
 		if mainFlag {
 			return fmt.Errorf("wrk: --exec is not valid with --main")
@@ -567,7 +557,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return fmt.Errorf("wrk: --set-task is mutually exclusive with other flags")
 	}
 	if setTaskFlagSet {
-		return runSetTask(workDir, *setTaskDesc, assumeYes, noCd, forceCd, execArgs)
+		// Default auto-yes for rename prompt; --confirm restores Y/n; -y still auto-yes.
+		return runSetTask(workDir, *setTaskDesc, planAssumeYes(assumeYes, forceConfirm), noCd, forceCd, execArgs)
 	}
 
 	if taskFlagSet && strings.TrimSpace(*taskDesc) == "" {
@@ -625,6 +616,9 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if confirmFromStdin && !done && !mergeBack {
 		return fmt.Errorf("wrk: --confirm-from-stdin is only valid with --done or --merge-back")
 	}
+	if forceConfirm && !done && !mergeBack && !setTaskFlagSet {
+		return fmt.Errorf("wrk: --confirm is only valid with --done, --merge-back, or --set-task")
+	}
 	if noInModuleReplace && !done {
 		return fmt.Errorf("wrk: --no-in-module-replace is only valid with --done")
 	}
@@ -640,10 +634,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if allDeps && (depPath != "" || bringPath != "" || done || list || mergeBack || tagNext || propagateTags || syncFlag || cd || mainFlag || reinstallLocal) {
 		return fmt.Errorf("wrk: --all-deps is mutually exclusive with --dep, --bring, --done, --merge-back and --list")
 	}
-	// --reinstall-local is exclusive with other modes except:
-	//   - --main (and dry-run modifier), and
-	//   - post-success tail after --done / --merge-back (then also with post stages + dry-run
-	//     and done modifiers such as confirm-from-stdin / no-in-module-replace / no-cd / force-cd).
+	// --reinstall-local may compose with pipeline stages (activeRoot model) and with
+	// --main / --done / --merge-back. Still exclusive with list/status/repos and similar.
 	if reinstallLocal {
 		otherMode := list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" ||
@@ -651,88 +643,69 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			spawnTarget != "" || jsonFlag || fetchFlag
 		if done || mergeBack {
 			// Primary compose: post stages and done modifiers are allowed.
-			// merge-back has no exec/land modifiers noCd/forceCd beyond what's already gated.
+		} else if !tagNext && !propagateTags && !syncFlag && !pushFlag && !genCommitMsg && !hasExec {
+			// Bare / --main reinstall only: exclusive with primary-only modifiers.
+			otherMode = otherMode || confirmFromStdin || forceConfirm || noInModuleReplace || noCd || forceCd
 		} else {
-			// Bare / --main reinstall: exclusive with post stages and primary-only modifiers.
-			otherMode = otherMode || tagNext || propagateTags || syncFlag || pushFlag ||
-				confirmFromStdin || noInModuleReplace || noCd || forceCd
+			// Multi-stage without primary: still reject done-only modifiers.
+			otherMode = otherMode || confirmFromStdin || forceConfirm || noInModuleReplace || noCd || forceCd
 		}
 		if otherMode {
 			return fmt.Errorf("wrk: --reinstall-local is mutually exclusive with other modes")
 		}
 	}
-	// --tag-next may compose with --done / --merge-back (and then with --sync / --push /
-	// --propagate-tags / --reinstall-local / --dry-run), and with bare --propagate-tags (tag-then-propagate).
-	// Without those it remains exclusive with other command modes.
+	// --tag-next may compose with other pipeline stages (activeRoot must be main at
+	// that stage). Still exclusive with list/status/repos and other non-pipeline modes.
 	if tagNext {
 		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != ""
-		if reinstallLocal && !done && !mergeBack {
-			otherMode = true
-		}
-		if !done && !mergeBack {
-			// bare --tag-next: still exclusive with --sync (composition needs a primary)
-			otherMode = otherMode || syncFlag
-		}
 		if otherMode {
 			return fmt.Errorf("wrk: --tag-next is mutually exclusive with other modes")
 		}
 	}
-	// --propagate-tags may compose with:
-	//   - bare --tag-next (and then --push / --dry-run), or
-	//   - primary --done / --merge-back (post-pipeline; ± sync / tag-next / push / reinstall / dry-run).
-	// Still exclusive with list/status/repos and other modes. Bare propagate+sync needs primary.
+	// --propagate-tags may compose with pipeline stages (activeRoot model).
+	// --push alone with bare --propagate-tags (no tag-next/done/merge-back) is invalid.
 	// --json is rejected separately so the error names both flags.
 	if propagateTags {
 		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != ""
-		if reinstallLocal && !done && !mergeBack {
-			otherMode = true
-		}
-		if !done && !mergeBack {
-			// bare --propagate-tags: exclusive with --sync (needs primary for that combo)
-			otherMode = otherMode || syncFlag
+		if !done && !mergeBack && !tagNext && pushFlag {
 			// --push alone with bare --propagate-tags is invalid; only with --tag-next compose.
-			if pushFlag && !tagNext {
-				otherMode = true
-			}
+			otherMode = true
 		}
 		if otherMode {
 			return fmt.Errorf("wrk: --propagate-tags is mutually exclusive with other modes")
 		}
 	}
-	// --sync may compose with --done / --merge-back (and then with --tag-next / --push /
-	// --propagate-tags / --reinstall-local); still exclusive with other modes and with --json.
+	// --sync may compose with pipeline stages (activeRoot model); exclusive with
+	// non-pipeline modes. Multi-stage + --json is rejected by the --json check below.
 	if syncFlag {
 		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
-			taskFlagSet || setTaskFlagSet || spawnTarget != "" || jsonFlag
-		if reinstallLocal && !done && !mergeBack {
+			taskFlagSet || setTaskFlagSet || spawnTarget != ""
+		if jsonFlag && !tagNext {
 			otherMode = true
-		}
-		if !done && !mergeBack {
-			otherMode = otherMode || tagNext || pushFlag || propagateTags
 		}
 		if otherMode {
 			return fmt.Errorf("wrk: --sync is mutually exclusive with other modes")
 		}
 	}
 	// --push is a bare primary (option R: push current checkout branch), or a
-	// composition stage with --tag-next / --done / --merge-back.
-	// Bare --push is exclusive with other modes (same pattern as bare --sync).
-	// --json is rejected separately so the error names --json.
+	// composition stage with other pipeline flags. Bare --push is exclusive with
+	// non-pipeline modes. --json is rejected separately so the error names --json.
 	if pushFlag && !tagNext && !done && !mergeBack {
-		otherMode := depPath != "" || bringPath != "" || list || allDeps || reinstallLocal || cd || mainFlag ||
+		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
-			taskFlagSet || setTaskFlagSet || spawnTarget != "" || syncFlag || propagateTags
+			taskFlagSet || setTaskFlagSet || spawnTarget != ""
+		// propagate without tag-next/done still invalid (handled above for propagate).
 		if otherMode {
 			return fmt.Errorf("wrk: --push is mutually exclusive with other modes")
 		}
 	}
-	// --json is only valid with bare --tag-next; never with --done / --merge-back /
-	// --propagate-tags (compose or bare).
+	// --json is only valid with bare --tag-next (optionally --push); never with
+	// multi-stage compose or --done / --merge-back / --propagate-tags.
 	if jsonFlag && done {
 		return fmt.Errorf("wrk: --json is not valid with --done")
 	}
@@ -744,6 +717,9 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	}
 	if jsonFlag && !tagNext {
 		return fmt.Errorf("wrk: --json is only valid with --tag-next")
+	}
+	if jsonFlag && tagNext && (syncFlag || reinstallLocal || genCommitMsg || hasExec) {
+		return fmt.Errorf("wrk: --json is not valid with multi-stage compose (only with bare --tag-next)")
 	}
 	// --dry-run is valid with bare --sync / --all-deps / --tag-next / --propagate-tags /
 	// --reinstall-local / --push, with --done / --merge-back composition (full multi-stage plan is later phases),
@@ -762,7 +738,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	if projects {
 		colorEnabled := term.IsTerminal(int(os.Stdout.Fd())) || colorFlag
-		return runProjects(wrkHome, colorEnabled, fetchFlag)
+		return runProjects(wrkHome, colorEnabled, fetchFlag, githubFlag)
 	}
 	if projectsDepGraph {
 		return runProjectsDepGraph(wrkHome)
@@ -791,8 +767,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runStatus(statusRoot, workDir, colorEnabled, fetchFlag)
 	}
 	// Bare / --main --reinstall-local before bare --main so compose does not open a nested shell.
-	// With --done / --merge-back, reinstall is a post-success tail on the primary path.
-	if reinstallLocal && !done && !mergeBack {
+	// Multi-stage reinstall is handled by activeRoot pipeline below.
+	if reinstallLocal && !done && !mergeBack && !genCommitMsg && !syncFlag && !tagNext && !pushFlag && !propagateTags && !hasExec {
 		return runReinstallLocal(workDir, dryRun, mainFlag, colorFlag)
 	}
 	if mainFlag {
@@ -819,12 +795,14 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// Prefer done / merge-back over bare tag-next / propagate / sync so composition
 	// runs the primary path (post-pipeline: sync → tag-next → push → propagate-tags → reinstall-local).
 	// Optional pre-stage: --gen-commit-msg --commit … on the source worktree.
+	// After successful done/merge-back, activeRoot switches to main for later stages.
 	if done {
 		if err := runGenCommitMsgPreStage(workDir, genCommitMsg, genCommitArgs, dryRun, "--done"); err != nil {
 			return err
 		}
 		runPrimary := func() error {
-			return runDone(workDir, wrkHome, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
+			// Default auto-yes for own + cascade plans; --confirm restores prompts; -y still auto-yes.
+			return runDone(workDir, wrkHome, confirmFromStdin, planAssumeYes(assumeYes, forceConfirm), noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
 		}
 		// Dry-run gen-commit pre would commit staged dirt; MergeBack --rm still
 		// requires a clean tree today. Stash staged only for the dry plan, then restore.
@@ -838,14 +816,52 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			return err
 		}
 		// merge-back keeps the worktree (Remove=false); dirty is allowed by MergeBack.
-		return runMergeBack(workDir, wrkHome, confirmFromStdin, assumeYes, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
+		// Default auto-yes; --confirm restores prompts; -y still auto-yes.
+		return runMergeBack(workDir, wrkHome, confirmFromStdin, planAssumeYes(assumeYes, forceConfirm), syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
+	}
+	// Multi-stage without done/merge-back: fixed order on activeRoot (= cwd toplevel).
+	// Stages: gen-commit → sync → tag-next → push → propagate-tags → reinstall-local → exec.
+	{
+		stageN := 0
+		if genCommitMsg {
+			stageN++
+		}
+		if syncFlag {
+			stageN++
+		}
+		if tagNext {
+			stageN++
+		}
+		if pushFlag {
+			stageN++
+		}
+		if propagateTags {
+			stageN++
+		}
+		if reinstallLocal {
+			stageN++
+		}
+		if hasExec {
+			stageN++
+		}
+		// tag-next + push [+json] stays on the dedicated bare path (json-clean stdout).
+		bareTagPushJSON := tagNext && pushFlag && jsonFlag && stageN == 2
+		if stageN > 1 && !bareTagPushJSON {
+			return runActiveRootPipeline(workDir, wrkHome, genCommitMsg, genCommitArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag, execArgs)
+		}
 	}
 	// Bare compose: --tag-next --propagate-tags [--push] [--dry-run].
 	// Fixed stage order tag-next → push? → propagate-tags.
 	if tagNext && propagateTags {
+		if err := requireMainActiveRoot(workDir, "--tag-next"); err != nil {
+			return err
+		}
 		return runTagNextPropagateCompose(workDir, wrkHome, dryRun, pushFlag)
 	}
 	if tagNext {
+		if err := requireMainActiveRoot(workDir, "--tag-next"); err != nil {
+			return err
+		}
 		// Create tags locally only; push (if any) is via runPushMain with tag list
 		// so branch + tags are published (not tagscope tags-only push).
 		tagRes, err := runTagNextAtResult(workDir, "HEAD", dryRun, false, jsonFlag)
@@ -925,11 +941,11 @@ Positional arguments:
                    - missing parent            -> error
 
 Flags:
-  --done [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm-from-stdin]
-                                  merge worktree branch back and remove it
+  --done [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm] [--confirm-from-stdin]
+                                  merge worktree branch back and remove it (default auto-yes)
                                   (optional pre: --gen-commit-msg --commit … on worktree; optional post-success: --sync, --tag-next, --push, --propagate-tags, --reinstall-local from main)
-  --merge-back [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm-from-stdin]
-                                  merge worktree branch back WITHOUT removing it
+  --merge-back [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm] [--confirm-from-stdin]
+                                  merge worktree branch back WITHOUT removing it (default auto-yes)
                                   (optional pre: --gen-commit-msg --commit … on worktree; optional post-success: --sync, --tag-next, --push, --propagate-tags, --reinstall-local from main)
   --done --no-in-module-replace   block --done on ANY local replace (strict)
   --list                          list worktrees (git worktree list)
@@ -937,8 +953,9 @@ Flags:
   --repos                         list git repos under this checkout
   --projects                      list recorded main repository paths
   --projects-dep-graph            module-level dep graph across registered projects
-  --scan-git-repos [ROOT...]      discover main git repos under roots and record them
+  --scan-git-repos [ROOT...]      discover main git repos under roots and record them (default: ~)
   --no-cache                      with --scan-git-repos: disable scan cache read/write
+  --github                        with --projects: only show projects whose origin is github.com
   --fetch                         with --projects or --status: fetch upstream before Remote: compare
   -v, --verbose                   log major git commands to stderr
   --add <dir>                     manually record a main repository path
@@ -970,7 +987,10 @@ Flags:
                                   (not valid with --propagate-tags)
   --task <desc>                   append task slug to worktree/branch names
   --set-task <desc>               rename worktree/branch to match new task
-  -y, --yes                       auto-confirm Y/n prompts (own worktree; cascade on TTY only)
+  -y, --yes                       auto-confirm Y/n prompts (compat; default already auto-yes for
+                                  --done/--merge-back/--set-task including cascade)
+  --confirm                       force interactive Y/n for --done/--merge-back/--set-task
+                                  (opt out of default auto-yes; use with --confirm-from-stdin on non-TTY)
   --no-cd                         do not write shell follow-up cd lines (for bash auto-cd wrapper)
   --force-cd                      always land in dest after create/--done/--set-task (bypass gates)
   --new-window                    create Mission Control Desktop (implies --new-terminal)
@@ -1009,13 +1029,16 @@ Environment:
 `
 }
 
-func runProjects(wrkHome string, colorEnabled bool, fetchEnabled bool) error {
+func runProjects(wrkHome string, colorEnabled bool, fetchEnabled bool, githubOnly bool) error {
 	endPerf := beginProjectsPerfRun()
 	defer endPerf()
 
 	paths, err := storage.ListProjects(wrkHome)
 	if err != nil {
 		return err
+	}
+	if githubOnly {
+		paths = filterGitHubProjectPaths(paths)
 	}
 	if len(paths) == 0 {
 		return nil
@@ -1069,32 +1092,34 @@ func runProjects(wrkHome string, colorEnabled bool, fetchEnabled bool) error {
 	return nil
 }
 
+// envTruthy reports whether s is a truthy env value: 1, true, or yes
+// (case-insensitive). Empty and other values are false.
+func envTruthy(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 // runScanGitRepos discovers main git repositories under roots and records
 // newly seen paths in projects.json with source "scan". Already-known paths
-// are not re-printed. Empty CacheRoot uses the scan_repo library default.
-func runScanGitRepos(wrkHome string, roots []string, noCache bool) error {
+// are not re-printed. Each new main is recorded and printed as discovered
+// (discovery order via OnRepo), not sorted after the full scan.
+// Empty CacheRoot uses the scan_repo library default.
+// verbose (from -v/--verbose) and truthy WRK_SCAN_DEBUG enable scan_repo Debug
+// logs (phase-level "scan:" lines on stderr).
+func runScanGitRepos(wrkHome string, roots []string, noCache bool, verbose bool) error {
 	if len(roots) == 0 {
 		home, err := os.UserHomeDir()
 		if err != nil || home == "" {
-			return fmt.Errorf("wrk: --scan-git-repos requires at least one root (or ~/Projects)")
+			return fmt.Errorf("wrk: --scan-git-repos requires a home directory to use as default root")
 		}
-		defaultRoot := filepath.Join(home, "Projects")
-		if st, err := os.Stat(defaultRoot); err != nil || !st.IsDir() {
-			return fmt.Errorf("wrk: --scan-git-repos requires at least one root (or ~/Projects)")
+		if st, err := os.Stat(home); err != nil || !st.IsDir() {
+			return fmt.Errorf("wrk: --scan-git-repos requires a home directory to use as default root (~ is missing or not a directory)")
 		}
-		roots = []string{defaultRoot}
-	}
-
-	result, err := scan_repo.Scan(context.Background(), scan_repo.Options{
-		Roots:   roots,
-		NoCache: noCache,
-		// CacheRoot empty → product default when cache is enabled.
-	})
-	if err != nil {
-		return err
-	}
-	for _, re := range result.RootErrors {
-		fmt.Fprintf(os.Stderr, "warning: scan root %s: %s\n", re.Root, re.Error)
+		roots = []string{home}
 	}
 
 	pf, err := storage.LoadProjects(wrkHome)
@@ -1105,29 +1130,75 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool) error {
 	for _, p := range pf.Projects {
 		known[storage.NormalizePath(p.Path)] = true
 	}
+	knownAtStart := len(known)
 
-	var newly []string
-	for _, repo := range result.Repos {
-		if repo.RepoType != scan_repo.RepoTypeMain {
-			continue
+	debug := verbose || envTruthy(os.Getenv("WRK_SCAN_DEBUG"))
+
+	// Cancelable scan so Ctrl-C / SIGTERM stops the walk, keeps partial
+	// progress (already-recorded projects), and exits 130 with a warning.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	go func() {
+		select {
+		case <-sigCh:
+			cancel()
+		case <-ctx.Done():
 		}
-		if repo.Error != "" {
-			continue
+	}()
+
+	// scan_repo absorbs OnRepo errors into repo.Error and continues; capture
+	// RecordProject failures so the run still fails after Scan returns.
+	var recordErr error
+	var newly int
+	result, err := scan_repo.Scan(ctx, scan_repo.Options{
+		Roots:   roots,
+		NoCache: noCache,
+		Debug:   debug,
+		Stderr:  os.Stderr,
+		// CacheRoot empty → product default when cache is enabled.
+		OnRepo: func(repo scan_repo.Repo) error {
+			if recordErr != nil {
+				return recordErr
+			}
+			if repo.RepoType != scan_repo.RepoTypeMain {
+				return nil
+			}
+			if repo.Error != "" {
+				return nil
+			}
+			path := storage.NormalizePath(repo.Path)
+			if known[path] {
+				return nil
+			}
+			if err := storage.RecordProject(wrkHome, path, storage.SourceScan); err != nil {
+				recordErr = err
+				return err
+			}
+			known[path] = true
+			newly++
+			fmt.Println(path)
+			return nil
+		},
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			fmt.Fprintln(os.Stderr, "warning: scan interrupted; progress saved (cache and newly recorded projects)")
+			return ExitCodeError{Code: 130}
 		}
-		path := storage.NormalizePath(repo.Path)
-		if known[path] {
-			continue
-		}
-		if err := storage.RecordProject(wrkHome, path, storage.SourceScan); err != nil {
-			return err
-		}
-		known[path] = true
-		newly = append(newly, path)
+		return err
 	}
-	// Stable order for multi-root discoveries.
-	sort.Strings(newly)
-	for _, path := range newly {
-		fmt.Println(path)
+	if recordErr != nil {
+		return recordErr
+	}
+	if debug {
+		fmt.Fprintf(os.Stderr, "scan: record known=%d newly=%d\n", knownAtStart, newly)
+	}
+	for _, re := range result.RootErrors {
+		fmt.Fprintf(os.Stderr, "warning: scan root %s: %s\n", re.Root, re.Error)
 	}
 	return nil
 }
@@ -1219,35 +1290,174 @@ func runList(workDir string) error {
 	return nil
 }
 
+// requireLinkedWorktree ensures activeRoot is a linked worktree for --done/--merge-back.
+// Error names the gated flag and mentions linked worktree.
+func requireLinkedWorktree(workDir, flag string) (checkoutRoot string, err error) {
+	cwd, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve cwd: %w", err)
+	}
+	if !worktree.IsInsideWorkTree(cwd) {
+		return "", fmt.Errorf("%s is not a git repository", cwd)
+	}
+	checkoutRoot, err = worktree.ShowToplevel(cwd)
+	if err != nil {
+		return "", err
+	}
+	if !worktree.IsLinked(checkoutRoot) {
+		return "", fmt.Errorf("wrk: %s requires a linked worktree (%s is not a linked worktree)", flag, checkoutRoot)
+	}
+	return checkoutRoot, nil
+}
+
+// requireMainActiveRoot ensures activeRoot is the main repository checkout for --tag-next.
+// Error names --tag-next and mentions main.
+func requireMainActiveRoot(workDir, flag string) error {
+	cwd, err := filepath.Abs(workDir)
+	if err != nil {
+		return fmt.Errorf("resolve cwd: %w", err)
+	}
+	if !worktree.IsInsideWorkTree(cwd) {
+		return fmt.Errorf("%s is not a git repository", cwd)
+	}
+	checkoutRoot, err := worktree.ShowToplevel(cwd)
+	if err != nil {
+		return err
+	}
+	if worktree.IsLinked(checkoutRoot) {
+		return fmt.Errorf("wrk: %s requires the main repository checkout (activeRoot is a linked worktree, not main)", flag)
+	}
+	return nil
+}
+
+// runActiveRootPipeline runs multi-stage compose without --done/--merge-back.
+// activeRoot stays the git toplevel of workDir for the whole run.
+// Stage order: gen-commit → sync → tag-next → push → propagate-tags → reinstall-local → exec.
+// --tag-next is gated to main activeRoot; other stages OK on linked worktrees.
+func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommitArgs []string, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool, execArgs []string) error {
+	cwd, err := filepath.Abs(workDir)
+	if err != nil {
+		return fmt.Errorf("resolve cwd: %w", err)
+	}
+	if !worktree.IsInsideWorkTree(cwd) {
+		return fmt.Errorf("%s is not a git repository", cwd)
+	}
+	activeRoot, err := worktree.ShowToplevel(cwd)
+	if err != nil {
+		return err
+	}
+
+	// Gate tag-next early so we do not partially apply prior stages incorrectly
+	// when the only illegal stage is tag-next from a linked worktree.
+	// Still run gen-commit/sync before tag when legal; for illegal tag-next from WT,
+	// fail at the tag stage after earlier stages... Tests for bare tag-next and
+	// multi-stage tag-next-from-WT expect no tag created; partial sync is OK if
+	// non-zero exit. Prefer fail-fast before any stage when tag-next is requested
+	// from a linked worktree so push/tag cannot apply under wrong activeRoot.
+	if withTagNext {
+		if err := requireMainActiveRoot(activeRoot, "--tag-next"); err != nil {
+			return err
+		}
+	}
+
+	printed := false
+	blankBefore := func() {
+		if printed {
+			fmt.Println()
+		}
+		printed = true
+	}
+
+	if genCommitMsg {
+		if err := runGenCommitMsgStage(activeRoot, genCommitArgs, dryRun); err != nil {
+			return err
+		}
+		printed = true
+	}
+	if withSync {
+		blankBefore()
+		if err := runSync(activeRoot, dryRun); err != nil {
+			return err
+		}
+		printed = true
+	}
+
+	var createdTags []string
+	var tagPlan tagscope.ChangePlan
+	if withTagNext {
+		blankBefore()
+		tagRes, err := runTagNextAtResult(activeRoot, "HEAD", dryRun, false, false)
+		if err != nil {
+			return err
+		}
+		createdTags = tagRes.Tags
+		tagPlan = tagRes.Plan
+		printed = true
+	}
+	if withPush {
+		blankBefore()
+		var tags []string
+		if withTagNext {
+			tags = createdTags
+		}
+		if err := runPushMain(activeRoot, dryRun, tags); err != nil {
+			return err
+		}
+		printed = true
+	}
+	if withPropagateTags {
+		blankBefore()
+		var releaseOverride []SourceRelease
+		if dryRun && withTagNext {
+			releases, err := ResolveSourceReleases(activeRoot)
+			if err != nil {
+				return err
+			}
+			releaseOverride = applyPlannedTagsToReleases(releases.Releases, tagPlan)
+			if len(releaseOverride) == 0 {
+				return fmt.Errorf("wrk: no usable release tags for source modules")
+			}
+		}
+		if err := runPropagateTagsWithReleases(activeRoot, wrkHome, dryRun, releaseOverride); err != nil {
+			return err
+		}
+		printed = true
+	}
+	if withReinstallLocal {
+		blankBefore()
+		// Scan modules under activeRoot (already the checkout root).
+		if err := runReinstallLocal(activeRoot, dryRun, false, colorFlag); err != nil {
+			return err
+		}
+		printed = true
+	}
+	// --exec is last; skip under dry-run (plan-only pipeline).
+	if len(execArgs) > 0 && !dryRun {
+		_ = printed
+		if err := runExecInDir(activeRoot, execArgs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool) error {
 	// Shell process cwd (inherited from interactive shell), not merely workDir.
 	// Used after remove to decide whether auto-cd is needed.
 	shellCwd, _ := os.Getwd()
 
-	cwd, err := filepath.Abs(workDir)
-	if err != nil {
-		return fmt.Errorf("resolve cwd: %w", err)
-	}
-
-	if !worktree.IsInsideWorkTree(cwd) {
-		return fmt.Errorf("%s is not a git repository", cwd)
-	}
-
-	checkoutRoot, err := worktree.ShowToplevel(cwd)
+	checkoutRoot, err := requireLinkedWorktree(workDir, "--done")
 	if err != nil {
 		return err
 	}
+	cwd := checkoutRoot
 
 	consumerTop, err := worktree.ShowToplevel(cwd)
 	if err != nil {
 		return err
 	}
-	// Dry-run never confirms/applies cascade, so skip the non-interactive block.
-	if !dryRun {
-		if err := checkCascadeNonInteractive(consumerTop, checkoutRoot); err != nil {
-			return err
-		}
-	}
+	// Cascade uses the same assumeYes policy as own worktree (default auto-yes).
+	// Dry-run never applies cascade mutations; mergeBackExternalWorktree prints would: lines.
 	if err := cascadeLinkedWorktrees(consumerTop, checkoutRoot, confirmFromStdin, assumeYes, dryRun); err != nil {
 		return err
 	}
@@ -1317,16 +1527,7 @@ func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleRep
 }
 
 func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool) error {
-	cwd, err := filepath.Abs(workDir)
-	if err != nil {
-		return fmt.Errorf("resolve cwd: %w", err)
-	}
-
-	if !worktree.IsInsideWorkTree(cwd) {
-		return fmt.Errorf("%s is not a git repository", cwd)
-	}
-
-	checkoutRoot, err := worktree.ShowToplevel(cwd)
+	checkoutRoot, err := requireLinkedWorktree(workDir, "--merge-back")
 	if err != nil {
 		return err
 	}
@@ -1485,41 +1686,10 @@ func resolveWouldBeMainTip(sourcePath, mainPath, relation string) (string, error
 	}
 }
 
-func checkCascadeNonInteractive(consumerTop, checkoutRoot string) error {
-	if term.IsTerminal(int(os.Stdin.Fd())) {
-		return nil
-	}
-	repos, err := discoverStatusRepos(context.Background(), consumerTop)
-	if err != nil {
-		return err
-	}
-	cleanCheckout := filepath.Clean(checkoutRoot)
-	for _, repo := range repos {
-		if repo.RepoType == scan_repo.RepoTypeMain {
-			continue
-		}
-		if repo.RepoType != scan_repo.RepoTypeWorktree {
-			continue
-		}
-		if !worktree.IsLinked(repo.Path) {
-			continue
-		}
-		if filepath.Clean(repo.Path) == cleanCheckout {
-			continue
-		}
-		mainRepo, err := worktree.ResolveMainRepo(repo.Path)
-		if err != nil {
-			return err
-		}
-		inclusion, err := worktree.HeadIncludedInMain(mainRepo, repo.Path)
-		if err != nil {
-			return err
-		}
-		if inclusion.Relation == "ahead" || inclusion.Relation == "diverged" {
-			return fmt.Errorf("wrk --done: cannot cascade merge-back non-interactively: linked worktree %s is %s and needs confirmation", repo.Path, inclusion.Relation)
-		}
-	}
-	return nil
+// planAssumeYes returns whether merge-back / set-task plan prompts should be
+// skipped. Default is auto-yes; --confirm forces prompts; -y/--yes still auto-yes.
+func planAssumeYes(assumeYes, forceConfirm bool) bool {
+	return assumeYes || !forceConfirm
 }
 
 func cascadeLinkedWorktrees(consumerTop, checkoutRoot string, confirmFromStdin, assumeYes, dryRun bool) error {
@@ -1562,8 +1732,8 @@ func cascadeLinkedWorktrees(consumerTop, checkoutRoot string, confirmFromStdin, 
 // branch shares the dep's history, so the merge-base check resolves. This
 // ensures dep work committed on the external worktree is merged back into the
 // dep repo before the worktree is removed. Relation to dep main: already-included
-// → remove only; ahead/diverged → prompt (via confirmFromStdin). A
-// non-interactive ahead/diverged worktree errors (no force-removal fallback).
+// → remove only; ahead/diverged → Confirm (default auto-yes from caller; --confirm
+// restores prompts; --confirm-from-stdin for non-TTY when prompting).
 //
 // When dryRun is true, prints a compact plan line and does not mutate.
 func mergeBackExternalWorktree(externalPath string, confirmFromStdin, assumeYes, dryRun bool) error {
@@ -2885,12 +3055,12 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 		}
 	}
 
-	// TTY check (escape hatch for testing via WRK_SET_TASK_CONFIRM=1; -y bypasses).
-	// Require an interactive stdin; stdout may be redirected while stdin is still a TTY
-	// (or vice versa under some harnesses). Non-interactive CI has neither.
+	// Default auto-yes (assumeYes) skips rename prompt. --confirm clears assumeYes so we
+	// prompt. WRK_SET_TASK_CONFIRM=1 is a test escape hatch that auto-confirms (no prompt).
+	// TTY detection sticks to stdout (same fd used for the rename plan print).
 	if !assumeYes && os.Getenv("WRK_SET_TASK_CONFIRM") != "1" {
-		if !term.IsTerminal(int(os.Stdin.Fd())) {
-			return fmt.Errorf("wrk: --set-task requires a terminal (tty)")
+		if !term.IsTerminal(int(os.Stdout.Fd())) {
+			return fmt.Errorf("wrk: --set-task --confirm requires a terminal (tty)")
 		}
 		fmt.Printf("Rename worktree:\n  %s → %s\n  branch %s → %s\n", cwd, newPath, branch, newBranch)
 		fmt.Print("Proceed? [Y/n] ")

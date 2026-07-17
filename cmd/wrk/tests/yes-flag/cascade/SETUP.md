@@ -1,9 +1,9 @@
 # Scenario
 
-**Feature**: `-y` cascade behavior — blocked on non-TTY, auto-yes on TTY
+**Feature**: `-y` cascade behavior — auto-yes on TTY and non-TTY
 
 ```
-# non-TTY: ahead external dep -> wrk --done -y -> error (cascade guard)
+# non-TTY: ahead external dep -> wrk --done -y -> cascade + consumer succeed
 # TTY: ahead external dep -> wrk --done -y -> cascade + consumer merge-back succeed
 ```
 

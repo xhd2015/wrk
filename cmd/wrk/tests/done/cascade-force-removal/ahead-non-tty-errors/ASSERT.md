@@ -1,14 +1,10 @@
 ## Expected
 
-- Non-zero exit code.
-- Stderr indicates cascade cannot proceed non-interactively (ahead/diverged linked worktree needs confirmation).
-- External dependency worktree under `external/` still exists.
-- Dep fix commit is still only on the external worktree branch (not merged into dep main).
+- Non-zero exit (replace guard after cascade — not the old non-interactive confirm error).
+- Dep fix merged into dep main.
+- External dependency worktree removed.
 - Consumer linked worktree still exists.
-
-## Side Effects
-
-- No `git worktree remove --force` on the external worktree.
+- Stderr is the local-replace block, not "cannot cascade merge-back non-interactively".
 
 ## Exit Code
 
@@ -22,27 +18,20 @@ import (
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode == 0 {
-		t.Fatalf("expected non-zero exit (no force-remove), got 0 stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
+		t.Fatalf("expected non-zero exit (replace guard after cascade), got 0 stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
 	}
 
-	combined := strings.ToLower(resp.Stderr + resp.Stdout)
-	if !strings.Contains(combined, "cascade") &&
-		!strings.Contains(combined, "ahead") &&
-		!strings.Contains(combined, "diverged") &&
-		!strings.Contains(combined, "confirmation") &&
-		!strings.Contains(combined, "non-interactive") &&
-		!strings.Contains(combined, "stdin is not a terminal") {
-		t.Fatalf("expected cascade non-TTY guard error, got stderr=%q stdout=%q", resp.Stderr, resp.Stdout)
+	lower := strings.ToLower(resp.Stderr + resp.Stdout)
+	if strings.Contains(lower, "cannot cascade merge-back non-interactively") {
+		t.Fatalf("old cascade pre-flight must not fire; stderr=%q", resp.Stderr)
 	}
-
-	assertFileExists(t, req.ExternalWtDir)
-	assertWorktreeListContains(t, req.DepPath, req.ExternalWtDir)
+	assertContains(t, resp.Stderr, "blocks wrk --done")
 
 	depLog := gitOutputIsolated(t, req.DepPath, "log", "--oneline")
-	assertNotContains(t, depLog, "dep fix on external worktree")
+	assertContains(t, depLog, "dep fix on external worktree")
 
-	extLog := gitOutputIsolated(t, req.ExternalWtDir, "log", "--oneline")
-	assertContains(t, extLog, "dep fix on external worktree")
+	assertFileNotExists(t, req.ExternalWtDir)
+	assertWorktreeListNotContains(t, req.DepPath, req.ExternalWtDir)
 
 	assertFileExists(t, req.WtDir)
 }

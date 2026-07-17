@@ -1,9 +1,10 @@
 ## Expected
 
-- Non-zero exit code (pre-flight cascade guard rejects before any merge-back).
-- External dependency worktree under `external/` still exists.
-- Dep fix committed on the external worktree was **not** merged into dep main.
+- Non-zero exit (local replace guard after cascade — same as `external-cascade`).
+- Dep fix **was** merged into dep main (cascade auto-yes ran; pre-flight guard no longer blocks).
+- External dependency worktree removed.
 - Consumer linked worktree still exists.
+- Stderr mentions replace blocking `--done`.
 
 ## Exit Code
 
@@ -13,17 +14,17 @@
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode == 0 {
-		t.Fatalf("expected non-zero exit (option A: no cascade merge on non-TTY), got 0 stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
+		t.Fatalf("expected non-zero exit (replace guard after cascade), got 0 stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
 	}
 
-	assertFileExists(t, req.ExternalWtDir)
-	assertWorktreeListContains(t, req.DepPath, req.ExternalWtDir)
+	assertContains(t, resp.Stderr, "blocks wrk --done")
+	assertContains(t, resp.Stderr, "go.mod: => ")
 
 	depLog := gitOutputIsolated(t, req.DepPath, "log", "--oneline")
-	assertNotContains(t, depLog, "dep fix on external worktree")
+	assertContains(t, depLog, "dep fix on external worktree")
 
-	extLog := gitOutputIsolated(t, req.ExternalWtDir, "log", "--oneline")
-	assertContains(t, extLog, "dep fix on external worktree")
+	assertFileNotExists(t, req.ExternalWtDir)
+	assertWorktreeListNotContains(t, req.DepPath, req.ExternalWtDir)
 
 	assertFileExists(t, req.WtDir)
 }

@@ -1,12 +1,12 @@
 # Scenario
 
-**Feature**: bare `--gen-commit-msg --sync` remains mutually exclusive (no primary)
+**Feature**: bare `--gen-commit-msg --sync` is allowed multi-stage compose (activeRoot stays cwd; no done required)
 
 ```
-# P2 must not open bare gen-commit + sync; sync is post-only with primary
+# Target model: stages may compose without --done/--merge-back
 myrepo -> wrk --gen-commit-msg --sync
-  -> non-zero
-  -> stderr mutually exclusive (or equivalent mode conflict)
+  -> must NOT stderr "mutually exclusive"
+  -> may later fail for missing --commit / no staged changes (not a mode mutex)
 ```
 
 ## Steps

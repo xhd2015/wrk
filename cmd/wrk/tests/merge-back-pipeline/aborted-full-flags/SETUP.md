@@ -5,7 +5,7 @@
 ```
 # user declines confirm → merge-back aborted; no post-pipeline
 myrepo (v0.0.1) + wtA (ahead)
-  -> wrk --merge-back --confirm-from-stdin --sync --tag-next --push  (stdin: n)
+  -> wrk --merge-back --confirm --confirm-from-stdin --sync --tag-next --push  (stdin: n)
   -> merge-back aborted
   -> no synced:; no tag created; no pushed line; wt remains
 ```
@@ -18,7 +18,7 @@ myrepo (v0.0.1) + wtA (ahead)
 ```go
 func Setup(t *testing.T, req *Request) error {
 	setupMergeBackPipelineLocal(t, req)
-	req.Args = []string{"--merge-back", "--confirm-from-stdin", "--sync", "--tag-next", "--push"}
+	req.Args = []string{"--merge-back", "--confirm", "--confirm-from-stdin", "--sync", "--tag-next", "--push"}
 	req.StdinInput = "n\n"
 	return nil
 }

@@ -115,6 +115,7 @@ var wrkCompletionFlags = []string{
 	"--scan-git-repos",
 	"--no-cache",
 	"--fetch",
+	"--github",
 	"-v", "--verbose",
 	"--color",
 	"--add",
@@ -132,6 +133,7 @@ var wrkCompletionFlags = []string{
 	"-t", "--task",
 	"--set-task",
 	"-y", "--yes",
+	"--confirm",
 	"--confirm-from-stdin",
 	"--no-in-module-replace",
 	"--no-cd",
@@ -158,11 +160,11 @@ var bashIntegrationDisallowedFlags = []string{
 	"--done", "--merge-back", "-l", "--list", "--repos", "--projects",
 	"--projects-dep-graph",
 	"--scan-git-repos", "--no-cache",
-	"--fetch", "-v", "--verbose", "--color", "--add", "--rm", "--where",
+	"--fetch", "--github", "-v", "--verbose", "--color", "--add", "--rm", "--where",
 	"--cd",
 	"--main",
 	"--dep", "--bring", "--all-deps", "--tag-next", "--propagate-tags", "--sync", "-t", "--task", "--set-task", "-y", "--yes",
-	"--confirm-from-stdin", "--no-in-module-replace",
+	"--confirm", "--confirm-from-stdin", "--no-in-module-replace",
 }
 
 // CompletionRequest carries bash COMP_WORDS and COMP_CWORD for tab completion.

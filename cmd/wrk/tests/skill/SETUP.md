@@ -127,7 +127,7 @@ func getWrkBin(t *testing.T) string {
 		if modRoot == "" {
 			t.Fatal("find module root: no go.mod in ancestors")
 		}
-		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/wrk")
+		cmd := exec.Command("go", "build", "-o", bin, "./cmd/wrk")
 		cmd.Dir = modRoot
 		out, err := cmd.CombinedOutput()
 		if err != nil {
