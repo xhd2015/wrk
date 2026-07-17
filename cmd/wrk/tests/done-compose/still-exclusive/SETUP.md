@@ -1,25 +1,29 @@
 # Scenario
 
-**Feature**: non-composed mode pairs remain mutually exclusive after composition lands
+**Feature**: list-mode exclusives remain; multi-stage pipeline pairs without list are allowed under activeRoot
 
 ```
-# composition must not accidentally open other exclusives
+# list modes stay exclusive with pipeline stages
 wrk --tag-next --list -> still mutually exclusive
-wrk --reinstall-local --sync -> still mutually exclusive (no primary)
 wrk --reinstall-local --list -> still mutually exclusive
-wrk --gen-commit-msg --sync -> still mutually exclusive (no primary; post-only with primary)
+
+# multi-stage without done is allowed (classic RED unlock until implementer):
+wrk --reinstall-local --sync -> NOT mutually exclusive
+wrk --gen-commit-msg --sync -> NOT mutually exclusive
+# full activeRoot coverage: compose-pipeline/
 ```
 
 ## Preconditions
 
 - Standalone exclusives such as `--tag-next` + `--list` stay rejected.
-- Bare `--reinstall-local` stays exclusive with `--sync` / `--list` (only composes after primary).
-- Bare `--gen-commit-msg --sync` (no `--done`/`--merge-back`) stays exclusive; `--sync` is only a
-  post modifier of primary, not of bare gen-commit.
+- `--reinstall-local --list` stays exclusive with list mode.
+- Bare multi-stage (`--gen-commit-msg --sync`, `--reinstall-local --sync`) is **allowed** under
+  the activeRoot compose model (leaves under this group assert unlock; deeper e2e under
+  `compose-pipeline/`).
 
 ## Steps
 
-- Leaves set still-invalid mode pairs.
+- Leaves set mode pairs (list exclusives stay RED-on-regression; pipeline pairs assert allow).
 
 ```go
 func Setup(t *testing.T, req *Request) error {

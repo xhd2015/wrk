@@ -1,16 +1,16 @@
 ## Expected
 
-- Non-zero exit.
-- Stderr mentions mutual exclusion (or equivalent mode conflict).
-- Prefer mentioning `--gen-commit-msg` and/or `--sync`.
+- Flag layer accepts `--gen-commit-msg` + `--sync` without a done/merge-back stage.
+- Stderr must **not** contain `mutually exclusive`.
+- Later-stage errors (e.g. missing `--commit`, nothing to commit) are acceptable.
 
-## Errors
+## Side Effects
 
-- Bare `--gen-commit-msg` and `--sync` cannot be combined without a primary.
+- None required (flag-layer unlock).
 
 ## Exit Code
 
-- Non-zero
+- Any, as long as failure is not multi-stage mutual exclusion of these two flags.
 
 ```go
 import (
@@ -19,20 +19,10 @@ import (
 
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
-	if resp.ExitCode == 0 {
-		t.Fatalf("expected non-zero exit for --gen-commit-msg --sync, got 0 stdout=%q stderr=%q",
-			resp.Stdout, resp.Stderr)
-	}
 	se := resp.Stderr
-	if !strings.Contains(se, "mutually exclusive") &&
-		!strings.Contains(se, "not valid") &&
-		!strings.Contains(se, "cannot") {
-		t.Fatalf("stderr should indicate mutual exclusion, got %q", se)
-	}
-	if !strings.Contains(se, "--gen-commit-msg") &&
-		!strings.Contains(se, "gen-commit-msg") &&
-		!strings.Contains(se, "--sync") {
-		t.Fatalf("stderr should name gen-commit-msg and/or sync, got %q", se)
+	if strings.Contains(se, "mutually exclusive") {
+		t.Fatalf("bare --gen-commit-msg --sync still mutually exclusive; stderr=%q exit=%d",
+			se, resp.ExitCode)
 	}
 }
 ```

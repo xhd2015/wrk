@@ -16,10 +16,11 @@ wrk --gen-commit-msg --commit [--model M] --done|--merge-back [post…]
   -> composed --dir with primary → reject (workDir wins)
   -> event command stays "done" / "merge-back" (not gen-commit-msg)
 
-# illegal: --json with primary; non-composed exclusives
-wrk --done --json / wrk --tag-next --list / wrk --reinstall-local --sync / wrk --reinstall-local --list
-wrk --gen-commit-msg --sync   # no primary → still exclusive
+# illegal: --json with primary; list-mode exclusives
+wrk --done --json / wrk --tag-next --list / wrk --reinstall-local --list
   -> non-zero, clear stderr
+# multi-stage without done is allowed under activeRoot model (see compose-pipeline/):
+#   wrk --gen-commit-msg --sync / wrk --reinstall-local --sync  → not mutually exclusive
 # bare wrk --push is standalone (cmd/wrk/tests/push/), not rejected here
 
 # user-facing help: composition documented in usage()
@@ -35,8 +36,9 @@ wrk --help
 - Flag-layer leaves use a **main** repo checkout so mutex checks fire **before** heavy merge-back / tagscope work.
 - Flag validation leaves: not full merge+tag+push+propagate+reinstall e2e; `help/` asserts `usage()` substrings only.
 - **P7**: `--propagate-tags` is an allowed post modifier with primary.
-- **P1 reinstall tail**: `--reinstall-local` is an allowed post-success tail after primary only.
-  Bare `--reinstall-local --sync` / `--list` stay exclusive.
+- **P1 reinstall tail**: `--reinstall-local` composes with primary posts; also with other pipeline
+  stages without primary (activeRoot model — `compose-pipeline/`). Bare `--reinstall-local --list`
+  stays exclusive with list mode.
 - **P2 gen-commit pre**: `--gen-commit-msg --commit` may compose with primary (± post). Classic RED
   until unlocked (today early `runGenCommitMsg` rejects `--done`/`--merge-back` as mutex).
   Bare `--gen-commit-msg` (no primary) and library path stay covered under `gen-commit-msg/`.

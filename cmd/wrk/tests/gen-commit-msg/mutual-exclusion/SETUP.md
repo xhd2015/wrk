@@ -1,21 +1,23 @@
 # Scenario
 
-**Feature**: wrk --gen-commit-msg is mutually exclusive with other standalone modes (no primary)
+**Feature**: wrk --gen-commit-msg exclusives vs allowed pipeline compose
 
 ```
-wrk --gen-commit-msg combined with other modes -> error
-# still exclusive after P2 primary compose:
-wrk --gen-commit-msg --status
-wrk --gen-commit-msg --sync   # --sync is post-only with --done/--merge-back
+# still exclusive with non-pipeline modes:
+wrk --gen-commit-msg --status -> non-zero; mutually exclusive
+
+# allowed multi-stage (activeRoot pipeline; no --done required):
+wrk --gen-commit-msg --sync [--dry-run] -> not mutually exclusive
+# covered by with-sync/ (exit 0 dry-run path)
 ```
 
 ## Steps
 
-1. Descendants combine `--gen-commit-msg` with another exclusive mode (e.g. `--status`, bare `--sync`).
+1. Descendants either reject list/status-style modes or allow pipeline stages with gen-commit.
 
 ```go
 func Setup(t *testing.T, req *Request) error {
-	// Grouping: mutex leaves share root helpers; no git required for mode selection.
+	// Grouping: mutex leaves share root helpers; with-sync needs git (leaf sets RepoDir).
 	ensureGenCommitMsgHelpersUsed()
 	return nil
 }

@@ -1,12 +1,12 @@
 # Scenario
 
-**Feature**: bare `--reinstall-local --sync` remains mutually exclusive (no primary)
+**Feature**: bare `--reinstall-local --sync` is allowed multi-stage compose (no done required)
 
 ```
-# composition with primary must not open bare reinstall + sync
+# Target model: reinstall and sync compose under fixed stage order without primary
 myrepo -> wrk --reinstall-local --sync
-  -> non-zero
-  -> stderr mutually exclusive
+  -> must NOT stderr "mutually exclusive"
+  -> may later fail for empty reinstall plan / sync conditions
 ```
 
 ## Steps

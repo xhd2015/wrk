@@ -10,8 +10,9 @@ import (
 
 // genCommitMsgDisallowedFlags are wrk mode / create-flow flags that cannot
 // appear with bare --gen-commit-msg (library-owned flags like --dry-run are allowed).
-// When composed with --done / --merge-back, those primaries are peeled as pre-stage
-// partners instead of hitting this exclusive path.
+// Pipeline compose partners (--done, --merge-back, --sync, --tag-next, --push,
+// --propagate-tags, --reinstall-local, --exec) are peeled before this list is
+// consulted, so they never hit the bare exclusive path.
 var genCommitMsgDisallowedFlags = []string{
 	"--done", "--merge-back", "-l", "--list", "--status", "--repos", "--projects",
 	"--projects-dep-graph",
@@ -32,6 +33,25 @@ var genCommitMsgDisallowedFlags = []string{
 	"--open-in-agent", "--no-open-in-agent",
 	"--no-config",
 	"--color", "-v", "--verbose",
+}
+
+// genCommitMsgComposePartners are flags that compose with --gen-commit-msg under
+// the activeRoot pipeline model (peeled; not mutually exclusive).
+var genCommitMsgComposePartners = []string{
+	"--done", "--merge-back",
+	"--sync", "--tag-next", "--push", "--propagate-tags",
+	"--reinstall-local", "--exec",
+}
+
+// hasGenCommitComposePartner reports whether args include a pipeline partner
+// that peels --gen-commit-msg into a multi-stage compose path.
+func hasGenCommitComposePartner(args []string) bool {
+	for _, p := range genCommitMsgComposePartners {
+		if hasArg(args, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // genCommitMsgValueFlags are library flags that take a value (separate arg or =form).
@@ -118,9 +138,19 @@ func runGenCommitMsgPreStage(workDir string, enabled bool, genArgs []string, dry
 		return fmt.Errorf("wrk: --dir is not valid with --gen-commit-msg when used with %s", primaryFlag)
 	}
 
+	return runGenCommitMsgStage(workDir, genArgs, dryRun)
+}
+
+// runGenCommitMsgStage runs library gen-commit-msg against workDir (activeRoot).
+// Used as stage 1 of multi-stage compose (with or without done/merge-back).
+// Does not require --commit (caller / library may still fail later).
+func runGenCommitMsgStage(workDir string, genArgs []string, dryRun bool) error {
+	if genArgsHasFlag(genArgs, "--dir") {
+		return fmt.Errorf("wrk: --dir is not valid with --gen-commit-msg when used in multi-stage compose")
+	}
 	forwarded := make([]string, 0, len(genArgs)+3)
 	forwarded = append(forwarded, genArgs...)
-	// Pin to primary workDir; user --dir was rejected above.
+	// Pin to activeRoot workDir.
 	forwarded = append(forwarded, "--dir", workDir)
 	if dryRun {
 		forwarded = append(forwarded, "--dry-run")
