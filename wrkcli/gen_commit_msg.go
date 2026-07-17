@@ -26,7 +26,7 @@ var genCommitMsgDisallowedFlags = []string{
 	"--version",
 	"--set-config", "--bash-integration",
 	"--push", "--json",
-	"--confirm-from-stdin", "--no-in-module-replace",
+	"--confirm-from-stdin", "--confirm", "--no-in-module-replace",
 	"--no-cd", "--force-cd",
 	"--new-window", "--no-new-window",
 	"--new-terminal", "--reuse-terminal", "--smart-terminal", "--no-new-terminal",

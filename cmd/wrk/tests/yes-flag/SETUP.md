@@ -1,14 +1,14 @@
 # Scenario
 
-**Feature**: universal `-y` / `--yes` auto-confirms Y/n prompts on wrk CLI
+**Feature**: universal `-y` / `--yes` auto-confirms Y/n prompts (compat with default auto-yes)
 
 ```
-# -y parsed at top level; auto-yes on own-worktree merge-back and --set-task rename
+# -y parsed at top level; still valid for done/merge-back/set-task (default is already auto-yes)
 wrk --done -y -> skip Proceed? on own ahead/diverged worktree (non-TTY ok)
 wrk --merge-back -y -> merge without prompt, keep worktree
 wrk --set-task "new" -y -> rename without stdout-TTY requirement
 wrk -y (create) -> no-op, same as bare wrk
-cascade ahead on non-TTY -> -y ineffective; TTY + -y auto-confirms cascade
+cascade ahead on non-TTY -> -y (and bare --done) auto-yes cascade merge
 ```
 
 ## Preconditions

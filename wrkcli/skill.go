@@ -43,6 +43,7 @@ var wrkModeFlags = map[string]struct{}{
 	"--add":                  {},
 	"--rm":                   {},
 	"--confirm-from-stdin":   {},
+	"--confirm":              {},
 	"-y":                     {},
 	"--yes":                  {},
 	"--no-in-module-replace": {},

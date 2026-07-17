@@ -135,6 +135,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	var addPath *string
 	var removePath *string
 	var confirmFromStdin bool
+	var forceConfirm bool
 	var assumeYes bool
 	var noInModuleReplace bool
 	var depPath string
@@ -191,6 +192,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		String("--add", &addPath).
 		String("--rm", &removePath).
 		Bool("--confirm-from-stdin", &confirmFromStdin).
+		Bool("--confirm", &forceConfirm).
 		Bool("-y,--yes", &assumeYes).
 		Bool("--no-in-module-replace", &noInModuleReplace).
 		Bool("--no-cd", &noCd).
@@ -312,7 +314,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		otherMode := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || allDeps || reinstallLocal || tagNext || propagateTags || syncFlag ||
 			dryRun || pushFlag || jsonFlag || taskFlagSet || setTaskFlagSet || fetchFlag || noCd || forceCd ||
-			cd || mainFlag || confirmFromStdin || noInModuleReplace || scanGitRepos ||
+			cd || mainFlag || confirmFromStdin || forceConfirm || noInModuleReplace || scanGitRepos ||
 			newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
 			noNewTerminal || openInAgent || noOpenInAgent || len(execArgs) > 0
 		ctx.workDir = origWd
@@ -338,7 +340,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" ||
 			allDeps || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || taskFlagSet ||
 			setTaskFlagSet || fetchFlag || noCd || forceCd || cd || mainFlag ||
-			confirmFromStdin || noInModuleReplace || webFlag ||
+			confirmFromStdin || forceConfirm || noInModuleReplace || webFlag ||
 			newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
 			noNewTerminal || openInAgent || noOpenInAgent || noConfig || len(execArgs) > 0
 		ctx.workDir = origWd
@@ -550,7 +552,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return fmt.Errorf("wrk: --set-task is mutually exclusive with other flags")
 	}
 	if setTaskFlagSet {
-		return runSetTask(workDir, *setTaskDesc, assumeYes, noCd, forceCd, execArgs)
+		// Default auto-yes for rename prompt; --confirm restores Y/n; -y still auto-yes.
+		return runSetTask(workDir, *setTaskDesc, planAssumeYes(assumeYes, forceConfirm), noCd, forceCd, execArgs)
 	}
 
 	if taskFlagSet && strings.TrimSpace(*taskDesc) == "" {
@@ -608,6 +611,9 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if confirmFromStdin && !done && !mergeBack {
 		return fmt.Errorf("wrk: --confirm-from-stdin is only valid with --done or --merge-back")
 	}
+	if forceConfirm && !done && !mergeBack && !setTaskFlagSet {
+		return fmt.Errorf("wrk: --confirm is only valid with --done, --merge-back, or --set-task")
+	}
 	if noInModuleReplace && !done {
 		return fmt.Errorf("wrk: --no-in-module-replace is only valid with --done")
 	}
@@ -634,10 +640,10 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			// Primary compose: post stages and done modifiers are allowed.
 		} else if !tagNext && !propagateTags && !syncFlag && !pushFlag && !genCommitMsg && !hasExec {
 			// Bare / --main reinstall only: exclusive with primary-only modifiers.
-			otherMode = otherMode || confirmFromStdin || noInModuleReplace || noCd || forceCd
+			otherMode = otherMode || confirmFromStdin || forceConfirm || noInModuleReplace || noCd || forceCd
 		} else {
 			// Multi-stage without primary: still reject done-only modifiers.
-			otherMode = otherMode || confirmFromStdin || noInModuleReplace || noCd || forceCd
+			otherMode = otherMode || confirmFromStdin || forceConfirm || noInModuleReplace || noCd || forceCd
 		}
 		if otherMode {
 			return fmt.Errorf("wrk: --reinstall-local is mutually exclusive with other modes")
@@ -790,7 +796,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			return err
 		}
 		runPrimary := func() error {
-			return runDone(workDir, wrkHome, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
+			// Default auto-yes for own + cascade plans; --confirm restores prompts; -y still auto-yes.
+			return runDone(workDir, wrkHome, confirmFromStdin, planAssumeYes(assumeYes, forceConfirm), noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
 		}
 		// Dry-run gen-commit pre would commit staged dirt; MergeBack --rm still
 		// requires a clean tree today. Stash staged only for the dry plan, then restore.
@@ -804,7 +811,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			return err
 		}
 		// merge-back keeps the worktree (Remove=false); dirty is allowed by MergeBack.
-		return runMergeBack(workDir, wrkHome, confirmFromStdin, assumeYes, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
+		// Default auto-yes; --confirm restores prompts; -y still auto-yes.
+		return runMergeBack(workDir, wrkHome, confirmFromStdin, planAssumeYes(assumeYes, forceConfirm), syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
 	}
 	// Multi-stage without done/merge-back: fixed order on activeRoot (= cwd toplevel).
 	// Stages: gen-commit → sync → tag-next → push → propagate-tags → reinstall-local → exec.
@@ -928,11 +936,11 @@ Positional arguments:
                    - missing parent            -> error
 
 Flags:
-  --done [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm-from-stdin]
-                                  merge worktree branch back and remove it
+  --done [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm] [--confirm-from-stdin]
+                                  merge worktree branch back and remove it (default auto-yes)
                                   (optional pre: --gen-commit-msg --commit … on worktree; optional post-success: --sync, --tag-next, --push, --propagate-tags, --reinstall-local from main)
-  --merge-back [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm-from-stdin]
-                                  merge worktree branch back WITHOUT removing it
+  --merge-back [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm] [--confirm-from-stdin]
+                                  merge worktree branch back WITHOUT removing it (default auto-yes)
                                   (optional pre: --gen-commit-msg --commit … on worktree; optional post-success: --sync, --tag-next, --push, --propagate-tags, --reinstall-local from main)
   --done --no-in-module-replace   block --done on ANY local replace (strict)
   --list                          list worktrees (git worktree list)
@@ -973,7 +981,10 @@ Flags:
                                   (not valid with --propagate-tags)
   --task <desc>                   append task slug to worktree/branch names
   --set-task <desc>               rename worktree/branch to match new task
-  -y, --yes                       auto-confirm Y/n prompts (own worktree; cascade on TTY only)
+  -y, --yes                       auto-confirm Y/n prompts (compat; default already auto-yes for
+                                  --done/--merge-back/--set-task including cascade)
+  --confirm                       force interactive Y/n for --done/--merge-back/--set-task
+                                  (opt out of default auto-yes; use with --confirm-from-stdin on non-TTY)
   --no-cd                         do not write shell follow-up cd lines (for bash auto-cd wrapper)
   --force-cd                      always land in dest after create/--done/--set-task (bypass gates)
   --new-window                    create Mission Control Desktop (implies --new-terminal)
@@ -1436,12 +1447,8 @@ func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleRep
 	if err != nil {
 		return err
 	}
-	// Dry-run never confirms/applies cascade, so skip the non-interactive block.
-	if !dryRun {
-		if err := checkCascadeNonInteractive(consumerTop, checkoutRoot); err != nil {
-			return err
-		}
-	}
+	// Cascade uses the same assumeYes policy as own worktree (default auto-yes).
+	// Dry-run never applies cascade mutations; mergeBackExternalWorktree prints would: lines.
 	if err := cascadeLinkedWorktrees(consumerTop, checkoutRoot, confirmFromStdin, assumeYes, dryRun); err != nil {
 		return err
 	}
@@ -1670,41 +1677,10 @@ func resolveWouldBeMainTip(sourcePath, mainPath, relation string) (string, error
 	}
 }
 
-func checkCascadeNonInteractive(consumerTop, checkoutRoot string) error {
-	if term.IsTerminal(int(os.Stdin.Fd())) {
-		return nil
-	}
-	repos, err := discoverStatusRepos(context.Background(), consumerTop)
-	if err != nil {
-		return err
-	}
-	cleanCheckout := filepath.Clean(checkoutRoot)
-	for _, repo := range repos {
-		if repo.RepoType == scan_repo.RepoTypeMain {
-			continue
-		}
-		if repo.RepoType != scan_repo.RepoTypeWorktree {
-			continue
-		}
-		if !worktree.IsLinked(repo.Path) {
-			continue
-		}
-		if filepath.Clean(repo.Path) == cleanCheckout {
-			continue
-		}
-		mainRepo, err := worktree.ResolveMainRepo(repo.Path)
-		if err != nil {
-			return err
-		}
-		inclusion, err := worktree.HeadIncludedInMain(mainRepo, repo.Path)
-		if err != nil {
-			return err
-		}
-		if inclusion.Relation == "ahead" || inclusion.Relation == "diverged" {
-			return fmt.Errorf("wrk --done: cannot cascade merge-back non-interactively: linked worktree %s is %s and needs confirmation", repo.Path, inclusion.Relation)
-		}
-	}
-	return nil
+// planAssumeYes returns whether merge-back / set-task plan prompts should be
+// skipped. Default is auto-yes; --confirm forces prompts; -y/--yes still auto-yes.
+func planAssumeYes(assumeYes, forceConfirm bool) bool {
+	return assumeYes || !forceConfirm
 }
 
 func cascadeLinkedWorktrees(consumerTop, checkoutRoot string, confirmFromStdin, assumeYes, dryRun bool) error {
@@ -1747,8 +1723,8 @@ func cascadeLinkedWorktrees(consumerTop, checkoutRoot string, confirmFromStdin, 
 // branch shares the dep's history, so the merge-base check resolves. This
 // ensures dep work committed on the external worktree is merged back into the
 // dep repo before the worktree is removed. Relation to dep main: already-included
-// → remove only; ahead/diverged → prompt (via confirmFromStdin). A
-// non-interactive ahead/diverged worktree errors (no force-removal fallback).
+// → remove only; ahead/diverged → Confirm (default auto-yes from caller; --confirm
+// restores prompts; --confirm-from-stdin for non-TTY when prompting).
 //
 // When dryRun is true, prints a compact plan line and does not mutate.
 func mergeBackExternalWorktree(externalPath string, confirmFromStdin, assumeYes, dryRun bool) error {
@@ -3070,10 +3046,11 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 		}
 	}
 
-	// TTY check (escape hatch for testing via WRK_SET_TASK_CONFIRM=1; -y bypasses)
+	// Default auto-yes (assumeYes) skips rename prompt. --confirm clears assumeYes so we
+	// prompt. WRK_SET_TASK_CONFIRM=1 is a test escape hatch that auto-confirms (no prompt).
 	if !assumeYes && os.Getenv("WRK_SET_TASK_CONFIRM") != "1" {
 		if !term.IsTerminal(int(os.Stdout.Fd())) {
-			return fmt.Errorf("wrk: --set-task requires a terminal (tty)")
+			return fmt.Errorf("wrk: --set-task --confirm requires a terminal (tty)")
 		}
 		fmt.Printf("Rename worktree:\n  %s → %s\n  branch %s → %s\n", cwd, newPath, branch, newBranch)
 		fmt.Print("Proceed? [Y/n] ")

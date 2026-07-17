@@ -49,11 +49,12 @@ wrk --propagate-tags --dry-run                # plan consumer go.mod bumps from 
 Fluent recipes:
 
 ```sh
-wrk --done --sync --tag-next --push -y
-wrk --done --sync --tag-next --push --reinstall-local -y
-wrk --gen-commit-msg --commit --model=MODEL --done --sync --tag-next --push -y
+wrk --done --sync --tag-next --push
+wrk --done --sync --tag-next --push --reinstall-local
+wrk --gen-commit-msg --commit --model=MODEL --done --sync --tag-next --push
 # full:
-wrk --gen-commit-msg --commit --model=MODEL --done --sync --tag-next --push --reinstall-local -y
+wrk --gen-commit-msg --commit --model=MODEL --done --sync --tag-next --push --reinstall-local
+# optional: --confirm restores Y/n; -y still auto-yes
 ```
 
 Optional pre-stage on `--done` / `--merge-back`: `--gen-commit-msg --commit …` (on the source worktree; with primary, `--commit` is required; `--dir` is not valid when composed).
@@ -90,4 +91,6 @@ wrk --all-deps --dry-run         # plan only, no writes
   use `--no-in-module-replace` for strict blocking.
 - **Basename fallback**: `wrk myrepo` resolves via registered projects when cwd has no
   local `./myrepo` directory.
-- **Non-TTY cascade**: `-y` auto-confirms on a TTY; in scripts prefer explicit flags.
+- **Default auto-yes**: bare `--done` / `--merge-back` / `--set-task` skip plan
+  prompts (including cascade deps). Use `--confirm` for interactive Y/n;
+  `-y` remains valid for compatibility.

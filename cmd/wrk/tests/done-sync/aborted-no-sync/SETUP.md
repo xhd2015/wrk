@@ -5,7 +5,7 @@
 ```
 # user declines confirm → merge-back aborted; no sync stdout
 myrepo + wtA (ahead)
-  -> wrk --done --confirm-from-stdin --sync  (stdin: n)
+  -> wrk --done --confirm --confirm-from-stdin --sync  (stdin: n)
   -> merge-back aborted
   -> no "synced:" line; wtA remains
 ```
@@ -13,7 +13,7 @@ myrepo + wtA (ahead)
 ## Steps
 
 1. Create wrk-managed linked worktree and commit ahead.
-2. Run `wrk --done --confirm-from-stdin --sync` with `n\n` on stdin.
+2. Run `wrk --done --confirm --confirm-from-stdin --sync` with `n\n` on stdin.
 
 ```go
 func Setup(t *testing.T, req *Request) error {
@@ -21,7 +21,7 @@ func Setup(t *testing.T, req *Request) error {
 	_, wtDir, _ := setupWrkWorktreeFromMain(t, req)
 	commitAheadOnWorktree(t, wtDir, "feature-work", "ahead of main")
 	req.RepoDir = wtDir
-	req.Args = []string{"--done", "--confirm-from-stdin", "--sync"}
+	req.Args = []string{"--done", "--confirm", "--confirm-from-stdin", "--sync"}
 	req.StdinInput = "n\n"
 	return nil
 }

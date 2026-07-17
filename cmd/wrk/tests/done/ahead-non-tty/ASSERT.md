@@ -1,13 +1,13 @@
 ## Expected
 
-- Non-zero exit code.
-- Stderr mentions `stdin is not a terminal` or `cannot prompt`.
-- Worktree directory still exists.
-- Main repo does NOT have the worktree commit.
+- Exit code 0.
+- Worktree directory removed; branch deleted.
+- Main repo contains the worktree commit.
+- No `Proceed?` prompt required.
 
 ## Exit Code
 
-- Non-zero
+- 0
 
 ```go
 import (
@@ -17,17 +17,18 @@ import (
 
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
-	if resp.ExitCode == 0 {
-		t.Fatalf("expected non-zero exit, got 0 stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
+	if resp.ExitCode != 0 {
+		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
 
-	combined := resp.Stderr + resp.Stdout
-	lower := strings.ToLower(combined)
-	if !strings.Contains(lower, "stdin is not a terminal") && !strings.Contains(lower, "cannot prompt") {
-		t.Fatalf("expected confirmation error in output, got stderr=%q stdout=%q", resp.Stderr, resp.Stdout)
+	combined := strings.ToLower(resp.Stdout + resp.Stderr)
+	if strings.Contains(combined, "proceed?") {
+		t.Fatalf("default auto-yes must not prompt, got stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
 	}
 
-	assertFileExists(t, req.WtDir)
-	assertFileNotExists(t, filepath.Join(req.MainRepo, "feature-work"))
+	assertFileNotExists(t, req.WtDir)
+	assertFileExists(t, filepath.Join(req.MainRepo, "feature-work"))
+	assertBranchNotExists(t, req.MainRepo, req.WtBranch)
+	assertWorktreeListNotContains(t, req.MainRepo, req.WtDir)
 }
 ```
