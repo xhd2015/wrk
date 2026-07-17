@@ -148,7 +148,7 @@ func getWrkBin(t *testing.T) string {
 		if modRoot == "" {
 			t.Fatal("find module root: no go.mod in ancestors")
 		}
-		cmd := exec.Command("go", "build", "-o", bin, "./cmd/wrk")
+		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/wrk")
 		cmd.Dir = modRoot
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -215,7 +215,7 @@ func getFakeOpencodeBin(t *testing.T) string {
 		if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
 			t.Fatalf("mkdir fake-opencode bin dir: %v", err)
 		}
-		cmd := exec.Command("go", "build", "-o", bin, "./cmd/fake-opencode")
+		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/fake-opencode")
 		cmd.Dir = agentProRoot(t)
 		out, err := cmd.CombinedOutput()
 		if err != nil {

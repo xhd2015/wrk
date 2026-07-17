@@ -247,7 +247,7 @@ func applyPropagateTags(updates []plannedConsumerUpdate) error {
 
 // goBuildAll runs `go build ./...` with Cmd.Dir set to moduleDir.
 func goBuildAll(moduleDir string) error {
-	cmd := exec.Command("go", "build", "./...")
+	cmd := exec.Command("go", "build", "-buildvcs=false", "./...")
 	cmd.Dir = moduleDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
