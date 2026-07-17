@@ -11,6 +11,8 @@ jobs:
       image: golang:1.25.0
     env:
       GOFLAGS: -buildvcs=false
+      NO_COLOR: "1"
+      FORCE_COLOR: "0"
     steps:
       - uses: actions/checkout@v4
       - name: Go test
