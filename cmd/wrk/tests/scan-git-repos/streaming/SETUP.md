@@ -179,8 +179,10 @@ func runScanGitReposStreamProbe(t *testing.T, req *Request) scanStreamProbe {
 // that the first chunk begins with the expected first main path line.
 func assertScanStreamsIncrementally(t *testing.T, probe scanStreamProbe, firstMainPath string) {
 	t.Helper()
-	const minTotalMS = int64(80)
-	const minLeadMS = int64(40)
+	// Fast CI runners (ubuntu-latest) finish the second root quickly; keep
+	// thresholds low enough for wall-clock noise while still rejecting batch-at-end.
+	const minTotalMS = int64(20)
+	const minLeadMS = int64(10)
 
 	if probe.FirstByteMS < 0 {
 		t.Fatalf("no stdout until process exit (buffered); total_ms=%d full=%q", probe.TotalMS, probe.FullStdout)

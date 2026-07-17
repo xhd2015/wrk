@@ -752,9 +752,15 @@ func wrkEnv(req *Request) []string {
 		if home == "" {
 			home = req.WorkRoot
 		}
+		// Prefer WorkRoot/minimal-bin (no system git-lfs). Fall back to
+		// /usr/bin:/bin only when the helper was not prepared.
+		path := filepath.Join(req.WorkRoot, "minimal-bin")
+		if st, err := os.Stat(path); err != nil || !st.IsDir() {
+			path = "/usr/bin:/bin"
+		}
 		env := []string{
 			"HOME=" + home,
-			"PATH=/usr/bin:/bin",
+			"PATH=" + path,
 			"WRK_HOME=" + req.WrkHome,
 			"WRK_DATE=" + wrkDate,
 		}
