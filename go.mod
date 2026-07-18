@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/xhd2015/agent-pro v0.0.66
-	github.com/xhd2015/dot-pkgs/go-pkgs v0.0.78
+	github.com/xhd2015/dot-pkgs/go-pkgs v0.0.81
 	github.com/xhd2015/gitops v0.0.25
 	github.com/xhd2015/less-flags v1.0.2
 	github.com/xhd2015/skills v0.0.21

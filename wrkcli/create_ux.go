@@ -1,6 +1,7 @@
 package wrkcli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,11 +11,16 @@ import (
 
 	"github.com/xhd2015/dot-pkgs/go-pkgs/computer-use/macos/space"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/shell/iterm2"
+	"golang.org/x/term"
 )
 
 const (
 	envSpaceInvokeLog = "WRK_SPACE_INVOKE_LOG"
+	envSpaceFail      = "WRK_SPACE_FAIL"
 	envSpaceGOOS      = "DOT_PKGS_SPACE_GOOS"
+
+	// Hermetic test value for WRK_SPACE_FAIL: pretend CreateAndActivate hit the 16-Desktop cap.
+	spaceFailMaxDesktops = "max-desktops"
 
 	defaultAgentRunner         = "grok-tty"
 	defaultAgentPromptTemplate = "/brainstorm ${task}"
@@ -167,18 +173,34 @@ func resolveCreateUX(wrkHome string, flags createUXFlags, applyConfig bool) (cre
 }
 
 // ensureCreateWindow runs Mission Control Desktop create+activate when plan.window
-// is set. Call this BEFORE native worktree create so a space failure does not
-// leave an orphan worktree. On success, plan.window is cleared so runCreateUX
-// will not create a second Desktop.
+// is set. Call this BEFORE native worktree create so a hard space failure does not
+// leave an orphan worktree. On success (or soft max-Desktop capacity failure),
+// plan.window is cleared so runCreateUX will not create a second Desktop.
+//
+// When macOS is already at the Desktop maximum, CreateAndActivate returns
+// space.ErrMaxDesktops: we warn and continue on the current Desktop (best-effort).
 func ensureCreateWindow(plan *createUXPlan) error {
 	if plan == nil || !plan.window {
 		return nil
 	}
 	if _, err := createAndActivateSpace(); err != nil {
+		if errors.Is(err, space.ErrMaxDesktops) {
+			warnMaxDesktopsFallback()
+			plan.window = false
+			return nil
+		}
 		return fmt.Errorf("wrk: window: %w", err)
 	}
 	plan.window = false
 	return nil
+}
+
+func warnMaxDesktopsFallback() {
+	warnTok := "warning:"
+	if term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == "" {
+		warnTok = colorize("warning:", ansiOrange)
+	}
+	fmt.Fprintf(os.Stderr, "%s Mission Control already at maximum Desktops (16); continuing on current Desktop\n", warnTok)
 }
 
 // runCreateUX runs terminal / agent steps after native create printed the path.
@@ -188,7 +210,11 @@ func runCreateUX(worktreePath, task string, plan createUXPlan) error {
 	// Defensive: if window was not pre-run (e.g. older call path), still try.
 	if plan.window {
 		if _, err := createAndActivateSpace(); err != nil {
-			return fmt.Errorf("wrk: window: %w", err)
+			if errors.Is(err, space.ErrMaxDesktops) {
+				warnMaxDesktopsFallback()
+			} else {
+				return fmt.Errorf("wrk: window: %w", err)
+			}
 		}
 	}
 
@@ -253,6 +279,8 @@ func openIterm(dir string, mode iterm2.OpenMode, followUps []string) error {
 
 // createAndActivateSpace wraps space.CreateAndActivate with a hermetic test hook:
 // when WRK_SPACE_INVOKE_LOG is set, log CreateAndActivate and skip real AX / settle.
+// When WRK_SPACE_FAIL=max-desktops (with the log hook), return space.ErrMaxDesktops
+// after logging so capacity soft-fail can be tested without Mission Control.
 func createAndActivateSpace() (int, error) {
 	if logPath := os.Getenv(envSpaceInvokeLog); logPath != "" {
 		if effectiveSpaceGOOS() != "darwin" {
@@ -269,6 +297,9 @@ func createAndActivateSpace() (int, error) {
 		}
 		if cerr != nil {
 			return 0, cerr
+		}
+		if os.Getenv(envSpaceFail) == spaceFailMaxDesktops {
+			return 0, space.ErrMaxDesktops
 		}
 		return 1, nil
 	}

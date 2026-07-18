@@ -22,6 +22,7 @@ window on implies terminal new (after flag apply); legacy create.interceptor ign
 - Git available; isolated `{WRK_HOME}`; `WRK_DATE=2026-06-30`.
 - UX mocks via env (implementer must honor space hook; iterm2 package already supports script-out):
   - `WRK_SPACE_INVOKE_LOG` — when set, wrk must log each `CreateAndActivate` (one line `CreateAndActivate`) and **not** run real Mission Control AX; settle must not sleep in tests.
+  - `WRK_SPACE_FAIL=max-desktops` — with the invoke log hook, return `space.ErrMaxDesktops` after logging (hermetic max-Desktop capacity soft-fail).
   - `DOT_PKGS_SPACE_GOOS` — platform override for space package (`darwin` / `linux`).
   - `KOOL_ITERM2_SCRIPT_OUT` — iterm2 writes AppleScript here instead of calling real osascript.
   - `KOOL_ITERM2_INSTALLED=1` — pretend iTerm2 is installed.
