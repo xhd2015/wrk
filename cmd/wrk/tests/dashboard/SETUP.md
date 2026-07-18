@@ -41,6 +41,8 @@ wrk --new --done | --list | --status
 - P3: `interactive/` forced actions via env (no real PTY).
 - P3b: `tty/` real PTY via **tty-watch** (Bubble Tea stays alive; keys CANCEL/RUN).
 - P4: `docs/` help + skill coverage for dashboard / `--new`.
+- P5: `package-tui/` package-boundary leaves for `github.com/xhd2015/wrk/wrkcli/tui`
+  (importable / RunDashboard+types exported / no parent import cycle). Classic TDD: RED until implementer.
 
 ## Context
 

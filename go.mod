@@ -5,11 +5,11 @@ go 1.25.0
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/xhd2015/agent-pro v0.0.70
+	github.com/xhd2015/agent-pro v0.0.76
 	github.com/xhd2015/dot-pkgs/go-pkgs v0.0.85
 	github.com/xhd2015/gitops v0.0.25
 	github.com/xhd2015/less-flags v1.0.2
-	github.com/xhd2015/skills v0.0.21
+	github.com/xhd2015/skills v0.0.22
 	github.com/xhd2015/xgo v1.2.0
 	golang.org/x/mod v0.36.0
 	golang.org/x/term v0.43.0
