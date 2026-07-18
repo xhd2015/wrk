@@ -108,6 +108,10 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// Bare --gen-commit-msg (no pipeline partner): exclusive early path.
 	// With --done / --merge-back / other pipeline stages: peel library flags and
 	// run as stage 1 of activeRoot compose later.
+	// --main is never valid with --gen-commit-msg (named reject before bare gen path).
+	if hasArg(args, "--gen-commit-msg") && hasArg(args, "--main") {
+		return fmt.Errorf("wrk: --main is not valid with --gen-commit-msg")
+	}
 	var genCommitMsg bool
 	var genCommitArgs []string
 	parseArgs := args
@@ -381,16 +385,18 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	// --main takes no path positional when used alone. It may compose with --status
 	// (status of main repo, no shell); positionals then follow --status rules.
-	// It may also compose with --reinstall-local (and --dry-run as its modifier);
-	// reinstall-local takes no path positionals.
+	// It may also compose with --reinstall-local (and --dry-run as its modifier)
+	// and with activeRoot pipeline stages (sync/tag-next/push/propagate/reinstall/exec);
+	// those take no path positionals.
 	// Mutual exclusion with other modes is checked later; if another mode flag is
 	// also set, prefer that error over unexpected arguments.
 	if mainFlag {
-		// reinstallLocal is a compose partner (not otherMode); dry-run only allowed with it.
+		// Pipeline partners and reinstall-local are compose partners (not otherMode).
+		mainPipelinePartner := reinstallLocal || tagNext || propagateTags || syncFlag || pushFlag || len(execArgs) > 0
 		otherMode := done || list || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet ||
-			whereFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || propagateTags || syncFlag || pushFlag || jsonFlag || mergeBack || taskFlagSet ||
+			whereFlagSet || depPath != "" || bringPath != "" || allDeps || jsonFlag || mergeBack || taskFlagSet ||
 			setTaskFlagSet || noCd || cd || spawnTarget != ""
-		if !reinstallLocal {
+		if !mainPipelinePartner && !status {
 			otherMode = otherMode || dryRun
 		}
 		// --fetch is only valid with --status (or --projects); allow with --main --status.
@@ -404,7 +410,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			}
 			return fmt.Errorf("wrk: --main is mutually exclusive with other modes")
 		}
-		if !status && !reinstallLocal && len(remaining) > 0 {
+		if !status && !mainPipelinePartner && len(remaining) > 0 {
 			ctx.workDir = origWd
 			if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
 				return err
@@ -420,10 +426,11 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if syncFlag {
 		// Pipeline partners (done/merge-back/tag-next/push/propagate/reinstall/gen-commit/exec)
 		// are intentionally excluded so multi-stage composition is allowed.
+		// --main is a scope modifier for the activeRoot pipeline (not otherMode).
 		otherMode := list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" ||
 			allDeps || taskFlagSet || setTaskFlagSet ||
-			cd || mainFlag || fetchFlag || spawnTarget != ""
+			cd || fetchFlag || spawnTarget != ""
 		// Bare --sync --json (no tag-next) still exclusive; multi-stage +json named later.
 		if jsonFlag && !tagNext {
 			otherMode = true
@@ -543,9 +550,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if allDeps {
 			return fmt.Errorf("wrk: --exec is not valid with --all-deps")
 		}
-		if mainFlag {
-			return fmt.Errorf("wrk: --exec is not valid with --main")
-		}
+		// --exec may compose with --main as the last activeRoot pipeline stage
+		// (activeRoot rewritten to main). Bare --main --exec is also allowed.
 	}
 
 	// --set-task is mutually exclusive with all other modes.
@@ -599,11 +605,14 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if cd && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || noCd || mainFlag) {
 		return fmt.Errorf("wrk: --cd is mutually exclusive with other modes")
 	}
-	// --main composes with --status (and --fetch when status is set) and with
-	// --reinstall-local (and --dry-run when reinstall is set); exclusive otherwise.
+	// --main composes with --status (and --fetch when status is set), with
+	// --reinstall-local, and with activeRoot pipeline stages (sync/tag-next/push/
+	// propagate-tags/reinstall-local/exec, plus --dry-run as modifier). Exclusive
+	// with done/merge-back, gen-commit-msg (checked earlier), and non-pipeline modes.
 	if mainFlag {
-		otherMode := done || list || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || tagNext || propagateTags || syncFlag || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || noCd || cd || (!status && fetchFlag)
-		if !reinstallLocal {
+		mainPipelinePartner := reinstallLocal || tagNext || propagateTags || syncFlag || pushFlag || hasExec
+		otherMode := done || list || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || noCd || cd || (!status && fetchFlag)
+		if !mainPipelinePartner && !status {
 			otherMode = otherMode || dryRun
 		}
 		if otherMode {
@@ -657,7 +666,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// --tag-next may compose with other pipeline stages (activeRoot must be main at
 	// that stage). Still exclusive with list/status/repos and other non-pipeline modes.
 	if tagNext {
-		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
+		// --main is a scope modifier (activeRoot := main), not exclusive with --tag-next.
+		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != ""
 		if otherMode {
@@ -668,7 +678,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// --push alone with bare --propagate-tags (no tag-next/done/merge-back) is invalid.
 	// --json is rejected separately so the error names both flags.
 	if propagateTags {
-		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
+		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != ""
 		if !done && !mergeBack && !tagNext && pushFlag {
@@ -682,7 +692,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// --sync may compose with pipeline stages (activeRoot model); exclusive with
 	// non-pipeline modes. Multi-stage + --json is rejected by the --json check below.
 	if syncFlag {
-		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
+		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != ""
 		if jsonFlag && !tagNext {
@@ -695,8 +705,9 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// --push is a bare primary (option R: push current checkout branch), or a
 	// composition stage with other pipeline flags. Bare --push is exclusive with
 	// non-pipeline modes. --json is rejected separately so the error names --json.
+	// --main is a scope modifier and may compose with --push (pipeline activeRoot).
 	if pushFlag && !tagNext && !done && !mergeBack {
-		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd || mainFlag ||
+		otherMode := depPath != "" || bringPath != "" || list || allDeps || cd ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != ""
 		// propagate without tag-next/done still invalid (handled above for propagate).
@@ -771,8 +782,27 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if reinstallLocal && !done && !mergeBack && !genCommitMsg && !syncFlag && !tagNext && !pushFlag && !propagateTags && !hasExec {
 		return runReinstallLocal(workDir, dryRun, mainFlag, colorFlag)
 	}
+	// --main with pipeline partners: rewrite activeRoot to main (no nested shell).
+	// Bare --main alone still opens a nested shell via runMain.
 	if mainFlag {
-		return runMain(workDir)
+		mainPipelinePartner := tagNext || propagateTags || syncFlag || pushFlag || reinstallLocal || hasExec
+		if !mainPipelinePartner {
+			return runMain(workDir)
+		}
+		mainRepo, err := resolveMainRepoForWorkDir(workDir)
+		if err != nil {
+			return err
+		}
+		// Already on main: non-fatal notice; continue pipeline under main.
+		cwdAbs, absErr := filepath.Abs(workDir)
+		if absErr == nil {
+			top, topErr := worktree.ShowToplevel(cwdAbs)
+			if topErr == nil && sameDirPath(top, mainRepo) {
+				fmt.Fprintf(os.Stderr, "wrk: --main is not necessary (already at main repository root); continuing\n")
+			}
+		}
+		workDir = mainRepo
+		// Fall through to activeRoot pipeline / bare stage handlers with main as workDir.
 	}
 	if cd {
 		return runCd(workDir, execArgs)
@@ -964,7 +994,8 @@ Flags:
   --cd <path|basename>            jump into directory (in-place follow-up or interactive shell)
   --main                          open nested shell at main repository root for this checkout
                                   (with --status: run status against the main repo instead;
-                                   with --reinstall-local: reinstall from main repo modules)
+                                   with --reinstall-local: reinstall from main repo modules;
+                                   with pipeline stages: run activeRoot as main, no nested shell)
   --dep <path>                    spawn a dependency worktree under ./external
   --bring <path>                  like --dep, but soft-skip go.mod replace when not a module dep
   --all-deps                      link every required dep from registered projects
