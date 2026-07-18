@@ -1,22 +1,22 @@
 # Scenario
 
-**Feature**: wrk --scan-git-repos discovers main git repos and records them in projects.json
+**Feature**: wrk --scan-git-repos always streams every valid git repo found; projects.json is a side effect
 
 ```
-# standalone mode: scan roots for main repos; record+print as found (OnRepo)
-wrk --scan-git-repos [ROOT...] [--no-cache]
+# standalone mode: scan roots; always print valid finds; record new mains only
+wrk --scan-git-repos [ROOT...] [--no-cache] [--include-worktrees]
   -> scan_repo.Scan(Roots, NoCache, OnRepo)
-  -> filter RepoTypeMain only
-  -> storage.RecordProject(wrkHome, path, source="scan") as each main is found
-  -> stdout: newly recorded absolute main paths in discovery order (not post-scan sort)
+  -> default: print RepoTypeMain only; with --include-worktrees also print worktrees
+  -> stdout: every valid abs path as discovered (known or not; not post-scan sort)
+  -> RecordProject(..., source="scan") only for new mains (not worktrees; not duplicates)
 
 # default root when no ROOT... (see defaults/)
 wrk --scan-git-repos  -> roots = [$HOME] if home is a directory (not ~/Projects)
 wrk --scan-git-repos  (HOME missing/not a dir)  -> non-zero; error about home/~
 
-# already recorded
-wrk --scan-git-repos ROOT (2nd run)
-  -> exit 0; no duplicate projects.json entries; no newly-added stdout lines
+# already recorded (always-print / record/idempotent)
+wrk --scan-git-repos ROOT (2nd run / pre-seeded projects)
+  -> exit 0; still prints valid main path once; no duplicate projects.json entries
 
 # streaming / interrupt (see streaming/ and interrupt/ leaves)
 wrk --scan-git-repos ROOT_B ROOT_A  -> discovery-order stdout (CLI root order)
@@ -24,8 +24,12 @@ wrk --scan-git-repos --no-cache ROOT_FIRST ROOT_LATER  -> first path before fini
 SIGINT mid-scan  -> exit 130; stderr warning: interrupted + progress saved; partial projects kept
 
 # cache flag
-wrk --scan-git-repos --no-cache ROOT  -> still discovers + records (NoCache to scan_repo)
+wrk --scan-git-repos --no-cache ROOT  -> still discovers + prints + records new (NoCache)
 wrk --no-cache (no --scan-git-repos)  -> non-zero; only valid with --scan-git-repos
+
+# include-worktrees (see include-worktrees/)
+wrk --scan-git-repos --include-worktrees ROOT  -> print main + valid worktrees; record main only
+wrk --include-worktrees (no --scan-git-repos)  -> non-zero; only valid with --scan-git-repos
 
 # debug wiring (see debug/ leaves) — implemented P3
 wrk --scan-git-repos -v ROOT  -> Options.Debug=true; stderr scan: + mode=
@@ -35,7 +39,12 @@ wrk --scan-git-repos ROOT (no -v, no env)  -> zero scan: markers
 
 # mutual exclusion / help
 wrk --scan-git-repos --projects  -> non-zero; mutually exclusive
-wrk -h  -> documents --scan-git-repos, --no-cache, and default root ~
+wrk -h  -> documents --scan-git-repos, --no-cache, --include-worktrees, default root ~
+
+# P5 two-base + filter (see filter-home-subpath/) — FakeHome isolation
+wrk --scan-git-repos  -> universe home; product $HOME/.cache/git-repo-scan/home/
+wrk --scan-git-repos ~/Projects  -> same home cache files; stdout only under Projects
+wrk --scan-git-repos ~/Projects -v  -> stderr cache_base + filter
 ```
 
 ## Preconditions
@@ -45,6 +54,7 @@ wrk -h  -> documents --scan-git-repos, --no-cache, and default root ~
 - Process cwd is `{WorkRoot}` (non-git) so auto-record does not pollute `projects.json`.
 - Explicit-root leaves use roots under `{WorkRoot}` — do not rely on `$HOME/Projects`.
 - Bare-flag default-root leaves (`defaults/`) isolate `HOME` via `FakeHome` and must not create `Projects`.
+- `filter-home-subpath/` uses FakeHome with both `home-main` and `Projects/proj-main`.
 
 ## Steps
 
@@ -55,9 +65,9 @@ wrk -h  -> documents --scan-git-repos, --no-cache, and default root ~
 ## Context
 
 - `projects.json` entries use `source: "scan"` for paths first seen via `--scan-git-repos`.
-- Re-recording is idempotent (first `source` wins; no duplicate paths).
-- Linked worktrees may appear under the scan root; only `RepoTypeMain` paths are recorded.
-- Stdout prefers **newly** recorded absolute main paths only, printed **as found** in discovery order (one per line, trailing `\n`); already-known stays silent on stdout. Not batch-sorted after the full scan.
+- Re-recording is idempotent (first `source` wins; no duplicate paths). Recording does **not** gate stdout.
+- Linked worktrees may appear under the scan root; default omits them from stdout and never records them; `--include-worktrees` prints valid worktrees (list-only).
+- Stdout always lists every **valid** discovery (live `.git`, under root filter, type allowed by flags) **as found** in discovery order (one absolute path per line, trailing `\n`); same path at most once per run. Not batch-sorted after the full scan.
 - Mid-scan SIGINT/SIGTERM → exit 130, stderr progress-saved warning, partial projects/cache retained.
 
 ```go
@@ -65,6 +75,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -212,6 +223,23 @@ func seedScanProject(t *testing.T, wrkHome, path string) {
 	}
 }
 
+// countScanStdoutPathLines counts non-empty stdout lines whose resolved path equals wantPath.
+func countScanStdoutPathLines(t *testing.T, stdout, wantPath string) int {
+	t.Helper()
+	want := resolveScanPath(t, wantPath)
+	n := 0
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if resolveScanPath(t, line) == want {
+			n++
+		}
+	}
+	return n
+}
+
 func ensureScanGitReposHelpersUsed() {
 	_ = scanProjectsJSONPath
 	_ = readScanProjectsFile
@@ -223,5 +251,6 @@ func ensureScanGitReposHelpersUsed() {
 	_ = setupScanLinkedWorktree
 	_ = makeScanRoot
 	_ = seedScanProject
+	_ = countScanStdoutPathLines
 }
 ```

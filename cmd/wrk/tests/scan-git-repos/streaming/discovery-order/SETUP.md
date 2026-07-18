@@ -1,11 +1,11 @@
 # Scenario
 
-**Feature**: multi-root scan prints newly recorded mains in CLI root order (discovery), not sorted paths
+**Feature**: multi-root scan always prints valid mains in CLI root order (discovery), not sorted paths
 
 ```
 root-b/main-b + root-a/main-a
   -> wrk --scan-git-repos root-b root-a
-  -> discovery order: main-b then main-a
+  -> discovery order: main-b then main-a (always-print as found)
   -> NOT lexicographic: main-a then main-b
   -> projects.json records both source=scan
 ```

@@ -1,13 +1,13 @@
 ## Expected
 
 - Exit code 0.
-- Stdout contains the resolved main repo absolute path exactly once (always-print of valid finds; not empty).
-- `projects.json` still has exactly one entry for the main repo with `source: "scan"`.
+- Stdout includes the resolved main absolute path exactly once (always-print; not silent for known).
+- `projects.json` still has exactly one entry with `source: "scan"`.
 
 ## Side Effects
 
-- No duplicate project entries after the second scan.
-- Already-known does not suppress listing the live main path.
+- Known path does not re-record or duplicate in projects.json.
+- Listing is independent of the record gate.
 
 ## Exit Code
 
@@ -22,7 +22,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	want := resolveScanPath(t, req.MainRepo)
 	n := countScanStdoutPathLines(t, resp.Stdout, want)
 	if n != 1 {
-		t.Fatalf("second scan must print known main path exactly once; count=%d stdout=%q want=%q", n, resp.Stdout, want)
+		t.Fatalf("known main must appear exactly once on stdout; count=%d stdout=%q want=%q", n, resp.Stdout, want)
 	}
 	assertScanProjectsCount(t, req.WrkHome, 1)
 	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
