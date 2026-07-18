@@ -60,6 +60,7 @@ var wrkModeFlags = map[string]struct{}{
 	"--set-task":             {},
 	"--where":                {},
 	"--cd":                   {},
+	"--new":                  {},
 	"--new-window":           {},
 	"--no-new-window":        {},
 	"--new-terminal":         {},

@@ -288,6 +288,10 @@ func branchName(baseBranch, date string, suffix int) string {
 func runWrkWithArgs(t *testing.T, req *Request, dir string, args ...string) string {
 	t.Helper()
 	bin := getWrkBin(t)
+	// Empty args would enter dashboard; fixture create path uses --new.
+	if len(args) == 0 {
+		args = []string{"--new"}
+	}
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
 	cmd.Env = []string{

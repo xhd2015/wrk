@@ -4,7 +4,8 @@
 
 ```
 # isolated WRK_HOME + work root per test; build wrk once
-wrk (no args) from cwd -> stdout path only + git worktree side effects
+wrk --new from cwd -> stdout path only + git worktree side effects (create)
+wrk (no args) from cwd -> dashboard (not create)
 wrk --done [--confirm-from-stdin] from linked wt -> merge-back --rm
 wrk --list from cwd -> git worktree list stdout unchanged
 ```
@@ -301,12 +302,17 @@ func branchName(baseBranch, date string, suffix int) string {
 
 func runWrkFrom(t *testing.T, req *Request, dir string) string {
 	t.Helper()
-	return runWrkWithArgs(t, req, dir)
+	// Create entry is wrk --new (bare no-args is dashboard).
+	return runWrkWithArgs(t, req, dir, "--new")
 }
 
 func runWrkWithArgs(t *testing.T, req *Request, dir string, args ...string) string {
 	t.Helper()
 	bin := getWrkBin(t)
+	// Empty args would enter dashboard; fixture helpers that mean "create" must pass --new.
+	if len(args) == 0 {
+		args = []string{"--new"}
+	}
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "WRK_HOME="+req.WrkHome, "WRK_DATE="+wrkDate)

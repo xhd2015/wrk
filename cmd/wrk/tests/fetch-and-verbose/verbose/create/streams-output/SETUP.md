@@ -13,7 +13,7 @@ func Setup(t *testing.T, req *Request) error {
 	repo := filepath.Join(req.WorkRoot, "create-v-stream")
 	initFetchVerboseRepo(t, repo, "create v stream")
 	req.RepoDir = repo
-	req.Args = []string{"-v"}
+	req.Args = []string{"--new", "-v"}
 	return nil
 }
 ```

@@ -1,9 +1,9 @@
 # Scenario
 
-**Feature**: wrk -v create logs worktree add
+**Feature**: wrk --new -v create logs worktree add
 
 ```
-main repo -> wrk -v -> stderr contains worktree add
+main repo -> wrk --new -v -> stderr contains worktree add
 ```
 
 ```go
@@ -13,7 +13,7 @@ func Setup(t *testing.T, req *Request) error {
 	repo := filepath.Join(req.WorkRoot, "create-v-main")
 	initFetchVerboseRepo(t, repo, "create v main")
 	req.RepoDir = repo
-	req.Args = []string{"-v"}
+	req.Args = []string{"--new", "-v"}
 	return nil
 }
 ```

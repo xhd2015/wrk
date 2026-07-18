@@ -10,7 +10,7 @@ wrk -> non-zero; follow-up file empty
 ## Steps
 
 1. Create non-git directory.
-2. Run bare `wrk` with follow-up env set.
+2. Run `wrk --new` with follow-up env set (create fails on non-git).
 
 ```go
 import (
@@ -22,7 +22,7 @@ func Setup(t *testing.T, req *Request) error {
 	mkdirAll(t, plain)
 	req.RepoDir = plain
 	req.UseFollowupEnv = true
-	req.CLIArgs = nil
+	req.CLIArgs = []string{"--new"}
 	return nil
 }
 ```

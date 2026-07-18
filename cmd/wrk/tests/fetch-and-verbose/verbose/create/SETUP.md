@@ -1,9 +1,9 @@
 # Scenario
 
-**Feature**: wrk -v on no-args create logs and streams worktree add
+**Feature**: wrk -v on create via --new logs and streams worktree add
 
 ```
-no-args create -> stderr has timestamp worktree add log + git subprocess lines
+create via --new -> stderr has timestamp worktree add log + git subprocess lines
 minor reads (rev-parse, status) not logged
 ```
 

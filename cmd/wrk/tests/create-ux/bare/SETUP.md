@@ -1,14 +1,15 @@
 # Scenario
 
-**Feature**: create with no window/terminal/agent axes
+**Feature**: create with no window/terminal/agent axes via `wrk --new`
 
 ```
-empty config + bare wrk -> native create only; no space/iterm/agent
+empty config + wrk --new -> native create only; no space/iterm/agent
 ```
 
 ## Steps
 
-- Leaves use empty config and no UX flags.
+- Leaves use empty config and `--new` (no UX flags).
+- P1: bare no-args is dashboard; create entry is `--new`.
 
 ```go
 func Setup(t *testing.T, req *Request) error {

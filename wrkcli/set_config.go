@@ -17,6 +17,7 @@ var setConfigDisallowedFlags = []string{
 	"--fetch", "--github", "--add", "--rm", "--where", "--cd", "--main",
 	"--dep", "--bring", "--all-deps", "--tag-next", "--propagate-tags", "--sync", "--dry-run",
 	"-t", "--task", "--set-task",
+	"--new",
 	"--exec",
 	"--bash-integration", "--interceptor",
 	"--no-interceptor",

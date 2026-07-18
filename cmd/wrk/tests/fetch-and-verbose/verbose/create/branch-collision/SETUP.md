@@ -19,7 +19,7 @@ func Setup(t *testing.T, req *Request) error {
 	req.TargetDir = repo
 	req.RepoDir = req.WorkRoot
 	req.SpawnDir = filepath.Join(req.WorkRoot, "wt")
-	req.Args = []string{"-v"}
+	req.Args = []string{"--new", "-v"}
 	return nil
 }
 ```

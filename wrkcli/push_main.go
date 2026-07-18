@@ -48,6 +48,20 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 
 	remote, remoteBranch, err := resolvePushRemote(mainRepo, branch)
 	if err != nil {
+		// Dry-run still emits a plan when no upstream/origin is configured so
+		// multi-stage compose dry-runs (e.g. dashboard RUN) can complete hermetically.
+		// Real push keeps the hard error (see push/no-remote).
+		if dryRun {
+			remote = "origin"
+			remoteBranch = branch
+			if printOutput {
+				fmt.Printf("would: git push %s %s\n", remote, branch)
+				for _, tag := range tags {
+					fmt.Printf("would: git push %s %s\n", remote, tag)
+				}
+			}
+			return nil
+		}
 		return err
 	}
 

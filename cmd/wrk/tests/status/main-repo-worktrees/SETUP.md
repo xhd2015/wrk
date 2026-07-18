@@ -365,15 +365,16 @@ func initMainRepoWithGoMod(t *testing.T, path, subject string) {
 func runWrkFrom(t *testing.T, req *Request, dir string) string {
 	t.Helper()
 	bin := getWrkBin(t)
-	cmd := exec.Command(bin)
+	// Create entry is wrk --new (bare no-args is dashboard).
+	cmd := exec.Command(bin, "--new")
 	cmd.Dir = dir
 	cmd.Env = wrkEnv(req)
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
-			t.Fatalf("wrk exit %d stderr=%q", ee.ExitCode(), string(ee.Stderr))
+			t.Fatalf("wrk --new exit %d stderr=%q", ee.ExitCode(), string(ee.Stderr))
 		}
-		t.Fatalf("wrk: %v", err)
+		t.Fatalf("wrk --new: %v", err)
 	}
 	return strings.TrimSpace(string(out))
 }

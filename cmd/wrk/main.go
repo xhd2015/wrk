@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	// teapre before wrkcli: skip bubbletea/lipgloss OSC background hang on dumb PTYs.
+	_ "github.com/xhd2015/wrk/wrkcli/teapre"
 	"github.com/xhd2015/wrk/wrkcli"
 	"github.com/xhd2015/wrk/wrkcli/web"
 )

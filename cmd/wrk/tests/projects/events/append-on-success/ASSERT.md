@@ -3,7 +3,7 @@
 - Exit code 0.
 - `events.jsonl` contains one event with `command: "create"`, `exit_code: 0`.
 - Event `main_repo` and `work_dir` match the main repo path.
-- Event `args` is empty (no flags).
+- Event `args` includes `--new`.
 
 ## Side Effects
 
@@ -20,6 +20,6 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("exit code %d stderr=%q", resp.ExitCode, resp.Stderr)
 	}
 	assertEventsCount(t, req.WrkHome, 1)
-	assertLastEvent(t, req.WrkHome, "create", 0, req.MainRepo, req.MainRepo, []string{})
+	assertLastEvent(t, req.WrkHome, "create", 0, req.MainRepo, req.MainRepo, []string{"--new"})
 }
 ```

@@ -1,9 +1,9 @@
 # Scenario
 
-**Feature**: bare create with empty config runs native worktree only
+**Feature**: `wrk --new` with empty config runs native worktree only
 
 ```
-myrepo -> wrk
+myrepo -> wrk --new
   -> wt path on stdout
   -> no space, no iterm, no agent-run
 ```
@@ -11,13 +11,13 @@ myrepo -> wrk
 ## Steps
 
 1. Init myrepo; install mocks (to prove they stay silent).
-2. Run bare `wrk`.
+2. Run `wrk --new` (P1 create entry; bare no-args is no longer create).
 
 ```go
 func Setup(t *testing.T, req *Request) error {
 	setupMainRepoForCreateUX(t, req)
 	installCreateUXMocks(t, req, "darwin")
-	req.Args = nil
+	req.Args = []string{"--new"}
 	return nil
 }
 ```

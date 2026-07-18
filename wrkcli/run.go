@@ -162,6 +162,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	var mainFlag bool
 	var execArgs []string
 	// Create UX one-shot flags.
+	var newFlag bool // --new: explicit create entry (former bare create)
 	var newWindow bool
 	var noNewWindow bool
 	var newTerminal bool
@@ -180,6 +181,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	var includeWorktrees bool
 	// *string targets: nil = flag absent; non-nil empty = present but empty.
 	// Cut("--exec") must be registered so tokens after --exec are never re-parsed as flags.
+	// Register --new before --new-window / --new-terminal so exact long names stay unambiguous.
 	remaining, err := lessflags.Bool("--done", &done).
 		Bool("--merge-back", &mergeBack).
 		Bool("-l,--list", &list).
@@ -215,6 +217,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		Bool("--push", &pushFlag).
 		Bool("--json", &jsonFlag).
 		Bool("--dry-run", &dryRun).
+		Bool("--new", &newFlag).
 		Bool("--new-window", &newWindow).
 		Bool("--no-new-window", &noNewWindow).
 		Bool("--new-terminal", &newTerminal).
@@ -260,6 +263,15 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		ctx.command = "scan-git-repos"
 	} else {
 		ctx.command = resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, depPath, bringPath, allDeps, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, cd, mainFlag)
+		// P1: pure bare no-args is dashboard, not create. --new / positionals / -t
+		// and create modifiers keep command "create".
+		if ctx.command == "create" && isDashboardBareEntry(newFlag, taskFlagSet, remaining, createUXFlags{
+			newWindow: newWindow, noNewWindow: noNewWindow,
+			newTerminal: newTerminal, reuseTerminal: reuseTerminal, smartTerminal: smartTerminal,
+			noNewTerminal: noNewTerminal, openInAgent: openInAgent, noOpenInAgent: noOpenInAgent,
+		}, noConfig, noCd, forceCd, len(execArgs) > 0) {
+			ctx.command = "dashboard"
+		}
 	}
 	ctx.eventArgs = extractEventArgs(args, remaining)
 
@@ -330,7 +342,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || allDeps || reinstallLocal || tagNext || propagateTags || syncFlag ||
 			dryRun || pushFlag || jsonFlag || taskFlagSet || setTaskFlagSet || fetchFlag || noCd || forceCd ||
 			cd || mainFlag || confirmFromStdin || forceConfirm || noInModuleReplace || scanGitRepos ||
-			newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
+			newFlag || newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
 			noNewTerminal || openInAgent || noOpenInAgent || len(execArgs) > 0
 		ctx.workDir = origWd
 		if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
@@ -356,7 +368,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			allDeps || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || taskFlagSet ||
 			setTaskFlagSet || fetchFlag || noCd || forceCd || cd || mainFlag ||
 			confirmFromStdin || forceConfirm || noInModuleReplace || webFlag ||
-			newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
+			newFlag || newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
 			noNewTerminal || openInAgent || noOpenInAgent || noConfig || len(execArgs) > 0
 		ctx.workDir = origWd
 		if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
@@ -579,6 +591,17 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// --task is only valid with create mode.
 	if taskFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" || allDeps || reinstallLocal || tagNext || propagateTags || syncFlag || mergeBack || cd || mainFlag) {
 		return fmt.Errorf("wrk: --task is mutually exclusive with --done, --merge-back, --list, --status, --repos, --projects, --add, --rm, --where, --dep and --all-deps")
+	}
+
+	// --new is the create entry; exclusive with non-create modes.
+	if newFlag {
+		otherMode := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
+			addFlagSet || removeFlagSet || whereFlagSet || setTaskFlagSet || depPath != "" || bringPath != "" ||
+			allDeps || reinstallLocal || tagNext || propagateTags || syncFlag || pushFlag || jsonFlag ||
+			cd || mainFlag || dryRun
+		if otherMode {
+			return fmt.Errorf("wrk: --new is mutually exclusive with other modes")
+		}
 	}
 
 	if list && done {
@@ -934,6 +957,13 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		task = promotedTask
 	}
 
+	// Bare no-args (no --new, no positionals, no create-selecting flags) → dashboard View.
+	// Create still runs with --new, <dir>, -t/--task, create UX flags, or create modifiers.
+	if isDashboardBareEntry(newFlag, taskFlagSet || promotedTask != "", remaining, uxFlags, noConfig, noCd, forceCd, len(execArgs) > 0) {
+		ctx.command = "dashboard"
+		return runDashboard(workDir, ctx)
+	}
+
 	// Two-arg create without -t: second positional may be a forgotten task description.
 	// When -t is already set, second remains target-dir (no treat-as-task).
 	if createMode && !taskFlagSet && promotedTask == "" && spawnTarget != "" {
@@ -957,16 +987,31 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	return runCreate(workDir, origWd, spawnTarget, task, noCd, forceCd, execArgs, uxPlan)
 }
 
+// isDashboardBareEntry is true when the invocation is pure bare no-args dashboard
+// (not create). Create-selecting: --new, positionals, --task/-t, create UX flags,
+// --no-config, --no-cd/--force-cd, or --exec.
+func isDashboardBareEntry(newFlag, taskFlagSet bool, remaining []string, ux createUXFlags, noConfig, noCd, forceCd, hasExec bool) bool {
+	if newFlag || taskFlagSet || len(remaining) > 0 || ux.any() || noConfig || noCd || forceCd || hasExec {
+		return false
+	}
+	return true
+}
+
+
+
 // usage returns the wrk help text printed by lessflags when -h/--help is given.
 func usage() string {
 	return `wrk — git worktree helper
 
 Usage:
-  wrk [dir] [target-dir] [flags]
+  wrk                              open dashboard snapshot (no create)
+  wrk --new [dir] [target-dir] [flags]
+  wrk [dir] [target-dir] [flags]   create when dir/task/UX args select create
 
-Creates a git worktree from the current directory (or <dir>) and prints its
-path. With <target-dir>, the worktree is spawned there instead of the default
-location (~/.wrk/worktrees/).
+With --new (or create-selecting args such as <dir> / -t), creates a git worktree
+from the current directory (or <dir>) and prints its path. With <target-dir>, the
+worktree is spawned there instead of the default location (~/.wrk/worktrees/).
+Bare wrk with no args prints the dashboard stage snapshot (does not create a worktree).
 
 Positional arguments:
   <dir>          optional source checkout to create the worktree from
@@ -977,6 +1022,7 @@ Positional arguments:
                    - missing parent            -> error
 
 Flags:
+  --new                           create a worktree (explicit create entry)
   --done [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm] [--confirm-from-stdin]
                                   merge worktree branch back and remove it (default auto-yes)
                                   (optional pre: --gen-commit-msg --commit … on worktree; optional post-success: --sync, --tag-next, --push, --propagate-tags, --reinstall-local from main)
@@ -1714,7 +1760,21 @@ func runComposeReinstallLocal(result *worktree.MergeBackResult, withReinstallLoc
 	}
 	fmt.Println() // blank line before reinstall stage
 	// Scan main tip after merge (useMain equivalent from main path).
-	return runReinstallLocal(mainPath, dryRun, true, colorFlag)
+	err := runReinstallLocal(mainPath, dryRun, true, colorFlag)
+	if err == nil {
+		return nil
+	}
+	// Empty / non-module main: do not fail the ship (dashboard / pure-git fixtures).
+	if strings.Contains(err.Error(), "no go.mod modules found") ||
+		strings.Contains(err.Error(), "no go.mod found") {
+		if dryRun {
+			fmt.Fprintf(os.Stderr, "would: skip reinstall-local (%s)\n", err.Error())
+		} else {
+			fmt.Fprintf(os.Stderr, "skip reinstall-local: %s\n", err.Error())
+		}
+		return nil
+	}
+	return err
 }
 
 // runComposePostStages runs optional post-merge stages in fixed order:

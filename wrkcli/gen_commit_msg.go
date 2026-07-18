@@ -2,6 +2,7 @@ package wrkcli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/xhd2015/agent-pro/agent/commit_msg"
@@ -67,6 +68,7 @@ var genCommitMsgValueFlags = map[string]struct{}{
 var genCommitMsgBoolFlags = map[string]struct{}{
 	"--commit":    {},
 	"--no-verify": {},
+	"--add-all":   {},
 }
 
 // peelGenCommitMsgForCompose removes --gen-commit-msg and its library-owned flags
@@ -155,7 +157,18 @@ func runGenCommitMsgStage(workDir string, genArgs []string, dryRun bool) error {
 	if dryRun {
 		forwarded = append(forwarded, "--dry-run")
 	}
-	return commit_msg.RunGenCommitMsg(forwarded)
+	err := commit_msg.RunGenCommitMsg(forwarded)
+	if err == nil {
+		return nil
+	}
+	// Dry-run compose with empty index (common for dashboard recipe defaults):
+	// library prints would: lines then errors "no staged". Continue so primary
+	// dry-run plan can still run; real (non-dry) runs still fail.
+	if dryRun && strings.Contains(err.Error(), "no staged") {
+		fmt.Fprintf(os.Stderr, "would: skip gen-commit-msg (no staged changes)\n")
+		return nil
+	}
+	return err
 }
 
 // withStashedStagedForDryPlan temporarily stashes only the index (staged
@@ -202,6 +215,17 @@ func runGenCommitMsg(args []string, ctx *invocationContext) error {
 	forwarded := make([]string, 0, len(args))
 	for _, arg := range args {
 		if arg == "--gen-commit-msg" {
+			continue
+		}
+		// Top-level wrk yes/confirm flags are no-ops for bare gen-commit-msg
+		// (library has no Y/n prompts). Strip so accidental -y from compose
+		// recipes does not surface as "unrecognized flag".
+		name := arg
+		if i := strings.IndexByte(arg, '='); i >= 0 {
+			name = arg[:i]
+		}
+		switch name {
+		case "-y", "--yes", "--confirm", "--confirm-from-stdin":
 			continue
 		}
 		forwarded = append(forwarded, arg)

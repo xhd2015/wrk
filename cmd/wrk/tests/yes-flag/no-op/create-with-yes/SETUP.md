@@ -1,15 +1,15 @@
 # Scenario
 
-**Feature**: `wrk -y` create mode matches bare `wrk`
+**Feature**: `wrk --new -y` create mode ( -y is no-op on create)
 
 ```
-main repo -> wrk -y -> worktree path on stdout; same side effects as wrk
+main repo -> wrk --new -y -> worktree path on stdout; same side effects as wrk --new
 ```
 
 ## Steps
 
 1. Create main repo.
-2. Run `wrk -y` from main repo.
+2. Run `wrk --new -y` from main repo.
 
 ```go
 import (
@@ -24,7 +24,7 @@ func Setup(t *testing.T, req *Request) error {
 	runGitIsolated(t, mainRepo, "add", "go.mod")
 	runGitIsolated(t, mainRepo, "commit", "-m", "add go.mod")
 	req.RepoDir = mainRepo
-	req.Args = []string{"-y"}
+	req.Args = []string{"--new", "-y"}
 	return nil
 }
 ```

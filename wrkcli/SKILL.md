@@ -13,15 +13,32 @@ WRK_SKILL_DOCTEST_MARKER
 ## When to use
 
 Use wrk when you need an isolated git worktree without disturbing your main
-checkout. Typical flow: create a worktree, work in it, finish with `--done` or
-`--merge-back`.
+checkout. Typical flow: open the **dashboard** (bare `wrk`) or create with
+`wrk --new`, work in the worktree, finish with `--done` or `--merge-back`.
+
+## Dashboard
+
+```sh
+wrk                              # dashboard mode (does not create a worktree)
+```
+
+Bare no-args `wrk` opens the **dashboard** stage snapshot (Pre / Main / After).
+It does **not** create a worktree. Interactive TTY / hermetic RUN can compose
+`--done` / `--merge-back` pipelines; cancel leaves the tree unchanged.
+Hint in the UI: create with `wrk --new`.
 
 ## Create
 
 ```sh
-wrk                              # create from cwd repo
-wrk myrepo -t 'fix login bug'    # basename + task slug in branch/dir names
+wrk --new                        # create a worktree from cwd (explicit create entry)
+wrk --new -t 'fix login bug'    # create with task slug in branch/dir names
+wrk myrepo -t 'fix login bug'   # create via basename + task (no --new required)
+wrk myrepo                       # create from registered/local dir positional
 ```
+
+**`--new`** is the explicit create entry (former bare create). Create also runs
+when create-selecting args are present (`<dir>`, `-t` / `--task`, create UX flags).
+Bare `wrk` alone is **dashboard**, not create.
 
 `-t` / `--task` appends a task slug to worktree and branch names.
 
