@@ -15,16 +15,24 @@
 
 # activeRoot starts as git toplevel of effective cwd.
 # After successful --done/--merge-back: activeRoot := main for stages 3–8.
-# Without those flags: activeRoot stays cwd for the whole run.
+# --main + pipeline partners (no shell): resolve main for this checkout,
+#   activeRoot := main at start, then stages 3–8 (no nested shell; no done/merge/remove).
+# Without those switches: activeRoot stays cwd for the whole run.
+# Bare wrk --main alone: nested shell at main (see main/ tree; not this compose model).
 
 # Gates
 # - --done/--merge-back: must run from linked worktree (main → Error naming flag + linked worktree)
 # - --tag-next: only when that stage's activeRoot is main
 #     with done/merge-back: after switch → OK
-#     without: cwd must be main; linked WT → error naming --tag-next + main repository
+#     with --main + pipeline partners: activeRoot already main → OK from linked WT
+#     without those: cwd must be main; linked WT → error naming --tag-next + main repository
 # - Only --tag-next is main-only among pipeline stages
 # - --json: bare --tag-next only; multi-stage + --json rejected
 # - --done and --merge-back still exclusive of each other
+# - --main is exclusive with --done / --merge-back / --gen-commit-msg
+# - --main partners allowed: sync, tag-next, push, propagate-tags, reinstall-local, dry-run, exec
+#     (+ status / reinstall-alone covered elsewhere)
+# - Already on main + --main + pipeline: notice (--main not necessary; continuing); exit 0 if rest OK
 # - --exec valid as last stage of any compose (not only with --done)
 ```
 

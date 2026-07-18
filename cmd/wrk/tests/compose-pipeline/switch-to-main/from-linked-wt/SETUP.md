@@ -1,15 +1,18 @@
 # Scenario
 
-**Feature**: `--done` / `--merge-back` from a linked worktree — activeRoot switches to main after stage 2
+**Feature**: from a linked worktree, switch activeRoot to main via done/merge-back or `--main` pipeline partners
 
 ```
-# Linked wt is legal for done/merge-back; later stages use main
+# Path A: done/merge-back switches after stage 2
 linked wt -> wrk --done|--merge-back […] -> activeRoot := main for sync/tag/push/reinstall/exec
+
+# Path B: --main + pipeline partners (no shell, no merge/remove)
+linked wt -> wrk --main --sync --tag-next … -> activeRoot := main at start; wt kept
 ```
 
 ## Steps
 
-- Grouping only.
+- Grouping: done/merge-back success leaves at this level; `via-main-flag/` for scope rewrite without done.
 
 ```go
 func Setup(t *testing.T, req *Request) error {
