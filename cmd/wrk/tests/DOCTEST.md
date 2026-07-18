@@ -307,6 +307,12 @@ wrk tests
 │       ├── tag-next-propagate/   # P7: dry-run includes would-propagate (planned next tag)
 │       ├── cascade-external/     # cascade would: line; external still present
 │       └── no-prompt-without-y/  # dry-run without -y does not require confirm TTY
+├── done-output/                  # P2 UX: phase banners + structured cascade Error:
+│   ├── dry-run-phases/           # ==> cascade then ==> own (structure, no ANSI)
+│   │   ├── with-cascade/         # nested external: headers + would: under cascade
+│   │   └── zero-cascade/         # no nested WTs: still prints ==> cascade
+│   └── cascade-failure/          # real cascade MergeBack failure framing
+│       └── structured-error/     # Error: + path; not bare rebase conflict: alone
 ├── merge-back-sync/              # wrk --merge-back --sync post-success composition
 │   ├── basic-propagate/          # merge-back keeps wtA; wtB gets main tip
 │   └── source-wt-stays/          # wtA still on disk after success; no worktree removed
@@ -913,6 +919,9 @@ wrk tests
 | 68z2 | done-pipeline/dry-run/tag-next-propagate | P7: dry-run plans tag + would-propagate; zero mutations |
 | 68za | done-pipeline/dry-run/cascade-external | cascade `would: cascade merge-back`; external still present |
 | 68zb | done-pipeline/dry-run/no-prompt-without-y | dry-run without `-y` exits 0; no confirm TTY error |
+| 68ux1 | done-output/dry-run-phases/with-cascade | P2: `==> cascade` then would: then `==> own` (Classic RED) |
+| 68ux2 | done-output/dry-run-phases/zero-cascade | P2: zero targets still prints `==> cascade` + `==> own` (Classic RED) |
+| 68ux3 | done-output/cascade-failure/structured-error | P2: cascade fail → `Error:` + path; not bare `rebase conflict:` (Classic RED) |
 | 68zc | merge-back-pipeline/tag-next-local | `--merge-back -y --tag-next`: local v0.0.2; source wt kept; event merge-back |
 | 68zd | merge-back-pipeline/tag-next-push | `--merge-back -y --tag-next --push`: branch+tags; wt kept |
 | 68ze | merge-back-pipeline/sync-tag-next | `--merge-back -y --sync --tag-next`: sync then local tags; wt kept |
@@ -1224,6 +1233,9 @@ doctest test ./tests/done-compose/help
 doctest test ./tests/done-push
 doctest test ./tests/done-pipeline
 doctest test ./tests/done-pipeline/dry-run
+# P2 done UX phases + structured cascade errors (Classic RED until implementer)
+doctest vet ./tests/done-output
+doctest test ./tests/done-output
 doctest test ./tests/merge-back-pipeline
 doctest test ./tests/merge-back-pipeline/dry-run
 

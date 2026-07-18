@@ -1644,8 +1644,21 @@ func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleRep
 	}
 	// Cascade uses the same assumeYes policy as own worktree (default auto-yes).
 	// Dry-run never applies cascade mutations; mergeBackExternalWorktree prints would: lines.
-	if err := cascadeLinkedWorktrees(consumerTop, checkoutRoot, confirmFromStdin, assumeYes, dryRun); err != nil {
+	// Phase banners only when there is at least one cascade target (0 → neither
+	// ==> cascade nor ==> own); with targets, both headers as today for stable order
+	// with would: lines and ==> own on the same stream.
+	cascadeTargets, err := listCascadeLinkedWorktrees(consumerTop, checkoutRoot)
+	if err != nil {
 		return err
+	}
+	hasCascade := len(cascadeTargets) > 0
+	if hasCascade {
+		fmt.Println("==> cascade")
+		for _, path := range cascadeTargets {
+			if err := mergeBackExternalWorktree(path, confirmFromStdin, assumeYes, dryRun); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Guard: classify every local filesystem replace under the checkout (main
@@ -1663,6 +1676,9 @@ func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleRep
 		return err
 	}
 
+	if hasCascade {
+		fmt.Println("==> own")
+	}
 	result, err := worktree.MergeBack(worktree.MergeBackOptions{
 		SourcePath: checkoutRoot,
 		TargetPath: "",
@@ -1892,13 +1908,17 @@ func planAssumeYes(assumeYes, forceConfirm bool) bool {
 	return assumeYes || !forceConfirm
 }
 
-func cascadeLinkedWorktrees(consumerTop, checkoutRoot string, confirmFromStdin, assumeYes, dryRun bool) error {
+// listCascadeLinkedWorktrees returns linked worktrees under consumerTop that
+// are cascade merge-back targets (excludes the consumer checkout itself).
+// Nested main repos are skipped with a warning (same policy as before).
+func listCascadeLinkedWorktrees(consumerTop, checkoutRoot string) ([]string, error) {
 	repos, err := discoverStatusRepos(context.Background(), consumerTop)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	cleanCheckout := filepath.Clean(checkoutRoot)
+	var targets []string
 	for _, repo := range repos {
 		if repo.RepoType == scan_repo.RepoTypeMain {
 			if filepath.Clean(repo.Path) != filepath.Clean(consumerTop) {
@@ -1915,11 +1935,9 @@ func cascadeLinkedWorktrees(consumerTop, checkoutRoot string, confirmFromStdin, 
 		if filepath.Clean(repo.Path) == cleanCheckout {
 			continue
 		}
-		if err := mergeBackExternalWorktree(repo.Path, confirmFromStdin, assumeYes, dryRun); err != nil {
-			return err
-		}
+		targets = append(targets, repo.Path)
 	}
-	return nil
+	return targets, nil
 }
 
 // mergeBackExternalWorktree merge-backs (or removes) an external dependency
@@ -1949,7 +1967,13 @@ func mergeBackExternalWorktree(externalPath string, confirmFromStdin, assumeYes,
 			return worktree.PromptConfirmPlan(plan, confirmFromStdin, assumeYes)
 		},
 	})
-	return err
+	if err != nil {
+		// Structured framing: main prints err.Error() to stderr. Prefix Error:
+		// and include cascade worktree path so failures are not bare git detail
+		// (e.g. "rebase conflict:") alone.
+		return fmt.Errorf("Error: cascade merge-back %s: %w", externalPath, err)
+	}
+	return nil
 }
 
 func runDep(workDir string, depArg string, wrkHome string, rawArgs []string, execArgs []string) error {
