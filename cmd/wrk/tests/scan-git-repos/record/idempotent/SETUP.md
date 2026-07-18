@@ -1,10 +1,13 @@
 # Scenario
 
-**Feature**: second --scan-git-repos does not duplicate projects.json entries
+**Feature**: second --scan-git-repos does not duplicate projects.json; still prints the valid main
 
 ```
-wrk --scan-git-repos ROOT (1st) -> records source=scan
-wrk --scan-git-repos ROOT (2nd) -> exit 0; still one entry; empty newly-added stdout
+wrk --scan-git-repos ROOT (1st / seeded) -> projects has source=scan
+wrk --scan-git-repos ROOT (2nd under test)
+  -> exit 0
+  -> still one projects entry
+  -> stdout contains the main abs path once (always-print; not gated on known)
 ```
 
 ## Steps

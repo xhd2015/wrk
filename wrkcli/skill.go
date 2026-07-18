@@ -38,6 +38,7 @@ var wrkModeFlags = map[string]struct{}{
 	"--projects-dep-graph":   {},
 	"--scan-git-repos":       {},
 	"--no-cache":             {},
+	"--include-worktrees":    {},
 	"--fetch":                {},
 	"--github":               {},
 	"--color":                {},

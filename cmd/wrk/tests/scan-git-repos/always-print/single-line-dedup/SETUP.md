@@ -1,12 +1,12 @@
 # Scenario
 
-**Feature**: cold first scan always prints main path and records source=scan
+**Feature**: single main under root yields exactly one stdout line for that path (in-run dedup)
 
 ```
-scan-root/myrepo (main, not in projects yet)
+scan-root/myrepo (one main, cold)
   -> wrk --scan-git-repos scan-root
-  -> stdout absolute main path (always-print on cold find)
-  -> projects.json entry source=scan
+  -> stdout path-line count for main == 1
+  -> projects records source=scan once
 ```
 
 ## Steps
@@ -20,7 +20,6 @@ func Setup(t *testing.T, req *Request) error {
 	mainRepo := initScanMainRepo(t, scanRoot, "myrepo")
 	req.MainRepo = mainRepo
 	req.Args = []string{"--scan-git-repos", scanRoot}
-	// RepoDir stays WorkRoot (parent Setup) so auto-record is a no-op.
 	return nil
 }
 ```

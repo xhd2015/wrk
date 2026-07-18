@@ -1,13 +1,13 @@
 # Scenario
 
-**Feature**: --scan-git-repos streams newly recorded mains in discovery order, with first path before finish
+**Feature**: --scan-git-repos streams every valid main in discovery order, with first path before finish
 
 ```
-# multi-root scan: record + print as each main is found (discovery order)
+# multi-root scan: print + record-as-needed as each main is found (discovery order)
 wrk --scan-git-repos ROOT_B ROOT_A
   -> scan_repo discovers mains under roots in root order
-  -> RecordProject(..., source="scan") as found
-  -> stdout newly recorded abs paths in discovery order (not post-scan sort)
+  -> stdout always prints valid main abs paths in discovery order (not post-scan sort)
+  -> RecordProject(..., source="scan") for new mains as found
 
 # timing / incremental stdout (first path arrives before process exit)
 wrk --scan-git-repos --no-cache ROOT_FIRST ROOT_LATER
@@ -31,8 +31,9 @@ wrk --scan-git-repos --no-cache ROOT_FIRST ROOT_LATER
 
 Helper `runScanGitReposStreamProbe`:
 
-1. Removes `{WRK_HOME}/projects.json` so probe stdout is newly-recorded paths only
-   (root `Run` may have already completed a full scan with the same Args).
+1. Removes `{WRK_HOME}/projects.json` so the probe run starts with a clean project list
+   (root `Run` may have already completed a full scan with the same Args; always-print
+   still lists paths either way, but record side effects stay attributable to the probe).
 2. Starts `wrk` with `buildWrkCLIArgs(req)` / `wrkEnv(req)` / `req.RepoDir` and a stdout pipe.
 3. Records `firstByteMS` at the first non-empty read and `totalMS` at process exit.
 4. Captures first chunk prefix + full stdout and exit code.
@@ -82,7 +83,7 @@ func seedScanPaddingDirs(t *testing.T, root string, n int) {
 func runScanGitReposStreamProbe(t *testing.T, req *Request) scanStreamProbe {
 	t.Helper()
 
-	// Fresh projects so newly-recorded path lines are attributable to this probe only.
+	// Fresh projects so record side effects are attributable to this probe only.
 	if err := os.Remove(scanProjectsJSONPath(req.WrkHome)); err != nil && !os.IsNotExist(err) {
 		t.Fatalf("remove projects.json: %v", err)
 	}

@@ -3,6 +3,7 @@
 - Exit code 0.
 - Help text (stdout and/or stderr) contains `--scan-git-repos`.
 - Help text also contains `--no-cache`.
+- Help text also contains `--include-worktrees`.
 - Help documents that bare `--scan-git-repos` defaults to home (`~`) when no ROOT is given
   (soft match common phrasings; existing `~/.wrk` alone is not enough).
 
@@ -28,6 +29,9 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 	if !strings.Contains(help, "--no-cache") {
 		t.Fatalf("help must mention --no-cache; got stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
+	}
+	if !strings.Contains(help, "--include-worktrees") {
+		t.Fatalf("help must mention --include-worktrees; got stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
 	}
 	assert.Output(t, help, `<contains>
 --scan-git-repos

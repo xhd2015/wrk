@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code **0**.
-- Stdout empty (main already recorded by seed; no newly-added paths).
+- Stdout prints the already-known main path exactly once (always-print; not a new record).
 - `projects.json` still exactly one `source=scan` entry for `myrepo`.
 - **Stderr contains greppable `scan:`** (library Debug wired through wrk).
 - **Stderr contains `mode=`** with warm or cold (`mode=warm` preferred after seed; `mode=cold` acceptable if product still cold-walks).
@@ -33,8 +33,10 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("via-verbose second scan: exit %d stderr=%q stdout=%q",
 			resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
-	if resp.Stdout != "" {
-		t.Fatalf("second scan should print no newly recorded paths, got stdout=%q", resp.Stdout)
+	want := resolveScanPath(t, req.MainRepo)
+	n := countScanStdoutPathLines(t, resp.Stdout, want)
+	if n != 1 {
+		t.Fatalf("second scan must always-print known main once; count=%d stdout=%q want=%q", n, resp.Stdout, want)
 	}
 	assertScanProjectsCount(t, req.WrkHome, 1)
 	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")

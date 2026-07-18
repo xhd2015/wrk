@@ -1,13 +1,13 @@
 # Scenario
 
-**Feature**: only main repos are recorded; linked worktrees under the root are skipped
+**Feature**: default scan always prints main only; skips linked worktrees on stdout and in projects
 
 ```
 scan-root/main (RepoTypeMain) + scan-root/main-wt (linked worktree)
-  -> wrk --scan-git-repos scan-root
+  -> wrk --scan-git-repos scan-root  (no --include-worktrees)
+  -> stdout is main path only (always-print main; omit worktree)
   -> records main only (source=scan)
   -> does not record worktree path
-  -> stdout is main path only
 ```
 
 ## Steps
