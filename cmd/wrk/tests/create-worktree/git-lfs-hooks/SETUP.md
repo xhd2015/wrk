@@ -12,7 +12,9 @@ wrk -> git worktree add -> hook misses git-lfs -> exit 1 (expected)
 
 - Git must be available.
 - Tests install a fake `git-lfs` executable under `{FakeHome}/.local/bin/`.
-- `UseMinimalPath` runs wrk with `PATH=/usr/bin:/bin` and `HOME={FakeHome}`.
+- `UseMinimalPath` runs wrk with `HOME={FakeHome}` and `PATH={WorkRoot}/minimal-bin`
+  only (symlinks to `git`/`sh`/etc., **not** system `git-lfs`). Ubuntu runners ship
+  `git-lfs` in `/usr/bin`, so `PATH=/usr/bin:/bin` is not a valid "stripped" PATH there.
 
 ## Steps
 
@@ -20,6 +22,13 @@ wrk -> git worktree add -> hook misses git-lfs -> exit 1 (expected)
 - Run `wrk` with stripped PATH; the hook fails because wrk does not augment PATH for git subprocesses.
 
 ```go
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	skipIfNoGit(t)
 	return nil
@@ -34,7 +43,48 @@ func initFakeHomeWithGitLFS(t *testing.T, workRoot string) string {
 	if err := os.Chmod(filepath.Join(binDir, "git-lfs"), 0755); err != nil {
 		t.Fatalf("chmod git-lfs: %v", err)
 	}
+	// Controlled PATH without system git-lfs (see ensureMinimalBinWithoutGitLFS).
+	_ = ensureMinimalBinWithoutGitLFS(t, workRoot)
 	return home
+}
+
+// ensureMinimalBinWithoutGitLFS builds WorkRoot/minimal-bin with symlinks to
+// common tools needed by git/hooks, deliberately excluding git-lfs so Ubuntu CI
+// (which installs git-lfs under /usr/bin) still exercises the missing-lfs path.
+func ensureMinimalBinWithoutGitLFS(t *testing.T, workRoot string) string {
+	t.Helper()
+	dir := filepath.Join(workRoot, "minimal-bin")
+	mkdirAll(t, dir)
+	// Keep the set small: git + shell builtins/tools hooks and git may invoke.
+	for _, name := range []string{
+		"git", "sh", "bash", "rm", "cat", "sed", "tr", "uname",
+		"dirname", "basename", "mkdir", "cp", "mv", "ls", "chmod",
+		"true", "false", "echo", "printf", "env", "test", "[",
+		"awk", "head", "tail", "grep", "sort", "diff", "mktemp",
+		"touch", "date", "pwd", "which", "command",
+	} {
+		src, err := exec.LookPath(name)
+		if err != nil {
+			continue
+		}
+		if filepath.Base(src) == "git-lfs" {
+			continue
+		}
+		dst := filepath.Join(dir, name)
+		_ = os.Remove(dst)
+		if err := os.Symlink(src, dst); err != nil {
+			t.Fatalf("symlink %s -> %s: %v", src, dst, err)
+		}
+	}
+	// Refuse to proceed if git-lfs still resolves via this PATH (misconfigured).
+	pathEnv := dir + string(os.PathListSeparator) + dir
+	cmd := exec.Command("sh", "-c", "command -v git-lfs")
+	cmd.Env = []string{"PATH=" + dir}
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("minimal-bin still resolves git-lfs: %s", strings.TrimSpace(string(out)))
+	}
+	_ = pathEnv
+	return dir
 }
 
 func initGitRepoWithLFSHooks(t *testing.T, repoDir, hooksDir string) {

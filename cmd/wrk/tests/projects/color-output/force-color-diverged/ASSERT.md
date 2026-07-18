@@ -31,7 +31,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 
 	block := fmt.Sprintf(`---
-version: 2
+version: 3
 ---
 %s
 %s

@@ -28,12 +28,12 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 
 	remote := colorCompareWithRemoteField(t, req.MainRepo, "origin/main", "main")
 	block := fmt.Sprintf(`---
-version: 2
+version: 3
 ---
 %s
 %s
 %s
-Status:       <ansi-color red>dirty</ansi-color> (<ansi-color red>1 added</ansi-color>, <ansi-color #90>0 changed</ansi-color>, <ansi-color #90>0 renamed</ansi-color>, <ansi-color #90>0 deleted</ansi-color>)
+Status:       <ansi-color red>dirty</ansi-color> \(<ansi-color red>1 added</ansi-color>, <ansi-color #90>0 changed</ansi-color>, <ansi-color #90>0 renamed</ansi-color>, <ansi-color #90>0 deleted</ansi-color>\)
 %s
 Worktrees:    0 total, 0 dirty
 `, colorProjectDirLine(t, req.MainRepo), colorStatusBranchLine(t, req.MainRepo), colorStatusCommitLine(t, req.MainRepo), remote)

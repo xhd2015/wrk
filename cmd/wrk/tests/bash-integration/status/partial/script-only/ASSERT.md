@@ -31,12 +31,12 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 
 	assert.Output(t, resp.Stdout, fmt.Sprintf(`---
-version: 2
+version: 3
 ---
 bash integration: partial
-script: %s (present)
-bash_profile: %s (marker absent)
-bashrc: %s (marker absent)
+script: %s \(present\)
+bash_profile: %s \(marker absent\)
+bashrc: %s \(marker absent\)
 
 `, resp.BashShPath, resp.BashProfilePath, resp.BashRCPath))
 

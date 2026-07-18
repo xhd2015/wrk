@@ -167,7 +167,9 @@ func gitCommandCombinedError(t *testing.T, dir string, args ...string) string {
 
 func worktreeStatusError(t *testing.T, wtPath string) string {
 	t.Helper()
-	return gitCommandCombinedError(t, wtPath, "status", "--porcelain")
+	raw := gitCommandCombinedError(t, wtPath, "status", "--porcelain")
+	// Product surfaces gitcmd.normalizeError shape: "git <args> in <path>: <msg>"
+	return fmt.Sprintf("git status --porcelain in %s: %s", resolvePath(t, wtPath), raw)
 }
 
 func mainRepoStatusError(t *testing.T, mainRepo string) string {

@@ -1,10 +1,10 @@
 # Scenario
 
-**Feature**: bare `wrk --scan-git-repos` fails clearly when `$HOME` is missing or not a directory
+**Feature**: bare `wrk --scan-git-repos` fails clearly when `$HOME` is not a directory
 
 ```
-# HOME points at a non-existent path under WorkRoot
-HOME=WorkRoot/missing-home
+# HOME points at a regular file under WorkRoot (not a directory)
+HOME=WorkRoot/not-a-dir-home  (file)
   -> wrk --scan-git-repos
   -> non-zero exit
   -> stderr explains unusable home / ~ (must not require ~/Projects)
@@ -12,22 +12,29 @@ HOME=WorkRoot/missing-home
 
 ## Preconditions
 
-- `FakeHome` is a path under WorkRoot that is **never created** (not a directory).
+- `FakeHome` is a **file** under WorkRoot (not a directory). Using a missing path is
+  unreliable: some tools auto-create `$HOME` (and CI/macOS may race mkdir before
+  Stat), so a file is a stable "not a directory" fixture.
 - No scan fixtures needed — default-root resolution fails before discovery.
 
 ## Steps
 
-1. Set `FakeHome` to `{WorkRoot}/missing-home` without creating it.
+1. Create `{WorkRoot}/not-a-dir-home` as a regular file; set `FakeHome` to it.
 2. Set Args to bare `--scan-git-repos`.
 
 ```go
 import (
+	"os"
 	"path/filepath"
 )
 
 func Setup(t *testing.T, req *Request) error {
-	// Non-existent home: UserHomeDir returns the path; product must reject it.
-	req.FakeHome = filepath.Join(req.WorkRoot, "missing-home")
+	// File-as-home: stable rejection (missing dirs can be auto-created by tooling).
+	homeFile := filepath.Join(req.WorkRoot, "not-a-dir-home")
+	if err := os.WriteFile(homeFile, []byte("not a directory\n"), 0o644); err != nil {
+		t.Fatalf("write fake home file: %v", err)
+	}
+	req.FakeHome = homeFile
 	req.Args = []string{"--scan-git-repos"}
 	return nil
 }

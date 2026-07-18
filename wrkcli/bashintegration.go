@@ -192,7 +192,8 @@ func runBashIntegration(args []string) error {
 
 	switch action {
 	case "":
-		fmt.Print(bashIntegrationScript)
+		// Use Printf so go vet does not treat the script (which contains %s) as a format string.
+		fmt.Printf("%s", bashIntegrationScript)
 		return nil
 	case "--install":
 		if dryRun {

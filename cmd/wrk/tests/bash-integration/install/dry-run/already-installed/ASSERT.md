@@ -33,12 +33,12 @@ t.Fatalf("expected exit 0, got %d; stderr=%s", resp.ExitCode, resp.Stderr)
 }
 
 assert.Output(t, resp.Stdout, fmt.Sprintf(`---
-version: 2
+version: 3
 ---
 bash integration: is up to date
-script: %s (is up to date)
-bash_profile: %s (marker is up to date)
-bashrc: %s (marker is up to date)
+script: %s \(is up to date\)
+bash_profile: %s \(marker is up to date\)
+bashrc: %s \(marker is up to date\)
 
 `, resp.BashShPath, resp.BashProfilePath, resp.BashRCPath))
 

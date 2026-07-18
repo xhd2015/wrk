@@ -30,11 +30,11 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 
 	assert.Output(t, resp.Stdout, fmt.Sprintf(`---
-version: 2
+version: 3
 ---
 wrk bash integration: already uninstalled
-bash_profile: %s (marker absent)
-bashrc: %s (marker absent)
+bash_profile: %s \(marker absent\)
+bashrc: %s \(marker absent\)
 no changes needed
 
 `, resp.BashProfilePath, resp.BashRCPath))

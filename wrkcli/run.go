@@ -3057,6 +3057,7 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 
 	// Default auto-yes (assumeYes) skips rename prompt. --confirm clears assumeYes so we
 	// prompt. WRK_SET_TASK_CONFIRM=1 is a test escape hatch that auto-confirms (no prompt).
+	// TTY detection sticks to stdout (same fd used for the rename plan print).
 	if !assumeYes && os.Getenv("WRK_SET_TASK_CONFIRM") != "1" {
 		if !term.IsTerminal(int(os.Stdout.Fd())) {
 			return fmt.Errorf("wrk: --set-task --confirm requires a terminal (tty)")

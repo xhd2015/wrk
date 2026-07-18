@@ -28,7 +28,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("missing add completion output")
 	}
 	assert.Output(t, addOut, `---
-version: 2
+version: 3
 ---
 alpha
 alphalong
@@ -40,7 +40,7 @@ alphalong
 		t.Fatalf("missing rm completion output")
 	}
 	assert.Output(t, rmOut, `---
-version: 2
+version: 3
 ---
 beta
 

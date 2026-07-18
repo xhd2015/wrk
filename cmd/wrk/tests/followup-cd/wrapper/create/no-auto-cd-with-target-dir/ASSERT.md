@@ -12,6 +12,7 @@
 
 ```go
 import (
+	"regexp"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,7 +28,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("expected exit 0, got %d; stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
 	wantPath := filepath.Join(req.WorkRoot, "wt")
-	assert.Output(t, resp.Stdout, "---\nversion: 2\n---\n"+wantPath+"\n")
+	assert.Output(t, resp.Stdout, "---\nversion: 3\n---\n"+regexp.QuoteMeta(wantPath)+"\n")
 	for _, line := range strings.Split(resp.Stderr, "\n") {
 		trim := strings.TrimSpace(line)
 		if strings.HasPrefix(trim, "cd ") {

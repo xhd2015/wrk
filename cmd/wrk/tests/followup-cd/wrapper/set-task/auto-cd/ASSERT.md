@@ -12,6 +12,7 @@
 
 ```go
 import (
+	"regexp"
 	"testing"
 
 	"github.com/xhd2015/doctest/assert"
@@ -25,7 +26,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("expected exit 0, got %d; stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
 	wantPath := worktreePathWithTask(req.WrkHome, "myrepo", "main", wrkDate, slugify("new task"), 0)
-	assert.Output(t, resp.Stdout, "---\nversion: 2\n---\n"+wantPath+"\n")
+	assert.Output(t, resp.Stdout, "---\nversion: 3\n---\n"+regexp.QuoteMeta(wantPath)+"\n")
 	assertContains(t, resp.Stderr, "cd "+wantPath)
 	assertPathsEqual(t, resp.FinalPWD, wantPath)
 	assertFileNotExists(t, req.WtDir)

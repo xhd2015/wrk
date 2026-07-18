@@ -25,7 +25,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 	assertCompleteExitOK(t, resp)
 	assert.Output(t, resp.Stdout, `---
-version: 2
+version: 3
 ---
 alpha
 alphalong
