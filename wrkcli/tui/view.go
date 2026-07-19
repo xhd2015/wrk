@@ -363,8 +363,12 @@ func (m *teaDashModel) renderView() string {
 	_ = y
 
 	m.hitmap = hits
+	// viewLines must match Bubble Tea's rendered line count for bottom-origin
+	// mouse mapping. A trailing "\n" makes strings.Split produce an extra empty
+	// segment → linesRendered = len(lines)+1 → origin off-by-one (clicks hit the
+	// row above: gen-commit-msg Run → add-changes).
 	m.viewLines = len(lines)
-	return strings.Join(lines, "\n") + "\n"
+	return strings.Join(lines, "\n")
 }
 
 func max(a, b int) int {

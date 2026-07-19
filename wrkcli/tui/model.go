@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/tui/mouse"
 )
 
 // Dashboard glyphs (fine-grained; never [x]/[X]).
@@ -72,6 +74,10 @@ type teaDashModel struct {
 	hitmap    []dashHit
 	viewLines int // last rendered line count (hitmap local Y is 0..viewLines-1)
 	color     bool
+
+	// Inline mouse origin via shared tui/mouse package (CSI 6n + dual-origin).
+	origin *mouse.Tracker
+	cprCh  <-chan mouse.CPRMsg
 
 	// loadingID: non-empty while an op runs in-process (no UI tear-down / flash).
 	// Values: stage ids ("add-changes", "sync", …) or "run-all".
@@ -144,22 +150,41 @@ func dashMouseIsLeftClick(msg tea.MouseMsg) bool {
 	return msg.Button == tea.MouseButtonLeft || msg.Type == tea.MouseLeft
 }
 
-// mapMouseY converts terminal-absolute mouse Y to view-local line index.
-// Without alt-screen, Bubble Tea paints inline and typically sits at the bottom
-// of the visible terminal: originY ≈ height - viewLines.
-// Also tries raw Y as fallback when the mapped coordinate misses (UI not bottom-anchored).
+// mapMouseY converts terminal-absolute mouse Y to view-local line index via
+// ResolveMouseHit (known origin from CSI 6n when set, else dual-origin). Prefer
+// the successful candidate's LocalY; if both miss, return a best-effort local.
+func (m *teaDashModel) originYPtr() *int {
+	if m.origin == nil {
+		return nil
+	}
+	return m.origin.OriginY()
+}
+
 func (m *teaDashModel) mapMouseY(absY int) (local int, ok bool) {
-	if m.height > 0 && m.viewLines > 0 {
-		origin := m.height - m.viewLines
-		if origin < 0 {
-			origin = 0
+	res := ResolveMouseHit(ResolveMouseHitOpts{
+		AbsX:      0,
+		AbsY:      absY,
+		Height:    m.height,
+		ViewLines: m.viewLines,
+		OriginY:   m.originYPtr(),
+		Hitmap:    dashHitsToHits(m.hitmap),
+	})
+	if res.OK {
+		return res.LocalY, true
+	}
+	if oy := m.originYPtr(); oy != nil {
+		local = absY - *oy
+		if local >= 0 && (m.viewLines == 0 || local < m.viewLines) {
+			return local, true
 		}
+	}
+	if m.height > 0 && m.viewLines > 0 {
+		origin := mouse.BottomOriginY(m.height, m.viewLines)
 		local = absY - origin
 		if local >= 0 && local < m.viewLines {
 			return local, true
 		}
 	}
-	// Fallback: treat absolute Y as local (works if UI starts at row 0).
 	if absY >= 0 && (m.viewLines == 0 || absY < m.viewLines) {
 		return absY, true
 	}
@@ -167,16 +192,17 @@ func (m *teaDashModel) mapMouseY(absY int) (local int, ok bool) {
 }
 
 func (m *teaDashModel) hitTest(x, y int) (h dashHit, ok bool) {
-	for _, cand := range m.hitmap {
-		if y < cand.y0 || y >= cand.y1 {
-			continue
-		}
-		if cand.x1 > cand.x0 && (x < cand.x0 || x >= cand.x1) {
-			continue
-		}
-		return cand, true
+	hits := dashHitsToHits(m.hitmap)
+	mh, ok := mouse.HitTest(hitsToMouse(hits), x, y)
+	if !ok {
+		return dashHit{}, false
 	}
-	return dashHit{}, false
+	got := mouseHitToDash(mh, hits)
+	return dashHit{
+		y0: got.Y0, y1: got.Y1,
+		x0: got.X0, x1: got.X1,
+		focus: got.Focus, runStage: got.RunStage,
+	}, true
 }
 
 func dashPaint(on bool, code, s string) string {
@@ -190,18 +216,19 @@ func newTeaDashModel(opts RunDashboardOpts) teaDashModel {
 	workDir := opts.WorkDir
 	status := opts.Status
 	m := teaDashModel{
-		opts:           opts,
-		workDir:        workDir,
-		status:         status,
-		genCommitMsg:   true,
-		commit:         true,
-		agentRunner:    "commandcode",
-		primaryDone:    false, // MERGE BACK default
-		sync:           true,
-		tagNext:        true,
-		push:           true,
-		reinstallLocal: true,
-		color:          dashColorOn(),
+		opts:            opts,
+		workDir:         workDir,
+		status:          status,
+		genCommitMsg:    true,
+		commit:          true,
+		agentRunner:     "commandcode",
+		primaryDone:     false, // MERGE BACK default
+		sync:            true,
+		tagNext:         true,
+		push:            true,
+		reinstallLocal:  true,
+		color:  dashColorOn(),
+		origin: mouse.NewTracker(),
 	}
 	addable := m.hasAddableDirt()
 	onMain := m.isMainCheckout()
@@ -269,14 +296,40 @@ func (m *teaDashModel) stageRunDisabled(id string) bool {
 	return id == "add-changes" && m.addDisabled
 }
 
-func (m *teaDashModel) Init() tea.Cmd { return nil }
+func (m *teaDashModel) Init() tea.Cmd {
+	// Listen for CPR peeled from stdin (same path as mouse).
+	return waitCPR(m.cprCh)
+}
 
 func (m *teaDashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		if m.origin != nil {
+			m.origin.OnResize()
+			mouseDebugf("origin_invalidate", map[string]any{"layoutGen": m.origin.LayoutGen()})
+		}
 		return m, nil
+	case mouse.CPRMsg:
+		cmd := waitCPR(m.cprCh)
+		ok := false
+		if m.origin != nil {
+			ok = m.origin.OnCPR(msg.Row1, msg.Col1)
+		}
+		mouseDebugf("cpr_raw", map[string]any{
+			"row1": msg.Row1, "col1": msg.Col1,
+			"ok": ok, "originY": originYVal(m.originYPtr()),
+			"phase": fmt.Sprintf("%v", m.originPhase()),
+		})
+		if ok {
+			mouseDebugf("cpr_ok", map[string]any{"originY": originYVal(m.originYPtr())})
+		} else {
+			mouseDebugf("cpr_fail_or_stale", map[string]any{
+				"row1": msg.Row1, "phase": fmt.Sprintf("%v", m.originPhase()),
+			})
+		}
+		return m, cmd
 	case dashTickMsg:
 		if m.loadingID == "" {
 			return m, nil
@@ -302,32 +355,75 @@ func (m *teaDashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addAll = false
 		}
 		m.mainDisabled = m.isMainCheckout()
+		// viewLines may change after op; View invalidates origin if needed.
 		return m, nil
 	case tea.MouseMsg:
+		mouseDebugf("mouse_raw", map[string]any{
+			"x": msg.X, "y": msg.Y,
+			"action": fmt.Sprintf("%v", msg.Action),
+			"button": fmt.Sprintf("%v", msg.Button),
+			"type":   fmt.Sprintf("%v", msg.Type),
+			"loadingID": m.loadingID,
+			"height": m.height, "viewLines": m.viewLines,
+			"originY": originYVal(m.originYPtr()),
+			"addDisabled": m.addDisabled, "addAll": m.addAll,
+			"width": m.width,
+		})
 		if m.loadingID != "" {
+			mouseDebugf("mouse_ignore", map[string]any{"reason": "loading", "loadingID": m.loadingID})
 			return m, nil // ignore clicks while running
 		}
 		if !dashMouseIsLeftClick(msg) {
+			mouseDebugf("mouse_ignore", map[string]any{"reason": "not_left_press"})
 			return m, nil
 		}
-		// No alt-screen: map absolute mouse Y → view-local line (see mapMouseY).
-		x := msg.X
-		yLocal, _ := m.mapMouseY(msg.Y)
-		h, ok := m.hitTest(x, yLocal)
-		if !ok {
-			// Retry absolute Y (UI starting at top of viewport).
-			h, ok = m.hitTest(x, msg.Y)
+		// Known origin from CSI 6n when available; else dual-origin.
+		// If known-origin misses, fall back to dual-origin (stale/wrong CPR).
+		hits := dashHitsToHits(m.hitmap)
+		opts := ResolveMouseHitOpts{
+			AbsX:      msg.X,
+			AbsY:      msg.Y,
+			Height:    m.height,
+			ViewLines: m.viewLines,
+			OriginY:   m.originYPtr(),
+			Hitmap:    hits,
+			Loading:   m.loadingID != "",
 		}
-		if !ok {
+		res := ResolveMouseHit(opts)
+		mouseDebugf("mouse_resolve", map[string]any{
+			"ok": res.OK, "localY": res.LocalY, "originKind": res.OriginKind,
+			"hitRunStage": res.Hit.RunStage, "hitFocus": res.Hit.Focus,
+			"hitY0": res.Hit.Y0, "hitY1": res.Hit.Y1, "hitX0": res.Hit.X0, "hitX1": res.Hit.X1,
+			"originY": originYVal(m.originYPtr()),
+			"hitmapN": len(hits),
+			"hitmap": hitmapSummaryHits(hits),
+		})
+		if !res.OK && m.originYPtr() != nil {
+			opts2 := opts
+			opts2.OriginY = nil
+			res2 := ResolveMouseHit(opts2)
+			mouseDebugf("mouse_resolve_fallback_dual", map[string]any{
+				"ok": res2.OK, "localY": res2.LocalY, "originKind": res2.OriginKind,
+				"hitRunStage": res2.Hit.RunStage, "hitFocus": res2.Hit.Focus,
+			})
+			if res2.OK {
+				res = res2
+			}
+		}
+		if !res.OK {
+			mouseDebugf("mouse_action", map[string]any{"action": "miss", "absY": msg.Y, "absX": msg.X})
 			return m, nil
 		}
-		if h.runStage != "" {
-			return m.startStageRun(h.runStage)
+		if res.Hit.RunStage != "" {
+			mouseDebugf("mouse_action", map[string]any{"action": "startStageRun", "stage": res.Hit.RunStage})
+			return m.startStageRun(res.Hit.RunStage)
 		}
-		if h.focus >= 0 {
-			m.cursor = h.focus
+		if res.Hit.Focus >= 0 {
+			mouseDebugf("mouse_action", map[string]any{"action": "activateFocus", "focus": res.Hit.Focus})
+			m.cursor = res.Hit.Focus
 			return m.activateFocus()
 		}
+		mouseDebugf("mouse_action", map[string]any{"action": "noop_hit"})
 		return m, nil
 	case tea.KeyMsg:
 		// Allow quit even while loading; block other input during ops.
@@ -467,13 +563,26 @@ func (m *teaDashModel) applySpace() {
 
 // startStageRun runs one stage in-process with a loading spinner (no UI tear-down).
 func (m *teaDashModel) startStageRun(stageID string) (tea.Model, tea.Cmd) {
-	if m.loadingID != "" || m.stageRunDisabled(stageID) {
+	disabled := m.stageRunDisabled(stageID)
+	mouseDebugf("startStageRun", map[string]any{
+		"stageID": stageID, "loadingID": m.loadingID,
+		"disabled": disabled, "addDisabled": m.addDisabled,
+	})
+	if m.loadingID != "" || disabled {
+		mouseDebugf("startStageRun_blocked", map[string]any{
+			"stageID": stageID,
+			"reason": map[string]any{
+				"loading": m.loadingID != "",
+				"disabled": disabled,
+			},
+		})
 		return m, nil
 	}
 	m.loadingID = stageID
 	m.loadingFrame = 0
 	m.status = "running…"
 	if stageID == "add-changes" {
+		mouseDebugf("startStageRun_ok", map[string]any{"stageID": stageID, "path": "gitAddAll"})
 		return m, tea.Batch(
 			m.dashRunOpCmd(stageID, true, Recipe{}),
 			dashSpinnerTick(),
@@ -481,9 +590,11 @@ func (m *teaDashModel) startStageRun(stageID string) (tea.Model, tea.Cmd) {
 	}
 	r, ok := m.singleStageRecipe(stageID)
 	if !ok {
+		mouseDebugf("startStageRun_blocked", map[string]any{"stageID": stageID, "reason": "no_recipe"})
 		m.loadingID = ""
 		return m, nil
 	}
+	mouseDebugf("startStageRun_ok", map[string]any{"stageID": stageID, "path": "compose"})
 	return m, tea.Batch(
 		m.dashRunOpCmd(stageID, false, r),
 		dashSpinnerTick(),
@@ -667,6 +778,37 @@ func (m *teaDashModel) isStageRowFocused(id string) bool {
 	return m.isFocused(focusStage, id)
 }
 
+func (m *teaDashModel) originPhase() mouse.Phase {
+	if m.origin == nil {
+		return mouse.PhaseUnknown
+	}
+	return m.origin.Phase()
+}
+
 func (m *teaDashModel) View() string {
-	return m.renderView()
+	s := m.renderView()
+	if m.origin != nil {
+		if suf := m.origin.FrameSuffix(m.height, m.viewLines); suf != "" {
+			s += suf
+			mouseDebugf("cpr_emit", map[string]any{
+				"layoutGen": m.origin.LayoutGen(),
+				"viewLines": m.viewLines, "height": m.height,
+			})
+		}
+	}
+	return s
+}
+
+// waitCPR delivers the next peeled CPR as mouse.CPRMsg and must be re-armed.
+func waitCPR(ch <-chan mouse.CPRMsg) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
 }
