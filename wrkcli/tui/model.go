@@ -1,8 +1,8 @@
 package tui
 
 import (
+	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
@@ -48,6 +48,19 @@ type dashHit struct {
 	runStage string // single-phase run id; exclusive with normal activate when set
 }
 
+// LogLine is one captured stdout/stderr line from a stage / RUN ALL op.
+type LogLine struct {
+	Stage string
+	Level string // optional; empty for plain process output
+	Text  string
+	At    time.Time
+}
+
+const (
+	maxDashLogs      = 200 // ring buffer capacity
+	dashLogViewLines = 3   // fixed Log viewport height (always reserved; no layout bounce)
+)
+
 // teaDashModel is the Bubble Tea model for bare `wrk` on a real TTY.
 type teaDashModel struct {
 	opts RunDashboardOpts
@@ -84,8 +97,42 @@ type teaDashModel struct {
 	loadingID    string
 	loadingFrame int // spinner frame index
 
+	// Streaming op logs (ring buffer + live channel while an op runs).
+	logs  []LogLine
+	logCh <-chan dashLogLineMsg // set while op streams; re-armed via listenLogs
+
+	// Phase-aware pipeline events (RUN ALL / optional single-stage).
+	stageRun map[string]StageRunState
+	eventCh  <-chan dashStageEventMsg // set while pipeline streams; re-armed via listenEvents
+
+	// Optional one-line stage previews filled asynchronously after first paint.
+	// Keyed by stage id: add-changes, gen-commit-msg, commit, merge-back, done,
+	// sync, tag-next, push, reinstall-local.
+	// Secondary lines are always reserved (stable viewLines); empty settled → blank.
+	previews map[string]string
+	// previewSettled[id]==true once a dashPreviewMsg has been applied for id.
+	// Unsettled stages show "…" in the reserved secondary slot (no layout bounce).
+	previewSettled map[string]bool
+
+	// Brief per-stage results from StageEvent.Result after a successful run.
+	// Prefer over preview for that stage until the next run clears them.
+	stageResults map[string]string
+	// Structured gen-commit message (subject line + optional body).
+	genSubject string
+	genBody    string
+
 	quitOutcome int // only cancel leaves the program
 }
+
+// dashStageIDs is the ordered list of stages that may show a preview line.
+var dashStageIDs = []string{
+	"add-changes", "gen-commit-msg", "commit",
+	"merge-back", "done",
+	"sync", "tag-next", "push", "reinstall-local",
+}
+
+// previewJobTimeout is a soft cap per stage preview so expensive helpers cannot stall.
+const previewJobTimeout = 1500 * time.Millisecond
 
 const (
 	teaOutcomeNone   = 0
@@ -99,8 +146,32 @@ type dashOpDoneMsg struct {
 	err       error
 }
 
+// dashLogLineMsg is one streamed stdout/stderr line from a running op.
+type dashLogLineMsg struct {
+	Stage string
+	Level string
+	Text  string
+}
+
+// dashLogClosedMsg signals the log channel was closed (op finished streaming).
+type dashLogClosedMsg struct{}
+
+// dashStageEventMsg is one stage transition from a phase-aware pipeline run.
+type dashStageEventMsg StageEvent
+
+// dashEventsClosedMsg signals the stage-event channel was closed.
+type dashEventsClosedMsg struct{}
+
 // dashTickMsg advances the loading spinner while an op runs.
 type dashTickMsg struct{}
+
+// dashPreviewMsg delivers one stage's async one-line preview text and any
+// captured diagnostics for the Log panel (normal log lines, not tty prints).
+type dashPreviewMsg struct {
+	StageID string
+	Text    string
+	Logs    []string // e.g. git stderr lines; append to log ring as normal logs
+}
 
 // ASCII spinner keeps column width stable under dashPad (single-byte cells).
 var dashSpinnerFrames = []string{"|", "/", "-", "\\"}
@@ -216,25 +287,36 @@ func newTeaDashModel(opts RunDashboardOpts) teaDashModel {
 	workDir := opts.WorkDir
 	status := opts.Status
 	m := teaDashModel{
-		opts:            opts,
-		workDir:         workDir,
-		status:          status,
-		genCommitMsg:    true,
-		commit:          true,
-		agentRunner:     "commandcode",
-		primaryDone:     false, // MERGE BACK default
-		sync:            true,
-		tagNext:         true,
-		push:            true,
-		reinstallLocal:  true,
-		color:  dashColorOn(),
-		origin: mouse.NewTracker(),
+		opts:           opts,
+		workDir:        workDir,
+		status:         status,
+		genCommitMsg:   true,
+		commit:         true,
+		agentRunner:    "commandcode",
+		primaryDone:    false, // MERGE BACK default
+		sync:           true,
+		tagNext:        true,
+		push:           true,
+		reinstallLocal: true,
+		color:          dashColorOn(),
+		origin:         mouse.NewTracker(),
+		previews:       make(map[string]string),
+		previewSettled: make(map[string]bool),
+		stageResults:   make(map[string]string),
+		stageRun:       make(map[string]StageRunState),
 	}
 	addable := m.hasAddableDirt()
 	onMain := m.isMainCheckout()
 	m.addAll = addable
 	m.addDisabled = !addable
 	m.mainDisabled = onMain
+	// No StagePreview injector: settle all empty so slots are blank (not forever "…").
+	// With injector, Init/previewCmds marks pending until async msgs settle.
+	if m.opts.StagePreview == nil {
+		m.markPreviewsSettledEmpty()
+	} else {
+		m.markPreviewsPending()
+	}
 	m.rebuildFocus()
 	m.cursor = m.firstEnabledFocus()
 	return m
@@ -297,8 +379,120 @@ func (m *teaDashModel) stageRunDisabled(id string) bool {
 }
 
 func (m *teaDashModel) Init() tea.Cmd {
-	// Listen for CPR peeled from stdin (same path as mouse).
-	return waitCPR(m.cprCh)
+	// CPR listener + async stage previews (do not block first paint).
+	return tea.Batch(waitCPR(m.cprCh), m.previewCmds())
+}
+
+// markPreviewsPending marks every stage secondary slot as loading ("…").
+// Used on Init (with StagePreview) and after ops before re-fetching previews.
+func (m *teaDashModel) markPreviewsPending() {
+	if m.previewSettled == nil {
+		m.previewSettled = make(map[string]bool)
+	}
+	for _, id := range dashStageIDs {
+		m.previewSettled[id] = false
+	}
+}
+
+// markPreviewsSettledEmpty marks all stages settled with no preview text (blank slots).
+func (m *teaDashModel) markPreviewsSettledEmpty() {
+	if m.previewSettled == nil {
+		m.previewSettled = make(map[string]bool)
+	}
+	if m.previews == nil {
+		m.previews = make(map[string]string)
+	}
+	for _, id := range dashStageIDs {
+		m.previewSettled[id] = true
+		delete(m.previews, id)
+	}
+}
+
+// previewSettledFor reports whether the stage's async preview has been applied.
+func (m *teaDashModel) previewSettledFor(id string) bool {
+	if m.previewSettled == nil {
+		return false
+	}
+	return m.previewSettled[id]
+}
+
+// previewCmds starts one background tea.Cmd per stage. Each soft-fails to empty
+// preview text on panic/timeout; results arrive as dashPreviewMsg and never fail the UI.
+// Captured diagnostics are carried in Logs for the Log panel (not discarded, not tty).
+// Re-marks all stages pending so the reserved slot shows "…" until each settles.
+func (m *teaDashModel) previewCmds() tea.Cmd {
+	if m.opts.StagePreview == nil {
+		m.markPreviewsSettledEmpty()
+		return nil
+	}
+	m.markPreviewsPending()
+	workDir := m.workDir
+	fn := m.opts.StagePreview
+	cmds := make([]tea.Cmd, 0, len(dashStageIDs))
+	for _, id := range dashStageIDs {
+		stageID := id
+		cmds = append(cmds, func() tea.Msg {
+			res := runStagePreview(fn, workDir, stageID)
+			return dashPreviewMsg{
+				StageID: stageID,
+				Text:    res.Preview,
+				Logs:    res.Logs,
+			}
+		})
+	}
+	return tea.Batch(cmds...)
+}
+
+// runStagePreview invokes StagePreview with a short timeout and recovers panics.
+func runStagePreview(fn func(workDir, stageID string) StagePreviewResult, workDir, stageID string) StagePreviewResult {
+	if fn == nil {
+		return StagePreviewResult{}
+	}
+	type result struct{ r StagePreviewResult }
+	ch := make(chan result, 1)
+	go func() {
+		defer func() {
+			if recover() != nil {
+				ch <- result{StagePreviewResult{}}
+			}
+		}()
+		r := fn(workDir, stageID)
+		r.Preview = strings.TrimSpace(r.Preview)
+		ch <- result{r}
+	}()
+	select {
+	case r := <-ch:
+		return r.r
+	case <-time.After(previewJobTimeout):
+		return StagePreviewResult{}
+	}
+}
+
+// applyPreview stores or clears one stage preview and marks the slot settled.
+// Empty text deletes the key (settled blank slot); non-empty stores truncated text.
+func (m *teaDashModel) applyPreview(stageID, text string) {
+	stageID = strings.TrimSpace(stageID)
+	if stageID == "" {
+		return
+	}
+	if m.previews == nil {
+		m.previews = make(map[string]string)
+	}
+	if m.previewSettled == nil {
+		m.previewSettled = make(map[string]bool)
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		delete(m.previews, stageID)
+		m.previewSettled[stageID] = true
+		return
+	}
+	// Keep one short line for layout stability.
+	if len(text) > 60 {
+		text = text[:57] + "..."
+	}
+	m.previews[stageID] = text
+	m.previewSettled[stageID] = true
 }
 
 func (m *teaDashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -336,9 +530,68 @@ func (m *teaDashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loadingFrame = (m.loadingFrame + 1) % len(dashSpinnerFrames)
 		return m, dashSpinnerTick()
+	case dashLogLineMsg:
+		m.appendLog(LogLine{
+			Stage: msg.Stage,
+			Level: msg.Level,
+			Text:  msg.Text,
+			At:    time.Now(),
+		})
+		// Re-arm listener while the channel is still open.
+		if m.logCh != nil {
+			return m, listenLogs(m.logCh)
+		}
+		return m, nil
+	case dashLogClosedMsg:
+		m.logCh = nil
+		return m, nil
+	case dashStageEventMsg:
+		m.applyStageEvent(StageEvent(msg))
+		if m.eventCh != nil {
+			return m, listenEvents(m.eventCh)
+		}
+		return m, nil
+	case dashEventsClosedMsg:
+		m.eventCh = nil
+		return m, nil
+	case dashPreviewMsg:
+		m.applyPreview(msg.StageID, msg.Text)
+		// Captured diagnostics (e.g. git stderr) are normal Log lines — never discarded.
+		for _, line := range msg.Logs {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			m.appendLog(LogLine{
+				Stage: msg.StageID,
+				Level: "info",
+				Text:  line,
+				At:    time.Now(),
+			})
+		}
+		return m, nil
 	case dashOpDoneMsg:
 		m.loadingID = ""
 		m.loadingFrame = 0
+		// Finalize stages that never got a terminal event (fallback RunCompose, race).
+		for id, st := range m.stageRun {
+			switch st {
+			case StageRunning:
+				if msg.err != nil {
+					m.stageRun[id] = StageError
+				} else {
+					m.stageRun[id] = StageOK
+				}
+			case StageQueued:
+				// On error remaining queued stages were not reached → skipped.
+				// On success without per-stage events (fallback) → ok.
+				if msg.err != nil {
+					m.stageRun[id] = StageSkipped
+				} else {
+					m.stageRun[id] = StageOK
+				}
+			}
+		}
 		if msg.err != nil {
 			m.status = "error: " + msg.err.Error()
 		} else if msg.status != "" {
@@ -356,16 +609,18 @@ func (m *teaDashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.mainDisabled = m.isMainCheckout()
 		// viewLines may change after op; View invalidates origin if needed.
-		return m, nil
+		// logCh / eventCh cleared by closed msgs after channels close.
+		// Light preview refresh after ops (cheap git helpers only).
+		return m, m.previewCmds()
 	case tea.MouseMsg:
 		mouseDebugf("mouse_raw", map[string]any{
 			"x": msg.X, "y": msg.Y,
-			"action": fmt.Sprintf("%v", msg.Action),
-			"button": fmt.Sprintf("%v", msg.Button),
-			"type":   fmt.Sprintf("%v", msg.Type),
+			"action":    fmt.Sprintf("%v", msg.Action),
+			"button":    fmt.Sprintf("%v", msg.Button),
+			"type":      fmt.Sprintf("%v", msg.Type),
 			"loadingID": m.loadingID,
-			"height": m.height, "viewLines": m.viewLines,
-			"originY": originYVal(m.originYPtr()),
+			"height":    m.height, "viewLines": m.viewLines,
+			"originY":     originYVal(m.originYPtr()),
 			"addDisabled": m.addDisabled, "addAll": m.addAll,
 			"width": m.width,
 		})
@@ -396,7 +651,7 @@ func (m *teaDashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			"hitY0": res.Hit.Y0, "hitY1": res.Hit.Y1, "hitX0": res.Hit.X0, "hitX1": res.Hit.X1,
 			"originY": originYVal(m.originYPtr()),
 			"hitmapN": len(hits),
-			"hitmap": hitmapSummaryHits(hits),
+			"hitmap":  hitmapSummaryHits(hits),
 		})
 		if !res.OK && m.originYPtr() != nil {
 			opts2 := opts
@@ -463,19 +718,201 @@ func dashSpinnerTick() tea.Cmd {
 	})
 }
 
-// dashRunOpCmd runs a dashboard op off the UI thread; stdout/stderr captured
-// so compose logs do not corrupt the inline TUI.
-func (m *teaDashModel) dashRunOpCmd(loadingID string, addOnly bool, recipe Recipe) tea.Cmd {
+// appendLog adds a line to the ring buffer, dropping oldest entries past maxDashLogs.
+func (m *teaDashModel) appendLog(line LogLine) {
+	m.logs = append(m.logs, line)
+	if len(m.logs) > maxDashLogs {
+		// Truncate from head; copy to avoid unbounded underlying array growth.
+		n := len(m.logs) - maxDashLogs
+		m.logs = append([]LogLine(nil), m.logs[n:]...)
+	}
+}
+
+// listenLogs waits for the next streamed log line (or channel close).
+func listenLogs(ch <-chan dashLogLineMsg) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return dashLogClosedMsg{}
+		}
+		return msg
+	}
+}
+
+// listenEvents waits for the next stage event (or channel close).
+func listenEvents(ch <-chan dashStageEventMsg) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return dashEventsClosedMsg{}
+		}
+		return msg
+	}
+}
+
+// applyStageEvent updates stageRun and status from a pipeline StageEvent.
+// On ok, stores Result / gen Subject+Body for the view and optional Log body lines.
+func (m *teaDashModel) applyStageEvent(ev StageEvent) {
+	if m.stageRun == nil {
+		m.stageRun = make(map[string]StageRunState)
+	}
+	id := strings.TrimSpace(ev.StageID)
+	if id == "" {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(ev.Kind)) {
+	case "start":
+		m.stageRun[id] = StageRunning
+		m.status = "running  " + id + "…"
+	case "ok":
+		m.stageRun[id] = StageOK
+		if res := strings.TrimSpace(ev.Result); res != "" {
+			if m.stageResults == nil {
+				m.stageResults = make(map[string]string)
+			}
+			m.stageResults[id] = res
+		}
+		if subj := strings.TrimSpace(ev.Subject); subj != "" {
+			m.genSubject = subj
+			// Keep a stage result for gen-commit-msg even when Result was empty
+			// so other consumers can read stageResults["gen-commit-msg"].
+			if id == "gen-commit-msg" || id == "commit" {
+				if m.stageResults == nil {
+					m.stageResults = make(map[string]string)
+				}
+				if strings.TrimSpace(m.stageResults["gen-commit-msg"]) == "" {
+					m.stageResults["gen-commit-msg"] = subj
+				}
+			}
+		}
+		if body := strings.TrimSpace(ev.Body); body != "" {
+			m.genBody = body
+			// First body lines go to the Log section for detail without crowding the stage row.
+			for _, line := range strings.Split(body, "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				m.appendLog(LogLine{Stage: id, Text: line, At: time.Now()})
+			}
+		}
+	case "error":
+		m.stageRun[id] = StageError
+		if strings.TrimSpace(ev.Err) != "" {
+			m.status = "error: " + ev.Err
+		} else {
+			m.status = "error: " + id
+		}
+	case "skipped":
+		m.stageRun[id] = StageSkipped
+	}
+}
+
+// resetStageRunForPlan sets planned stages to queued and others idle.
+// Clears results for stages in the plan so stale msg/result lines do not linger.
+func (m *teaDashModel) resetStageRunForPlan(plan []string) {
+	m.stageRun = make(map[string]StageRunState)
+	for _, id := range dashStageIDs {
+		m.stageRun[id] = StageIdle
+	}
+	clearGen := false
+	for _, id := range plan {
+		m.stageRun[id] = StageQueued
+		if m.stageResults != nil {
+			delete(m.stageResults, id)
+		}
+		if id == "gen-commit-msg" || id == "commit" {
+			clearGen = true
+		}
+	}
+	if clearGen {
+		m.genSubject = ""
+		m.genBody = ""
+	}
+}
+
+// SplitCommitMessage splits a full commit message into subject (first line) and body.
+// Pure helper for tests and any caller that holds a multi-line message string.
+func SplitCommitMessage(msg string) (subject, body string) {
+	msg = strings.ReplaceAll(msg, "\r\n", "\n")
+	msg = strings.TrimRight(msg, "\n")
+	if msg == "" {
+		return "", ""
+	}
+	i := strings.IndexByte(msg, '\n')
+	if i < 0 {
+		return strings.TrimSpace(msg), ""
+	}
+	subject = strings.TrimSpace(msg[:i])
+	body = strings.TrimSpace(msg[i+1:])
+	return subject, body
+}
+
+// stageRunState returns the current run state for id (idle if unset).
+func (m *teaDashModel) stageRunState(id string) StageRunState {
+	if m.stageRun == nil {
+		return StageIdle
+	}
+	if st, ok := m.stageRun[id]; ok {
+		return st
+	}
+	return StageIdle
+}
+
+// dashRunOpCmd runs a dashboard op off the UI thread.
+// User-visible process output is fed into logCh (Log panel), never left on the real tty.
+// When usePipeline is true and opts.RunPipeline is set, stages emit on eventCh and may
+// call LogFunc which also writes to logCh (TUI-safe structured logs).
+// Caller must tea.Batch this with listenLogs / listenEvents. Channels are closed on finish.
+func (m *teaDashModel) dashRunOpCmd(loadingID string, addOnly bool, recipe Recipe, usePipeline bool, logCh chan<- dashLogLineMsg, eventCh chan<- dashStageEventMsg) tea.Cmd {
 	workDir := m.workDir
 	opts := m.opts
 	return func() tea.Msg {
-		status, err := runDashboardOpCaptured(opts, workDir, addOnly, recipe)
+		status, err := runDashboardOpCaptured(opts, workDir, addOnly, recipe, loadingID, usePipeline, logCh, eventCh)
+		if logCh != nil {
+			close(logCh)
+		}
+		if eventCh != nil {
+			close(eventCh)
+		}
 		return dashOpDoneMsg{loadingID: loadingID, status: status, err: err}
 	}
 }
 
-// runDashboardOpCaptured executes git-add or compose with stdio redirected to a pipe.
-func runDashboardOpCaptured(opts RunDashboardOpts, workDir string, addOnly bool, recipe Recipe) (status string, err error) {
+// tuiLogFunc returns a LogFunc that posts lines to logCh for the Log panel.
+// Never writes to the real stdout/stderr.
+func tuiLogFunc(logCh chan<- dashLogLineMsg) LogFunc {
+	return func(stage, line string) {
+		if logCh == nil {
+			return
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			return
+		}
+		logCh <- dashLogLineMsg{Stage: stage, Text: line}
+	}
+}
+
+// runDashboardOpCaptured executes git-add, pipeline, or compose.
+//
+// TUI log design:
+//   - Structured pipeline notes go through LogFunc → logCh → model → View Log section.
+//   - Legacy bridge: for RunCompose / library code that still fmt-prints, process
+//     stdout/stderr are temporarily redirected to a pipe and each line is mirrored
+//     onto logCh. That is not the preferred API — prefer LogFunc from RunPipeline.
+//   - Do not fmt.Print / log.Printf to the real tty while tea owns the screen.
+func runDashboardOpCaptured(opts RunDashboardOpts, workDir string, addOnly bool, recipe Recipe, stage string, usePipeline bool, logCh chan<- dashLogLineMsg, eventCh chan<- dashStageEventMsg) (status string, err error) {
+	logf := tuiLogFunc(logCh)
+
+	// Legacy bridge: capture fmt/cli output from compose/git helpers that still
+	// write to process stdout/stderr. Lines are re-emitted on logCh only.
 	oldOut, oldErr := os.Stdout, os.Stderr
 	r, w, pipeErr := os.Pipe()
 	if pipeErr != nil {
@@ -483,23 +920,74 @@ func runDashboardOpCaptured(opts RunDashboardOpts, workDir string, addOnly bool,
 	}
 	os.Stdout, os.Stderr = w, w
 	done := make(chan struct{})
-	var buf strings.Builder
 	go func() {
-		_, _ = io.Copy(&buf, r)
-		close(done)
+		defer close(done)
+		sc := bufio.NewScanner(r)
+		// Allow long compose lines (default 64K is usually enough; bump for safety).
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for sc.Scan() {
+			logf(stage, sc.Text())
+		}
+		_ = sc.Err()
 	}()
 
 	runErr := error(nil)
 	if addOnly {
+		if eventCh != nil {
+			eventCh <- dashStageEventMsg{StageID: stage, Kind: "start"}
+		}
+		logf(stage, "git add -A")
 		if opts.GitAddAll != nil {
 			runErr = opts.GitAddAll(workDir)
+		}
+		if eventCh != nil {
+			if runErr != nil {
+				eventCh <- dashStageEventMsg{StageID: stage, Kind: "error", Err: runErr.Error()}
+				logf(stage, "error: "+runErr.Error())
+			} else {
+				eventCh <- dashStageEventMsg{StageID: stage, Kind: "ok", Result: "staged"}
+				logf(stage, "ok: staged")
+			}
 		}
 		if runErr == nil {
 			status = "ok  staged: git add -A"
 		}
+	} else if usePipeline && opts.RunPipeline != nil {
+		emit := func(ev StageEvent) {
+			if eventCh == nil {
+				return
+			}
+			eventCh <- dashStageEventMsg(ev)
+		}
+		// Pipeline-structured logs use the same logCh (not the real tty).
+		// Tag default stage as loadingID; pipeline may override per call.
+		runErr = opts.RunPipeline(workDir, recipe, emit, logf)
+		if runErr == nil {
+			argvParts := []string{}
+			if opts.ComposeArgv != nil {
+				argvParts = opts.ComposeArgv(recipe)
+			}
+			argv := strings.Join(argvParts, " ")
+			status = "ok  " + argv
+		} else {
+			logf(stage, "error: "+runErr.Error())
+		}
 	} else {
+		if eventCh != nil && stage != "" && stage != "run-all" {
+			eventCh <- dashStageEventMsg{StageID: stage, Kind: "start"}
+		}
+		logf(stage, "compose…")
 		if opts.RunCompose != nil {
 			runErr = opts.RunCompose(workDir, recipe)
+		}
+		if eventCh != nil && stage != "" && stage != "run-all" {
+			if runErr != nil {
+				eventCh <- dashStageEventMsg{StageID: stage, Kind: "error", Err: runErr.Error()}
+				logf(stage, "error: "+runErr.Error())
+			} else {
+				eventCh <- dashStageEventMsg{StageID: stage, Kind: "ok"}
+				logf(stage, "ok")
+			}
 		}
 		if runErr == nil {
 			argvParts := []string{}
@@ -515,7 +1003,6 @@ func runDashboardOpCaptured(opts RunDashboardOpts, workDir string, addOnly bool,
 	<-done
 	os.Stdout, os.Stderr = oldOut, oldErr
 	_ = r.Close()
-	_ = buf.String() // discarded; status line carries summary
 	if runErr != nil {
 		return "", runErr
 	}
@@ -572,7 +1059,7 @@ func (m *teaDashModel) startStageRun(stageID string) (tea.Model, tea.Cmd) {
 		mouseDebugf("startStageRun_blocked", map[string]any{
 			"stageID": stageID,
 			"reason": map[string]any{
-				"loading": m.loadingID != "",
+				"loading":  m.loadingID != "",
 				"disabled": disabled,
 			},
 		})
@@ -580,11 +1067,19 @@ func (m *teaDashModel) startStageRun(stageID string) (tea.Model, tea.Cmd) {
 	}
 	m.loadingID = stageID
 	m.loadingFrame = 0
-	m.status = "running…"
+	m.status = "running  " + stageID + "…"
+	m.resetStageRunForPlan([]string{stageID})
+	m.stageRun[stageID] = StageRunning
 	if stageID == "add-changes" {
 		mouseDebugf("startStageRun_ok", map[string]any{"stageID": stageID, "path": "gitAddAll"})
+		logCh := make(chan dashLogLineMsg, 64)
+		eventCh := make(chan dashStageEventMsg, 16)
+		m.logCh = logCh
+		m.eventCh = eventCh
 		return m, tea.Batch(
-			m.dashRunOpCmd(stageID, true, Recipe{}),
+			m.dashRunOpCmd(stageID, true, Recipe{}, false, logCh, eventCh),
+			listenLogs(logCh),
+			listenEvents(eventCh),
 			dashSpinnerTick(),
 		)
 	}
@@ -592,11 +1087,20 @@ func (m *teaDashModel) startStageRun(stageID string) (tea.Model, tea.Cmd) {
 	if !ok {
 		mouseDebugf("startStageRun_blocked", map[string]any{"stageID": stageID, "reason": "no_recipe"})
 		m.loadingID = ""
+		m.stageRun[stageID] = StageIdle
 		return m, nil
 	}
-	mouseDebugf("startStageRun_ok", map[string]any{"stageID": stageID, "path": "compose"})
+	// Prefer phase-aware pipeline when injected so gen/commit get structured Subject/Result.
+	usePipeline := m.opts.RunPipeline != nil
+	mouseDebugf("startStageRun_ok", map[string]any{"stageID": stageID, "path": "compose", "usePipeline": usePipeline})
+	logCh := make(chan dashLogLineMsg, 64)
+	eventCh := make(chan dashStageEventMsg, 16)
+	m.logCh = logCh
+	m.eventCh = eventCh
 	return m, tea.Batch(
-		m.dashRunOpCmd(stageID, false, r),
+		m.dashRunOpCmd(stageID, false, r, usePipeline, logCh, eventCh),
+		listenLogs(logCh),
+		listenEvents(eventCh),
 		dashSpinnerTick(),
 	)
 }
@@ -605,14 +1109,29 @@ func (m *teaDashModel) startRunAll() (tea.Model, tea.Cmd) {
 	if m.loadingID != "" {
 		return m, nil
 	}
+	r := m.toRecipe()
+	plan := PlanRecipeStages(r)
+	m.resetStageRunForPlan(plan)
 	m.loadingID = "run-all"
 	m.loadingFrame = 0
 	m.status = "running…"
-	r := m.toRecipe()
-	return m, tea.Batch(
-		m.dashRunOpCmd("run-all", false, r),
+	logCh := make(chan dashLogLineMsg, 64)
+	m.logCh = logCh
+	usePipeline := m.opts.RunPipeline != nil
+	var eventCh chan dashStageEventMsg
+	if usePipeline {
+		eventCh = make(chan dashStageEventMsg, 64)
+		m.eventCh = eventCh
+	}
+	cmds := []tea.Cmd{
+		m.dashRunOpCmd("run-all", false, r, usePipeline, logCh, eventCh),
+		listenLogs(logCh),
 		dashSpinnerTick(),
-	)
+	}
+	if eventCh != nil {
+		cmds = append(cmds, listenEvents(eventCh))
+	}
+	return m, tea.Batch(cmds...)
 }
 
 func (m *teaDashModel) activateFocus() (tea.Model, tea.Cmd) {

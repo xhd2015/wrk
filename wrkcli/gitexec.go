@@ -89,10 +89,39 @@ func gitRunDir(repoPath string, args ...string) error {
 }
 
 // gitOutputDir captures git stdout via xgo/support/cmd (non-interactive).
+// Note: git stderr may still inherit the process stderr (e.g. "fatal: no upstream").
+// For TUI soft probes, use gitOutputDirCapture and route stderr into the Log panel.
 func gitOutputDir(repoPath string, args ...string) (string, error) {
 	fullArgs := append([]string{"-C", repoPath}, args...)
 	logGitCommand(fullArgs)
 	return xgocmd.Dir(repoPath).Output("git", args...)
+}
+
+// gitOutputDirCapture captures git stdout and stderr without inheriting the tty.
+// Stderr must be treated as normal log lines by the caller (never discarded silently,
+// never printed to the real terminal while the TUI owns the screen).
+// Does not call logGitCommand (verbose mode would write to process stderr).
+func gitOutputDirCapture(repoPath string, args ...string) (stdout, stderr string, err error) {
+	var outBuf, errBuf bytes.Buffer
+	err = xgocmd.Dir(repoPath).Stdout(&outBuf).Stderr(&errBuf).Run("git", args...)
+	return outBuf.String(), errBuf.String(), err
+}
+
+// splitCapturedLogLines splits captured git stderr/stdout into non-empty log lines.
+func splitCapturedLogLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var lines []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimRight(line, "\r")
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 // gitCombinedRunDir runs git capturing combined stdout+stderr (error messages).

@@ -234,17 +234,17 @@ func applyDashboardAction(workDir string, ctx *invocationContext, action string)
 
 // dashboardRecipe holds stage selection for RUN compose.
 type dashboardRecipe struct {
-	addAll        bool
-	genCommitMsg  bool
-	commit        bool
-	agentRunner   string
-	done          bool
-	mergeBack     bool
-	sync          bool
-	tagNext       bool
-	push          bool
+	addAll         bool
+	genCommitMsg   bool
+	commit         bool
+	agentRunner    string
+	done           bool
+	mergeBack      bool
+	sync           bool
+	tagNext        bool
+	push           bool
 	reinstallLocal bool
-	dryRun        bool
+	dryRun         bool
 }
 
 // defaultDashboardRecipe builds DONE or MERGE BACK defaults for RUN.
@@ -410,14 +410,23 @@ func runDashboardCompose(workDir string, ctx *invocationContext, primaryDone boo
 
 // runDashboardComposeWithRecipe logs argv and re-enters wrkcli.Run with the given recipe.
 func runDashboardComposeWithRecipe(workDir string, ctx *invocationContext, r dashboardRecipe) error {
+	return runDashboardComposeWithRecipeOpts(workDir, ctx, r, true)
+}
+
+// runDashboardComposeWithRecipeOpts is the compose path used by single full-recipe
+// runs and by pipeline mini-stages. When writeArgv is false, the argv log is left
+// untouched (pipeline writes the full-recipe log once up front).
+func runDashboardComposeWithRecipeOpts(workDir string, ctx *invocationContext, r dashboardRecipe, writeArgv bool) error {
 	// Honor dirt gate: never add-all when clean even if recipe says so.
 	if r.addAll && !dashboardHasAddableDirt(workDir) {
 		r.addAll = false
 	}
 
 	args := composeArgvFromRecipe(r)
-	if err := writeComposeArgvLog(args); err != nil {
-		return fmt.Errorf("wrk: write %s: %w", envDashboardComposeArgvLog, err)
+	if writeArgv {
+		if err := writeComposeArgvLog(args); err != nil {
+			return fmt.Errorf("wrk: write %s: %w", envDashboardComposeArgvLog, err)
+		}
 	}
 
 	// Dry-run + Add changes: stage so gen-commit dry plan can see an index and

@@ -9,8 +9,8 @@ import (
 func runDashboardTeaLoop(workDir string, ctx *invocationContext) error {
 	_ = ctx // compose path uses nil ctx + skip via re-entry; events still recorded inside Run
 	return tui.RunDashboard(tui.RunDashboardOpts{
-		WorkDir: workDir,
-		Status:  "",
+		WorkDir:        workDir,
+		Status:         "",
 		HasAddableDirt: dashboardHasAddableDirt,
 		IsMainCheckout: dashboardIsMainCheckout,
 		GitAddAll: func(wd string) error {
@@ -19,8 +19,15 @@ func runDashboardTeaLoop(workDir string, ctx *invocationContext) error {
 		RunCompose: func(wd string, r tui.Recipe) error {
 			return runDashboardComposeWithRecipe(wd, nil, recipeFromTUI(r))
 		},
+		RunPipeline: func(wd string, r tui.Recipe, emit func(tui.StageEvent), log tui.LogFunc) error {
+			return runDashboardPipeline(wd, recipeFromTUI(r), emit, log)
+		},
 		ComposeArgv: func(r tui.Recipe) []string {
 			return composeArgvFromRecipe(recipeFromTUI(r))
+		},
+		StagePreview: func(wd, stageID string) tui.StagePreviewResult {
+			preview, logs := dashboardStagePreview(wd, stageID)
+			return tui.StagePreviewResult{Preview: preview, Logs: logs}
 		},
 	})
 }
