@@ -18,7 +18,7 @@ consumer wt + ahead external/dep wt -> wrk --done
 func Setup(t *testing.T, req *Request) error {
 	setupConsumerWithAheadExternalDep(t, req)
 	req.RepoDir = req.WtDir
-	req.Args = []string{"--done"}
+	req.Args = []string{"--done", "-y"}  // D3: cascade not-included needs -y
 	return nil
 }
 ```

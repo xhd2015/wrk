@@ -164,6 +164,11 @@ func setupDivergedExternalForCascadeFail(t *testing.T, req *Request) {
 	externalPath = compositionResolvePath(t, externalPath)
 	req.ExternalWtDir = externalPath
 
+	// Commit consumer porcelain after --dep so D2 dirty preflight does not
+	// block before the cascade MergeBack conflict under test.
+	runGitIsolated(t, wtDir, "add", "-A")
+	runGitIsolated(t, wtDir, "commit", "-m", "commit dep replace and ignore", "--allow-empty")
+
 	// Diverged: main and external each edit the same lines of dep.go.
 	writeFile(t, filepath.Join(depRepo, "dep.go"), "package dep\n// main-side change\n")
 	runGitIsolated(t, depRepo, "add", "dep.go")

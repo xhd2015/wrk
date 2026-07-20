@@ -28,7 +28,12 @@ func main() {
 		if errors.As(err, &exitErr) {
 			os.Exit(exitErr.Code)
 		}
-		fmt.Fprintln(os.Stderr, err.Error())
+		// Color Error: (red) / warning: (yellow) prefixes when --color or TTY
+		// and NO_COLOR is unset. Prefix-only; body stays plain.
+		msg := err.Error()
+		msg = wrkcli.FormatStderrError(msg)
+		msg = wrkcli.FormatStderrWarning(msg)
+		fmt.Fprintln(os.Stderr, msg)
 		os.Exit(1)
 	}
 }

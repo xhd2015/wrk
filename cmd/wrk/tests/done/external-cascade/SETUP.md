@@ -50,6 +50,11 @@ func Setup(t *testing.T, req *Request) error {
 	externalPath := runWrkWithArgs(t, req, wtDir, "--dep", depRepo)
 	req.ExternalWtDir = externalPath
 
+	// Commit --dep replace/gitignore so D2 dirty preflight does not block
+	// cascade; replace remains in go.mod for the local-replace guard under test.
+	runGitIsolated(t, wtDir, "add", "-A")
+	runGitIsolated(t, wtDir, "commit", "-m", "commit dep replace and ignore", "--allow-empty")
+
 	req.RepoDir = wtDir
 	req.Args = []string{"--done"}
 	return nil

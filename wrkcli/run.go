@@ -276,6 +276,9 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	ctx.eventArgs = extractEventArgs(args, remaining)
 
 	setInvocationVerbose(verbose)
+	// Keep force color for main's FormatStderrError after Run returns (do not
+	// clear in defer — main prints err after Run exits).
+	SetForceStderrColor(colorFlag)
 	worktree.GitVerboseLogger = logGitCommand
 	defer func() {
 		setInvocationVerbose(false)
@@ -860,8 +863,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			return err
 		}
 		runPrimary := func() error {
-			// Default auto-yes for own + cascade plans; --confirm restores prompts; -y still auto-yes.
-			return runDone(workDir, wrkHome, confirmFromStdin, planAssumeYes(assumeYes, forceConfirm), noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
+			// Own keeps default auto-yes; cascade not-included requires -y or explicit confirm (D3).
+			return runDone(workDir, wrkHome, confirmFromStdin, assumeYes, forceConfirm, noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
 		}
 		// Dry-run gen-commit pre would commit staged dirt; MergeBack --rm still
 		// requires a clean tree today. Stash staged only for the dry plan, then restore.
@@ -1627,10 +1630,15 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 	return nil
 }
 
-func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool) error {
+func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool) error {
 	// Shell process cwd (inherited from interactive shell), not merely workDir.
 	// Used after remove to decide whether auto-cd is needed.
 	shellCwd, _ := os.Getwd()
+
+	// Own merge-back: default auto-yes unless --confirm ( -y still auto-yes).
+	// Cascade not-included: default auto-yes does NOT apply; only -y/--yes (D3).
+	ownAssumeYes := planAssumeYes(yesFlag, forceConfirm)
+	cascadeAssumeYes := yesFlag
 
 	checkoutRoot, err := requireLinkedWorktree(workDir, "--done")
 	if err != nil {
@@ -1642,20 +1650,24 @@ func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleRep
 	if err != nil {
 		return err
 	}
-	// Cascade uses the same assumeYes policy as own worktree (default auto-yes).
-	// Dry-run never applies cascade mutations; mergeBackExternalWorktree prints would: lines.
-	// Phase banners only when there is at least one cascade target (0 → neither
-	// ==> cascade nor ==> own); with targets, both headers as today for stable order
-	// with would: lines and ==> own on the same stream.
+	// Nested main under consumer is a hard error (D1). Dry-run still runs
+	// preflight (D7). Phase banners only when cascade targets ≥ 1.
 	cascadeTargets, err := listCascadeLinkedWorktrees(consumerTop, checkoutRoot)
 	if err != nil {
 		return err
+	}
+	// D2/D7: all-or-nothing dirty preflight on cascade targets + own before any
+	// mutation or successful would: cascade plan.
+	if len(cascadeTargets) > 0 {
+		if err := preflightCascadeDirty(cascadeTargets, checkoutRoot); err != nil {
+			return err
+		}
 	}
 	hasCascade := len(cascadeTargets) > 0
 	if hasCascade {
 		fmt.Println("==> cascade")
 		for _, path := range cascadeTargets {
-			if err := mergeBackExternalWorktree(path, confirmFromStdin, assumeYes, dryRun); err != nil {
+			if err := mergeBackExternalWorktree(path, confirmFromStdin, cascadeAssumeYes, dryRun); err != nil {
 				return err
 			}
 		}
@@ -1685,7 +1697,7 @@ func runDone(workDir, wrkHome string, confirmFromStdin, assumeYes, noInModuleRep
 		Remove:     true,
 		DryRun:     dryRun,
 		Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
-			return worktree.PromptConfirmPlan(plan, confirmFromStdin, assumeYes)
+			return worktree.PromptConfirmPlan(plan, confirmFromStdin, ownAssumeYes)
 		},
 	})
 	if err != nil {
@@ -1910,7 +1922,8 @@ func planAssumeYes(assumeYes, forceConfirm bool) bool {
 
 // listCascadeLinkedWorktrees returns linked worktrees under consumerTop that
 // are cascade merge-back targets (excludes the consumer checkout itself).
-// Nested main repos are skipped with a warning (same policy as before).
+// Nested main repos under the consumer tree are a hard error (D1) — not
+// warn+skip — so --done aborts before cascade/own mutations.
 func listCascadeLinkedWorktrees(consumerTop, checkoutRoot string) ([]string, error) {
 	repos, err := discoverStatusRepos(context.Background(), consumerTop)
 	if err != nil {
@@ -1922,7 +1935,7 @@ func listCascadeLinkedWorktrees(consumerTop, checkoutRoot string) ([]string, err
 	for _, repo := range repos {
 		if repo.RepoType == scan_repo.RepoTypeMain {
 			if filepath.Clean(repo.Path) != filepath.Clean(consumerTop) {
-				fmt.Fprintf(os.Stderr, "warning: skipping nested main repo %s\n", repo.Path)
+				return nil, fmt.Errorf("Error: nested main repo under consumer blocks cascade: %s", repo.Path)
 			}
 			continue
 		}
@@ -1940,6 +1953,22 @@ func listCascadeLinkedWorktrees(consumerTop, checkoutRoot string) ([]string, err
 	return targets, nil
 }
 
+// preflightCascadeDirty fails hard if any cascade target or the own checkout
+// has uncommitted changes. Runs before phase headers/mutations so cascade cannot
+// remove externals then fail on own dirty (D2), and so dry-run cannot print a
+// false would: success plan (D7).
+func preflightCascadeDirty(cascadeTargets []string, ownPath string) error {
+	for _, path := range cascadeTargets {
+		if err := worktree.IsClean(path); err != nil {
+			return fmt.Errorf("Error: %w", err)
+		}
+	}
+	if err := worktree.IsClean(ownPath); err != nil {
+		return fmt.Errorf("Error: %w", err)
+	}
+	return nil
+}
+
 // mergeBackExternalWorktree merge-backs (or removes) an external dependency
 // worktree during the --done cascade.
 //
@@ -1950,16 +1979,18 @@ func listCascadeLinkedWorktrees(consumerTop, checkoutRoot string) ([]string, err
 // branch shares the dep's history, so the merge-base check resolves. This
 // ensures dep work committed on the external worktree is merged back into the
 // dep repo before the worktree is removed. Relation to dep main: already-included
-// → remove only; ahead/diverged → Confirm (default auto-yes from caller; --confirm
-// restores prompts; --confirm-from-stdin for non-TTY when prompting).
+// → remove only (D8, no confirm); ahead/diverged → Confirm. Cascade assumeYes is
+// only true with -y (D3: default auto-yes does not apply to cascade not-included).
+// --confirm-from-stdin for non-TTY when prompting (D4).
 //
-// When dryRun is true, prints a compact plan line and does not mutate.
+// When dryRun is true (and preflight already passed), prints a compact plan line
+// and does not mutate (D6). Real success prints result.Message on stdout (D5).
 func mergeBackExternalWorktree(externalPath string, confirmFromStdin, assumeYes, dryRun bool) error {
 	if dryRun {
 		fmt.Printf("would: cascade merge-back %s\n", externalPath)
 		return nil
 	}
-	_, err := worktree.MergeBack(worktree.MergeBackOptions{
+	result, err := worktree.MergeBack(worktree.MergeBackOptions{
 		SourcePath: externalPath,
 		TargetPath: "",
 		Remove:     true,
@@ -1972,6 +2003,15 @@ func mergeBackExternalWorktree(externalPath string, confirmFromStdin, assumeYes,
 		// and include cascade worktree path so failures are not bare git detail
 		// (e.g. "rebase conflict:") alone.
 		return fmt.Errorf("Error: cascade merge-back %s: %w", externalPath, err)
+	}
+	// D5: print MergeBack Message on stdout (same as own path).
+	if result != nil && result.Message != "" {
+		fmt.Println(result.Message)
+	}
+	if result != nil && result.Action == "aborted" {
+		// Stop cascade + own after user decline; non-zero so callers do not
+		// treat partial --done as success.
+		return fmt.Errorf("merge-back aborted")
 	}
 	return nil
 }

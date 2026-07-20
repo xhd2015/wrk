@@ -22,7 +22,7 @@ consumer + diverged external
 func Setup(t *testing.T, req *Request) error {
 	setupDivergedExternalForCascadeFail(t, req)
 	req.RepoDir = req.WtDir
-	req.Args = []string{"--done"}
+	req.Args = []string{"--done", "-y"}  // D3: diverged cascade needs -y to reach conflict Error:
 	return nil
 }
 ```

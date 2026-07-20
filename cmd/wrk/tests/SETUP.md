@@ -604,6 +604,11 @@ func setupConsumerWithAheadExternalDep(t *testing.T, req *Request) {
 	externalPath := runWrkWithArgs(t, req, wtDir, "--dep", depRepo)
 	req.ExternalWtDir = externalPath
 
+	// Commit consumer porcelain after --dep (replace/gitignore) so D2 cascade
+	// preflight dirty checks pass; replace stays in go.mod for replace-guard tests.
+	runGitIsolated(t, wtDir, "add", "-A")
+	runGitIsolated(t, wtDir, "commit", "-m", "commit dep replace and ignore", "--allow-empty")
+
 	writeFile(t, filepath.Join(externalPath, "dep.go"), "package dep // ahead fix\n")
 	runGitIsolated(t, externalPath, "add", "dep.go")
 	runGitIsolated(t, externalPath, "commit", "-m", "dep fix on external worktree")

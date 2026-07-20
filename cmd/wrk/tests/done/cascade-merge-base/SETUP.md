@@ -77,6 +77,9 @@ func Setup(t *testing.T, req *Request) error {
 	// Drop the consumer's local replace so the local-replace guard is not what
 	// fails — the cascade merge-base crash is the sole behavior under test.
 	runGoMod(t, wtDir, "edit", "-dropreplace="+cascadeMbDepModule)
+	// Commit so D2 dirty preflight does not block cascade remove.
+	runGitIsolated(t, wtDir, "add", "-A")
+	runGitIsolated(t, wtDir, "commit", "-m", "drop replace; clean porcelain", "--allow-empty")
 
 	req.RepoDir = wtDir
 	req.Args = []string{"--done"}
