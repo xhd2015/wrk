@@ -1,37 +1,26 @@
 ## Expected
 
-- Non-zero exit.
-- Stdout empty.
-- Stderr contains refuse wording: `already has a linked worktree`, basename, existing path, non-interactive / TTY, and that default is skip.
-- Shape: `wrk: myrepo already has a linked worktree at <absPath>; refusing non-interactive create (default is skip; re-run in a TTY)`
+- Exit code 0 (default auto-skip; non-TTY no longer hard-refuses).
+- Stdout (trimmed) equals the existing linked worktree path.
 - No new worktree under `{WorkRoot}/target/`.
 - Prior worktree unchanged.
-- No ANSI color required (non-TTY harness; plain refuse string).
+- No `Proceed?` / interactive skip prompt required (silent auto-skip OK).
 
 ## Exit Code
 
-- non-zero
+- 0
 
 ```go
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
-	if resp.ExitCode == 0 {
-		t.Fatalf("expected non-zero exit on non-TTY named bring with existing linked WT; stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
-	}
-	if strings.TrimSpace(resp.Stdout) != "" {
-		t.Fatalf("stdout must be empty, got %q", resp.Stdout)
+	if resp.ExitCode != 0 {
+		t.Fatalf("expected exit 0 on non-TTY named bring auto-skip; stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
 	}
 
-	assertContains(t, resp.Stderr, "already has a linked worktree")
-	assertContains(t, resp.Stderr, req.WtDir)
-	assertContains(t, resp.Stderr, "myrepo")
-	// Non-interactive refuse (stable substrings from design).
-	if !strings.Contains(resp.Stderr, "non-interactive") && !strings.Contains(resp.Stderr, "TTY") && !strings.Contains(resp.Stderr, "tty") {
-		t.Fatalf("stderr should mention non-interactive/TTY refuse; got %q", resp.Stderr)
-	}
-	assertContains(t, resp.Stderr, "skip")
+	wantPath := req.WtDir
+	assertStdoutExactPath(t, resp.Stdout, wantPath)
 
-	assertFileExists(t, req.WtDir)
+	assertFileExists(t, wantPath)
 	assertFileNotExists(t, filepath.Join(req.WorkRoot, "target", "myrepo-main-"+wrkDate))
 	assertFileNotExists(t, filepath.Join(req.WorkRoot, "target", "myrepo-main-"+wrkDate+"-1"))
 }

@@ -36,15 +36,16 @@ after successful create / `--cd` / `--dep` / `--bring` / `--set-task` / `--done`
 - **wrk --push (dual meaning)** — never bare (`wrk --push` alone → non-zero). **(1) Branch under primary**: with `--done` or `--merge-back` and **without** `--tag-next`, after successful primary (not aborted / not dry-run apply), call `runPushMain` from **main** with empty tag refs — pushes the main branch only (flag order free: `--done --push` ≡ `--push --done`; same for merge-back). **(2) Tags with standalone tag-next**: `wrk --tag-next --push` pushes newly created tag refs only (no branch push). **(3) Both when primary + tag-next + push**: create tags locally first, then `runPushMain(main, false, createdTags)` pushes **branch + tags**. **Remote resolution** (primary path): prefer configured upstream of main’s current branch; else fallback `origin` + current branch name. **Stdout** (primary path): blank line before push stage, then stable confirmation `pushed main → origin/main\n`. Push hard-fail after primary success → non-zero exit; **no undo** of primary. No resolvable remote → clear non-zero error.
 - **wrk --done / --merge-back post-pipeline (sync → tag-next → push → propagate-tags)** — after successful primary (not aborted / not dry-run apply), optional post steps run in **fixed order** regardless of flag argv order: **sync → tag-next → push → propagate-tags** (then **exec → land** on the **done** path only; merge-back keeps the source worktree and has no exec/land). Subsets allowed (e.g. `--tag-next` only, `--tag-next --propagate-tags`, `--propagate-tags` alone on existing tags, `--sync --tag-next`, full combo). **Blank line** between major stdout stages. When `--tag-next` / `--propagate-tags` is set with primary `--done` or `--merge-back`, dispatch must be the **primary** (not bare `runTagNext` / `runPropagateTags`); tag-next apply runs on **main** after merge; propagate runs from **main** + `WRK_HOME` using newly created tags (or planned next tags on dry-run) or existing source release tags when `--tag-next` is absent. Abort of primary: no post steps. Hard fail of a post step: stop, no undo. Event `command` stays `"done"` / `"merge-back"` (args may include `--sync` / `--tag-next` / `--push` / `--propagate-tags`). Coverage: flag matrix `done-compose/`; branch push `done-push/`; real apply `done-pipeline/` + `merge-back-pipeline/`; composition dry-run under each tree’s `dry-run/`.
 - **--json with primary** — `--json` is **only** valid with bare `--tag-next` (machine-readable plan/result). `--done --json` and `--merge-back --json` → non-zero; stderr names `--json` and the primary (`wrk: --json is not valid with --done` / `… with --merge-back`). Not a silent accept into merge-back or tag-next.
-- **wrk --done** — resolves checkout root via `ShowToplevel(cwd)`; requires a linked worktree (not main repo); clean worktree; implicit `--rm`. **Cascade**: `scan_repo.Scan(consumerTop)` discovers every git directory under the checkout; for each row where `RepoType == worktree` and `IsLinked(path)` and `path != checkoutRoot`, run `mergeBackExternalWorktree(path)` in scan path order (path-sorted). This covers `external/*` dep worktrees **and** manually linked worktrees elsewhere (e.g. `deps/foo`). Skip `RepoTypeMain` nested repos (no merge-back/delete). Each cascaded worktree is a dep-repo worktree (registered under `<depMain>/.git/worktrees/`), so `MergeBack` resolves its main repo from the worktree's `.git` gitdir (the dep main) and merges the dep branch back into the dep repo (the branch shares the dep's history, so merge-base resolves); this ensures dep work committed on a nested linked worktree is merged back before removal. Relation to dep main: already-included → remove only; ahead/diverged → default auto-yes merge/rebase (own + cascade); `--confirm` restores Y/n (with `--confirm-from-stdin` on non-TTY). The consumer's own `checkoutRoot` is excluded (finished by the final `MergeBack` in `runDone`). **Guard**: scan **every** Go module under the checkout (`gotool/mod/scan.Scan`) — main + all sub-modules — and classify each filesystem/local `replace` (`./`, `../`, or absolute path without version) by resolving its target relative to the module's `go.mod` dir: **intra-repo** = target dir exists AND `git -C <target> rev-parse --show-toplevel` equals the consumer's toplevel (a `../../`/`./sub` nested-module reference back into the same repo); **extra-repo** = everything else (`./external/foo` dep worktree, non-existent target, absolute path to another checkout, sibling outside) (`./external/foo` dep worktree, non-existent target, absolute/sibling outside). The guard names the offending `<top>/<m.Dir>/go.mod` file and each `replace <Old> => <New>` directive in its message. Default (no flag): intra-repo → **WARN to stderr and proceed** (exit 0, merge-back runs); extra-repo → **error, block**. `--no-in-module-replace` (opt-in, valid only with `--done`) → **all** local replaces block (fully-strict). A checkout with no `go.mod` at all yields zero modules → guard is a no-op → `--done` proceeds (and the linked-worktree check inside `MergeBack` still runs for a main-repo cwd, producing `not a linked worktree`). Branch relation to main: already-included → remove only; ahead/diverged → prompt then merge/rebase (or `-y` / `--confirm-from-stdin` on own worktree).
+- **wrk --done** — resolves checkout root via `ShowToplevel(cwd)`; requires a linked worktree (not main repo); clean worktree; implicit `--rm`. **Cascade**: `scan_repo.Scan(consumerTop)` discovers every git directory under the checkout; for each row where `RepoType == worktree` and `IsLinked(path)` and `path != checkoutRoot`, run `mergeBackExternalWorktree(path)` in scan path order (path-sorted). This covers `external/*` dep worktrees **and** manually linked worktrees elsewhere (e.g. `deps/foo`). Skip `RepoTypeMain` nested repos (no merge-back/delete). Each cascaded worktree is a dep-repo worktree (registered under `<depMain>/.git/worktrees/`), so `MergeBack` resolves its main repo from the worktree's `.git` gitdir (the dep main) and merges the dep branch back into the dep repo (the branch shares the dep's history, so merge-base resolves); this ensures dep work committed on a nested linked worktree is merged back before removal. Relation to dep main: already-included → remove only; ahead/diverged → **default auto-yes** (TTY and non-TTY; no pre-flight hard guard). **No non-TTY cascade confirmation hard-guard**: ahead/diverged cascaded worktrees auto-merge without prompts unless `--confirm` re-enables interactive Y/n. The consumer's own `checkoutRoot` is excluded (finished by the final `MergeBack` in `runDone`). **Guard**: scan **every** Go module under the checkout (`gotool/mod/scan.Scan`) — main + all sub-modules — and classify each filesystem/local `replace` (`./`, `../`, or absolute path without version) by resolving its target relative to the module's `go.mod` dir: **intra-repo** = target dir exists AND `git -C <target> rev-parse --show-toplevel` equals the consumer's toplevel (a `../../`/`./sub` nested-module reference back into the same repo); **extra-repo** = everything else (`./external/foo` dep worktree, non-existent target, absolute path to another checkout, sibling outside) (`./external/foo` dep worktree, non-existent target, absolute/sibling outside). The guard names the offending `<top>/<m.Dir>/go.mod` file and each `replace <Old> => <New>` directive in its message. Default (no flag): intra-repo → **WARN to stderr and proceed** (exit 0, merge-back runs); extra-repo → **error, block**. `--no-in-module-replace` (opt-in, valid only with `--done`) → **all** local replaces block (fully-strict). A checkout with no `go.mod` at all yields zero modules → guard is a no-op → `--done` proceeds (and the linked-worktree check inside `MergeBack` still runs for a main-repo cwd, producing `not a linked worktree`). Branch relation to main: already-included → remove only; ahead/diverged → **default auto-yes** merge/rebase without reading stdin (TTY and non-TTY); `--confirm` re-enables `Proceed? [Y/n]` (use `--confirm-from-stdin` for non-TTY pipes); `-y` / `--yes` is a no-op synonym of default auto-yes.
 - **wrk --list** — runs `git -C <cwd> worktree list`; prints stdout unchanged; cwd must be inside a git work tree (main repo, linked worktree, or nested subpath). Mutually exclusive with no-args create and `--done`.
 - **wrk --status** — standalone reporting mode; cwd must be inside a git work tree. Resolves the effective cwd's checkout root with git toplevel discovery, calls `scan_repo.Scan(context.Background(), scan_repo.Options{Roots: []string{Root}})`, and for main-repo roots prints primary then optional external sections (see Main-repo sections below); non-main roots keep scan-order discovery. Each block includes `Dir` via **`statusDirLine`** (see below), current branch, short commit hash plus subject, and `Status` as either `clean` or `dirty (<added> added, <changed> changed, <renamed> renamed, <deleted> deleted)` (wrk taxonomy: porcelain `??` untracked counts as **added**, same as index `A` / `wrk --projects`). **`statusDirLine` (all Dir lines)**: `rel = filepath.Rel(normalize(invocationCwd), normalize(repoPath))`; on Rel failure or when cleaned rel has **more than two** leading `..` segments → absolute `storage.NormalizePath(repoPath)`; else `filepath.ToSlash(rel)`. Pure Rel (no soft force of `.` merely because cwd is inside the checkout). Applies to scan blocks, appended external blocks, and broken/prunable minimal blocks. **Main-repo status content** (`worktree.IsMainRepo(checkoutRoot)`): the main-repo scan block also includes `Remote:` — same brief upstream labels as `--projects` (`identical`, `needs push`, `needs pull`, `diverged`, `(no upstream)`); field order is `Dir`, `Branch`, `Commit`, `Status`, `Remote` (no `Worktrees:`). `Remote:` is gated on **main identity** (repoPath is main), **not** on `Dir == "."`. `Remote:` uses local upstream tracking refs by default; with `--fetch`, fetch upstream for the main repo first then compare. Nested independent `RepoTypeMain` sub-repos and **linked worktree blocks** do **not** show `Remote:`. Running from a **linked worktree cwd** omits `Remote:` on all blocks (append phase also skipped). **Linked worktrees only** (`worktree.IsLinked`) also include one-line `Master:` — brief branch-relation label comparing main repo's current branch vs the worktree's current branch via `git.CompareBranches` (`identical`, `needs merge back(+N commit(s))`, `needs fast forward(+N commit(s))`, `diverged(N commit(s))`). Main checkout blocks (other than `Remote:` above) and nested independent `RepoTypeMain` repos do **not** show `Master:`. When stdout is a TTY or `--color` is set, `Status: clean` is green; dirty status uses granular red/grey segments (same rules as `--projects`); `Master:` and `Remote:` values follow `--projects` color rules when applicable; the main-repo external section header `---- external ----` is full-line grey (`ansiGrey` / `#90`). Without color: plain text (including plain header). **Scan-discovered broken** (alive checkout, `checkout.Enrich` or `masterBriefForRepo` fails during scan phase): minimal block with `Dir` via `statusDirLine` + `Status: error: <git stderr>` only (no `Branch`/`Commit`/`Remote`/`Master:`); red `error: …` when `--color`/TTY; run continues for remaining repos; exit 0; stderr empty (unless `-v`). Same non-fatal policy as `--projects` per-repo errors and appended broken blocks. **Main-repo sections (P2+P3)**: when `worktree.IsMainRepo(checkoutRoot)`, partition via `PartitionStatusPaths(main, scanPaths, ListLinked)` — **primary** = main then all ListLinked paths in porcelain order (in-tree + out-of-tree WRK + prunable); **external** = scan paths not in primary, path-sorted. Print primary blocks first; if external non-empty, after last primary: blank line, header `---- external ----` (P3: gray ANSI `ansiGrey` / `#90` when colorEnabled via TTY or `--color`; plain ASCII when color off), blank line, then external blocks. Omit header when external empty. Main-owned WRK out-of-tree linked worktrees are **primary** (no section header for them alone). Out-of-tree/prunable primary linked keep `printAppendedLinkedBlock` presentation (healthy: full + `Master:`; broken/prunable: minimal). Nested external always `printStatusBlock`. Running from a linked worktree cwd without `--main` skips main-repo sectioning (scan-only shortcut). Mutually exclusive with `--done`, `--list`, `--dep`, `--all-deps`, create target arguments, and other modes. **Composition with `--main`**: `wrk --main --status` and `wrk --status --main` (order irrelevant) run status of the **main repository** of the resolved checkout — resolve `ShowToplevel(workDir)` → `ResolveMainRepo` then `runStatus` on main for content; **Dir labels still use original invocation cwd**. No nested shell. Event `command` is `"status"` with `args` including both `--main` and `--status`. From an in-tree linked cwd, always full main-repo status (not the linked-cwd shortcut in `runStatusLinkedInTreeCwd`). Equivalence: same blocks and Branch/Commit/Status/Master/Remote as `(cd <mainRepo> && wrk --status)`; **Dir may differ** when invocation cwd ≠ main. Pure `wrk --main` (shell) and pure `wrk --status` (current checkout) stay unchanged. `--fetch` / `--color` / `-v` remain allowed with the pair.
-- **-y / --yes** — universal top-level bool flag; no-op on commands without Y/n prompts (create, `--list`, basename `Select [1-N]`, etc.). **Default auto-yes** for `--done` / `--merge-back` (own worktree **and** cascaded deps) and `--set-task` rename: bare invocations skip `Proceed? [Y/n]` without `-y`. `-y` remains valid for compatibility. **`--confirm`** restores interactive prompts for those modes; with non-TTY use `--confirm --confirm-from-stdin`. Recorded in `events.jsonl` `args` when passed.
-- **--confirm-from-stdin** — when set with piped `StdinInput`, reads Y/n from stdin for **own-worktree** merge-back confirmation on non-TTY ahead/diverged cases. Superseded by `-y` when `-y` is set (no stdin read). Does **not** confirm cascaded ahead/diverged worktrees on non-TTY (option A pre-flight guard).
+- **-y / --yes** — universal top-level bool flag; **no-op synonym of default auto-yes** for all `[Y/n]` prompts (own-worktree `--done` / `--merge-back`, cascade ahead/diverged, `--set-task` rename, task-like promote, create-skip). No-op on commands without Y/n prompts (create without skip, `--list`, basename `Select [1-N]`, etc.). Default behavior already auto-yes without reading stdin (TTY and non-TTY); `-y` remains accepted for compat and is recorded in `events.jsonl` `args` when passed. Does **not** bypass real safety guards (dirty remove, rebase fail, go.mod replace).
+- **--confirm** — opt-in force interactive Y/n prompts (opt-out of default auto-yes). Applies to own-worktree merge-back, cascade ahead/diverged, `--set-task` rename, task-like promote, and create-skip Policy B. With `--confirm`, TTY prompts as before; non-TTY merge-back uses `--confirm-from-stdin` + piped stdin when needed. `--confirm` + `n` aborts cleanly (`merge-back aborted` / create proceeds or declines per prompt). Help text should document `--confirm` and note `-y` is default for Y/n prompts.
+- **--confirm-from-stdin** — meaningful **only when prompting is active** (`--confirm`). When set with piped `StdinInput`, reads Y/n from stdin for non-TTY confirmations (own-worktree and cascade when `--confirm` is set). Without `--confirm`, default auto-yes means this flag is not required. Superseded by default auto-yes / `-y` when not prompting (no stdin read).
 - **--no-in-module-replace** — bool flag (no value); valid ONLY with `--done`. Restores the fully-strict local-replace guard: every filesystem/local `replace` (intra-repo or extra-repo) blocks `--done`. Without it (default), intra-repo replaces — whose target dir exists and shares the consumer's `git rev-parse --show-toplevel` (`../../`/`./sub` nested-module reference) — only WARN and `--done` proceeds; extra-repo replaces (`./external/foo` dep worktree, non-existent/absolute/sibling) still block. Bare `wrk --no-in-module-replace`, or with any other mode (`--dep`/`--list`/no-args create/`--all-deps`) → non-zero exit, stderr `wrk: --no-in-module-replace is only valid with --done`.
-- **Request.Args** — CLI arguments passed to `wrk` after optional `<dir>` (empty + no TargetDir/TaskDesc → bare dashboard; create uses `["--new"]` or positionals/task/UX; `["--dep", depPath]` for dep tests; `["--done"]` or `["--done", "--confirm-from-stdin"]` for done tests; `["--list"]` for list tests).
+- **Request.Args** — CLI arguments passed to `wrk` after optional `<dir>` (empty → no-args create; `["--dep", depPath]` for dep tests; `["--done"]` default auto-yes; `["--done", "--confirm", "--confirm-from-stdin"]` for decline/prompt leaves; `["--list"]` for list tests).
 - **Request.TargetDir** — when set, prepended as the first positional argument to `wrk` (`wrk <dir> ...`); used by `dir-arg/` tests to run from `WorkRoot` while targeting a repo elsewhere.
-- **Request.SpawnDir** — optional second positional `<target-dir>` (`wrk <dir> <target-dir>`); appended after `TargetDir` when set. Overrides the worktree spawn location: missing target with existing parent → spawn exactly at `<target-dir>` (no naming suffix on the path); existing target dir → spawn a default-named sub-dir under it; missing parent → error. Resolved relative to the process (shell) cwd, not `<dir>`. Create-only — errors with `wrk: unexpected arguments` when combined with `--list`/`--done`/`--dep`. `WRK_HOME` is ignored when set. **Named-bring same-repo reuse (Policy B)**: before create, search **any** live linked worktree of the source `mainRepo` (not only under `<target-dir>`, not only `external/`). None → create as today. Some + **stdin TTY** → prompt on stderr `<basename> already exists in <absPath>, skip? [Y/n] ` (primary path = lex-smallest; multi may warn also-present); empty/`Y`/`y` → **skip** create, stdout = existing path, exit 0; `n`/`N` → create as today. Some + **non-TTY** → hard error on stderr (`refusing non-interactive create (default is skip; re-run in a TTY)`), empty stdout, non-zero; no flag override. Bare `wrk` / `wrk <a>` (no second positional) are **unchanged** (still free to create many under `~/.wrk/worktrees` with `-N`).
+- **Request.SpawnDir** — optional second positional `<target-dir>` (`wrk <dir> <target-dir>`); appended after `TargetDir` when set. Overrides the worktree spawn location: missing target with existing parent → spawn exactly at `<target-dir>` (no naming suffix on the path); existing target dir → spawn a default-named sub-dir under it; missing parent → error. Resolved relative to the process (shell) cwd, not `<dir>`. Create-only — errors with `wrk: unexpected arguments` when combined with `--list`/`--done`/`--dep`. `WRK_HOME` is ignored when set. **Named-bring same-repo reuse (Policy B)**: before create, search **any** live linked worktree of the source `mainRepo` (not only under `<target-dir>`, not only `external/`). None → create as today. Some → **default auto-skip** (Y default) without TTY requirement: stdout = lex-smallest existing path, exit 0, no new worktree. Some + **`--confirm`** → prompt on stderr (`already has a linked worktree` / `skip creating another? [Y/n]`; primary = lex-smallest; multi may warn also-present); empty/`Y`/`y` → skip; `n`/`N` → create as today. Bare `wrk` / `wrk <a>` (no second positional) are **unchanged** (still free to create many under `~/.wrk/worktrees` with `-N`).
 - **external/** — dependency worktrees live at `{consumerTop}/external/{basename}-{token}-{WRK_DATE}[-N]`; not under `WRK_HOME`. They are linked worktrees of the DEP repo (registered under `<depMain>/.git/worktrees/`), not the consumer — the consumer only hosts the working tree on disk.
 - **deps/** — manually linked worktrees may also live under `{consumerTop}/deps/...` (or any path under the checkout); created via `git -C <depMain> worktree add` into the consumer tree. `--done` cascade discovers them via `scan_repo.Scan`, same as `external/*`.
 - **runGitIsolated** / **gitOutputIsolated** / **gitWorktreeListIsolated** — thin wrappers over `github.com/xhd2015/gitops/git/git_isolated` (`MustRun`, `MustOutput`, `WorktreeList`).
@@ -57,9 +58,9 @@ after successful create / `--cd` / `--dep` / `--bring` / `--set-task` / `--done`
 - **wrk --all-deps --dry-run** — runs the full read-only discovery/planning of `--all-deps` but writes nothing. Same cwd/git/go.mod validation, same `required`/`alreadyReplaced`/`consumerModule` sets, same registered-project discovery (`storage.ListProjects` + `modscan.Scan` per project), same self / not-required / already-replaced / seen / missing-path / non-git skips, and the SAME external-path naming + collision logic as the real run — but it does NOT `MkdirAll(external/)`, does NOT `ensureGitignoreExternal`, does NOT `createExternalWorktree` (no `git worktree add`/branch/remote/fetch), does NOT `GoModEditReplace`, and does NOT `GoModTidy`. stdout: one line per planned module in registered project path order `would: wrk <module-path> at ./external/<name>[/<subdir>]`, then a final `would: wrked <N> deps` (empty projects → single `would: wrked 0 deps`). Core guarantee: after a dry run `{consumerTop}/external/` does NOT exist, consumer `go.mod` is unchanged (no new replaces), and `.gitignore` is unchanged (no `/external` line). Errors that occur during planning (non-git cwd, unreadable go.mod) still surface as errors — the process "actually runs".
 - **--dry-run** — bool flag (no value); valid with **`--all-deps`**, **`--tag-next`**, **`--propagate-tags`**, **`--sync`**, and **primary composition** (`--done` / `--merge-back`, alone or with post modifiers `--sync` / `--tag-next` / `--push` / `--propagate-tags`). Bare `wrk --dry-run` (no host) → non-zero exit, stderr `wrk: --dry-run is only valid with --done, --merge-back, --all-deps, --tag-next, --propagate-tags, or --sync`. With primary + optional post flags: plan **all requested stages** (primary merge-back plan, cascade `would:` lines when applicable, then would-be sync / tag-next plan / push / propagate) with **zero mutations** and **no confirm prompts** (no `-y` required) — see `done-pipeline/dry-run/` and `merge-back-pipeline/dry-run/`. Standalone `--all-deps --dry-run`, `--tag-next --dry-run`, and `--propagate-tags --dry-run` unchanged. It does NOT relax `--all-deps`'s mutual exclusion with `--dep`/`--done`/`--list` — `--dry-run --all-deps --dep <x>` still errors as mutually exclusive (the `--all-deps` mutual-exclusion check runs first).
 - **wrk --task <desc>** / **wrk -t <desc>** — `-t` and `--task` are equivalent (like `-l,--list`); `hasArg` / `taskFlagSet` detect both forms. Event `args` record whichever form was passed (e.g. `["-t", "desc"]` when `-t` is used). Flag valid only in create mode (no `--done`/`--list`/`--dep`/`--all-deps`). Derives a sanitized slug from `<desc>` (lowercase, non-letter-digit → `-`, collapse, trim, truncate 64 runes soft cap). Appends slug after the date in both dir and branch names: `{basename}-{token}-{date}-{slug}[-N]` for dir, `{token}-{date}-{slug}[-N]` for branch (token = sanitize(currentBranch); no `/`). Empty `<desc>` or slug → non-zero exit. No metadata file stored — the slug is embedded in the name. **Name budget**: after soft cap, further shorten slug so path last component and branch stay ≤ **255 bytes** (reserve **3** for `-99` suffix → fit target 252); never silently chop basename/token — if prefix alone exceeds budget → clear non-zero error. Wrk-managed invariant remains `filepath.Base(path) == basename + "-" + branch`. Agent `${task}` / create-UX prompt always receives the **full original** task text (`taskDesc`), never the fitted slug alone.
-- **Forgot `-t` / task-like positionals** — when the user omits `-t`/`--task`, create-mode positionals may still be **task-like**. Heuristic (any): contains ASCII whitespace (after trim non-empty); **or** length **> 120** bytes; **or** single path component would exceed **255** bytes / ENAMETOOLONG class. **Never** task-like when path-like (`/`, `\`, leading `~`/`./`/`../`), resolves to an **existing directory**, or single-arg **source resolve** (cwd path / projects basename) succeeds. **Two-arg** `wrk <dir> <arg2>` without `-t`: task-like arg2 → TTY (or `WRK_TASK_LIKE_CONFIRM=1` + piped stdin) prompts `Treat as --task? [Y/n]` (empty/`Y`/`y` → promote to `--task arg2` under default `WRK_HOME` naming; `n`/`N` → keep target-dir semantics); **non-TTY** without `-y` → hard error (looks like task / not a target directory) + hint with `-t`; **`-y`** auto-promotes without interactive prompt. Path-like / short tokens / existing dirs stay target-dir. When **`-t` already set**, second positional remains target-dir (no treat-as-task prompt). **One-arg** `wrk <arg1>`: task-like and not a resolvable source → same confirm/`-y`/non-TTY rules; promote creates from **cwd** with task; non-TTY error says not a source directory + `wrk -t '…'` hint. Existing source path/basename → normal create, no prompt.
+- **Forgot `-t` / task-like positionals** — when the user omits `-t`/`--task`, create-mode positionals may still be **task-like**. Heuristic (any): contains ASCII whitespace (after trim non-empty); **or** length **> 120** bytes; **or** single path component would exceed **255** bytes / ENAMETOOLONG class. **Never** task-like when path-like (`/`, `\`, leading `~`/`./`/`../`), resolves to an **existing directory**, or single-arg **source resolve** (cwd path / projects basename) succeeds. **Two-arg** `wrk <dir> <arg2>` without `-t`: task-like arg2 → **default auto-promote** to `--task arg2` under default `WRK_HOME` naming (TTY and non-TTY; no hard error; `-y` optional synonym). **`--confirm`** re-enables `Treat as --task? [Y/n]` (empty/`Y`/`y` → promote; `n`/`N` → keep target-dir semantics; use `WRK_TASK_LIKE_CONFIRM=1` + piped stdin for non-TTY interactive tests). Path-like / short tokens / existing dirs stay target-dir. When **`-t` already set**, second positional remains target-dir (no treat-as-task prompt). **One-arg** `wrk <arg1>`: task-like and not a resolvable source → same default auto-promote / `--confirm` rules; promote creates from **cwd** with task. Existing source path/basename → normal create, no prompt.
 - **WRK_TASK_LIKE_CONFIRM** — when set to `1` with piped `StdinInput`, bypasses TTY detection for the treat-as-task Y/n prompt (same escape-hatch pattern as `WRK_BASENAME_CONFIRM` / `WRK_SET_TASK_CONFIRM`). Prefer `Request.ExtraEnv` entry `WRK_TASK_LIKE_CONFIRM=1` over `UseScriptTTY` when both work.
-- **wrk --set-task <desc>** — flag valid alone (mutually exclusive with all other flags). When run from inside a linked worktree (no `<dir>`), renames that worktree. When run as `wrk <dir> --set-task <desc>`, renames the worktree at `<dir>`. Requires a **linked** worktree whose **directory basename** is wrk-shaped (contains a `YYYY-MM-DD` date segment); fixed user paths / non-wrk dir names → clear error. Parses the worktree's branch name to extract `branchBase` and `date` (branch must match wrk pattern `{branchBase}-{YYYY-MM-DD}[-slug][-N]`; non-wrk branches → error). New path/branch names use **sanitized** token (`/` → `-`) so legacy slash branches migrate on rename. Same **name budget fit** as create (slug soft-cap 64 then fit ≤255 with `-99` reserve). If path or branch would collide, **suffix-walk** `-1`, `-2`, … (joint, keeping path/branch invariant) rather than hard-fail only. If nothing changes → `task unchanged` + trailing `\n`. Before `git worktree move`, checks stdout: TTY → warns (old→new path + branch) and prompts `Proceed? [Y/n]`; confirmation executes move + `git branch -m`. Non-TTY → non-zero exit `wrk: --set-task requires a terminal (tty)`. When run with `WRK_SET_TASK_CONFIRM=1` env → auto-confirms without TTY (test escape hatch). `<dir>` resolves to the effective working directory; empty `<dir>` (or absent) defaults to cwd.
+- **wrk --set-task <desc>** — flag valid alone (mutually exclusive with all other flags). When run from inside a linked worktree (no `<dir>`), renames that worktree. When run as `wrk <dir> --set-task <desc>`, renames the worktree at `<dir>`. Requires a **linked** worktree whose **directory basename** is wrk-shaped (contains a `YYYY-MM-DD` date segment); fixed user paths / non-wrk dir names → clear error. Parses the worktree's branch name to extract `branchBase` and `date` (branch must match wrk pattern `{branchBase}-{YYYY-MM-DD}[-slug][-N]`; non-wrk branches → error). New path/branch names use **sanitized** token (`/` → `-`) so legacy slash branches migrate on rename. Same **name budget fit** as create (slug soft-cap 64 then fit ≤255 with `-99` reserve). If path or branch would collide, **suffix-walk** `-1`, `-2`, … (joint, keeping path/branch invariant) rather than hard-fail only. If nothing changes → `task unchanged` + trailing `\n`. Before `git worktree move`: **default auto-yes** executes move + `git branch -m` without TTY requirement (no stdin read). **`--confirm`** re-enables interactive prompt (stdout TTY or test harness): warns (old→new path + branch) and prompts `Proceed? [Y/n]`; `n` aborts. `WRK_SET_TASK_CONFIRM=1` remains a test escape hatch for auto-confirm when prompting is forced. `<dir>` resolves to the effective working directory; empty `<dir>` (or absent) defaults to cwd.
 - **Request.TaskDesc** — when set, task description passed to wrk (with `Request.TaskFlag`, default `--task`).
 - **Request.TaskFlag** — task tests: CLI flag form for task description (`-t` or `--task`; default `--task` when `TaskDesc` is set).
 - **Request.SetTaskDesc** — when set, tests pass `--set-task <desc>` to wrk; test assertions verify rename side effects.
@@ -252,19 +253,20 @@ wrk tests
 │       └── without-all-deps/   # wrk --dry-run (no --all-deps) → non-zero
 ├── done/                         # wrk --done merge-back --rm from linked worktree
 │   ├── already-included/         # branch already merged into main; remove only
-│   ├── ahead-confirm/            # ahead + --confirm-from-stdin + Enter
-│   ├── ahead-decline/            # ahead + --confirm-from-stdin + decline
-│   ├── ahead-non-tty/            # ahead without confirm flag (non-interactive)
+│   ├── ahead-confirm/            # ahead + default auto-yes (no confirm flags)
+│   ├── ahead-confirm-flag-prompts/ # --confirm + --confirm-from-stdin + Enter → Proceed? then merge
+│   ├── ahead-decline/            # --confirm + --confirm-from-stdin + n → aborted
+│   ├── ahead-non-tty/            # ahead non-TTY default auto-yes success
 │   ├── dirty/                    # uncommitted changes in worktree
 │   ├── not-linked/               # cwd is main repo (not linked worktree)
 │   ├── from-subpath/             # cwd nested inside linked wt; uses checkout root
 │   ├── external-cascade/         # cascade removes external/* wt; guard blocks parent (names go.mod + directive)
 │   ├── cascade-merge-base/       # cascade must remove dep wt, not crash "failed to find merge base" (dep branch shares no history with consumer main)
-│   ├── cascade-force-removal/    # bug: non-TTY ahead cascade must error, not force-remove
-│   │   ├── ahead-non-tty-errors/
-│   │   └── ahead-non-tty-with-y-still-errors/
-│   ├── cascade-non-tty-rejects-with-confirm-from-stdin/ # option A: --confirm-from-stdin cannot confirm cascade on non-TTY
-│   ├── cascade-dep-merge-back/   # regression: ahead dep + --confirm-from-stdin on non-TTY → pre-flight error (no cascade merge)
+│   ├── cascade-force-removal/    # non-TTY ahead cascade auto-yes success
+│   │   ├── ahead-non-tty-errors/ # default --done cascade success
+│   │   └── ahead-non-tty-with-y-still-errors/ # -y synonym cascade success
+│   ├── cascade-non-tty-rejects-with-confirm-from-stdin/ # non-TTY cascade auto-yes success
+│   ├── cascade-dep-merge-back/   # ahead dep cascade merges on non-TTY auto-yes
 │   ├── cascade-non-external-linked/ # manual deps/foo linked wt (not under external/) → cascade removes it, consumer merge-back exit 0
 │   ├── cascade-external-and-deps/ # external/* + deps/foo both linked → cascade removes both, consumer merge-back exit 0
 │   ├── local-replace-blocks/     # extra-repo fs replace (non-existent ./external/foo) → guard blocks + names go.mod + directive
@@ -496,12 +498,12 @@ wrk tests
 │   └── reuse-same-repo/          # Policy B: named bring avoid duplicate same mainRepo
 │       ├── no-prior-linked/      # no linked WT → create as today; no skip prompt
 │       └── existing-linked/      # live linked WT(s) of source main
-│           ├── tty/              # UseScriptTTY + stdin Y/n
-│           │   ├── skip-default/ # Enter → skip; stdout = existing
-│           │   ├── proceed-n/    # n → create under target (branch -1 if needed)
-│           │   └── multi-skip/   # two linked WTs → lex-smallest skip
+│           ├── tty/              # UseScriptTTY; --confirm for decline path
+│           │   ├── skip-default/ # default auto-skip; stdout = existing
+│           │   ├── proceed-n/    # --confirm + n → create under target (branch -1 if needed)
+│           │   └── multi-skip/   # two linked WTs → lex-smallest auto-skip
 │           └── non-tty/
-│               └── refuse/       # hard error; empty stdout; no new WT
+│               └── refuse/       # default auto-skip; stdout = existing; no new WT
 ├── task/                          # wrk --task and wrk --set-task
 │   ├── spawn/                     # --task when creating worktree
 │   │   ├── basic/                 # wrk --task "fix login bug" → slug in name
@@ -518,7 +520,7 @@ wrk tests
 │   │   ├── branch-collision/      # pre-existing branch blocks → suffix
 │   │   └── target-dir/            # wrk <dir> <target> --task → branch has slug
 │   └── set-task/                  # --set-task inside linked worktree
-│       ├── non-tty/               # non-TTY → "requires terminal" error
+│       ├── non-tty/               # non-TTY default auto-yes rename success
 │       ├── empty-desc/            # --set-task "" → error
 │       ├── empty-slug/            # --set-task "!!!" → error
 │       ├── not-linked/            # from main repo → error
@@ -539,28 +541,28 @@ wrk tests
 │           ├── empty-desc/        # empty description → error
 │           ├── mutually-exclusive/# with --list → mutual exclusion error
 │           └── missing-dir/       # non-existent dir → "does not exist"
-├── forgot-task-flag/              # forgot -t: task-like positionals promote / error
+├── forgot-task-flag/              # forgot -t: task-like positionals default auto-promote
 │   ├── two-arg/                   # wrk <dir> <arg2> without -t
 │   │   ├── task-like/
-│   │   │   ├── non-tty/           # hard error + -t hint
+│   │   │   ├── non-tty/           # default auto-promote (no hard error)
 │   │   │   │   ├── spaces/        # multi-word second positional
 │   │   │   │   ├── over-120-bytes/# length >120, no spaces
 │   │   │   │   └── over-255-component/ # component >255 / ENAMETOOLONG class
-│   │   │   ├── confirm-y/spaces/  # WRK_TASK_LIKE_CONFIRM + y → promote WRK_HOME
-│   │   │   ├── confirm-n/spaces/  # n → keep target-dir path
-│   │   │   └── yes-flag/spaces/   # -y auto-promote
+│   │   │   ├── confirm-y/spaces/  # --confirm + y → promote WRK_HOME
+│   │   │   ├── confirm-n/spaces/  # --confirm + n → keep target-dir path
+│   │   │   └── yes-flag/spaces/   # -y synonym auto-promote
 │   │   └── not-task-like/
 │   │       ├── path-like-dot-slash/ # ./real-target unchanged
 │   │       ├── short-token/       # out → target-dir
 │   │       └── with-explicit-task/# -t set → second stays target-dir
 │   └── one-arg/                   # wrk <arg1>
 │       ├── task-like/
-│       │   ├── non-tty/spaces/    # error + source-dir hint
-│       │   ├── confirm-y/spaces/  # promote create from cwd
-│       │   └── yes-flag/spaces/   # -y auto-promote from cwd
+│       │   ├── non-tty/spaces/    # default auto-promote from cwd
+│       │   ├── confirm-y/spaces/  # --confirm + y → promote create from cwd
+│       │   └── yes-flag/spaces/   # -y synonym auto-promote from cwd
 │       └── not-task-like/
 │           └── existing-source/   # resolvable path → no prompt
-├── yes-flag/                     # universal -y / --yes flag
+├── yes-flag/                     # -y / --yes synonym of default auto-yes
 │   ├── done/
 │   │   ├── ahead-non-tty/        # wrk --done -y on own ahead wt (non-TTY)
 │   │   └── ahead-no-prompt/      # TTY + -y: no Proceed? shown (label: tty)
@@ -571,8 +573,8 @@ wrk tests
 │   ├── no-op/
 │   │   └── create-with-yes/      # wrk -y create same as bare wrk
 │   └── cascade/
-│       ├── non-tty-rejects/      # ahead external + wrk --done -y → error
-│       └── tty-auto-yes/         # TTY + -y auto-confirms cascade merge (label: tty)
+│       ├── non-tty-rejects/      # ahead external + wrk --done -y → success
+│       └── tty-auto-yes/         # TTY + -y cascade merge success (label: tty)
 ├── exec/                         # --exec cut-flag: run command in mode target dir
 │   ├── create/                   # native create + --exec
 │   │   ├── basic-pwd/            # --exec pwd → path then pwd in wt
@@ -780,9 +782,10 @@ wrk tests
 | 8a | create-worktree/git-lfs-hooks/minimal-path-succeeds | LFS hook + stripped PATH; git-lfs in $HOME/.local/bin → create fails (expected) |
 | 8b | create-worktree/git-lfs-hooks/from-other-cwd | wrk \<repo\> from foreign cwd + stripped PATH → create fails (expected) |
 | 9 | done/already-included | wt branch merged into main; `--done` removes wt + branch |
-| 10 | done/ahead-confirm | wt ahead; `--done --confirm-from-stdin` + `\n` → ff-merge + remove |
-| 11 | done/ahead-decline | wt ahead; `--confirm-from-stdin` + `n\n` → aborted, wt remains |
-| 12 | done/ahead-non-tty | wt ahead; no confirm flag → non-zero (cannot prompt) |
+| 10 | done/ahead-confirm | wt ahead; bare `--done` default auto-yes → ff-merge + remove; no Proceed? |
+| 10a | done/ahead-confirm-flag-prompts | wt ahead; `--confirm --confirm-from-stdin` + `\n` → Proceed? then merge |
+| 11 | done/ahead-decline | wt ahead; `--confirm --confirm-from-stdin` + `n\n` → aborted, wt remains |
+| 12 | done/ahead-non-tty | wt ahead; bare `--done` non-TTY → exit 0 merge+remove; no Proceed? |
 | 13 | done/dirty | uncommitted file in wt → non-zero |
 | 14 | done/not-linked | cwd is main repo → `not a linked worktree` |
 | 15 | done/from-subpath | cwd is subdir inside linked wt; `--done` uses checkout root |
@@ -851,24 +854,24 @@ wrk tests
 | 59 | target-dir/with-other-mode/with-list | `wrk <dir> <target> --list` → unexpected arguments |
 | 60 | target-dir/with-other-mode/with-dep | `wrk <dir> <target> --dep <dep>` → unexpected arguments |
 | 60a | target-dir/reuse-same-repo/no-prior-linked | named bring, no prior linked WT → create under target; no skip prompt |
-| 60b | target-dir/reuse-same-repo/existing-linked/tty/skip-default | TTY + Enter → skip; stdout = existing path (label: tty) |
-| 60c | target-dir/reuse-same-repo/existing-linked/tty/proceed-n | TTY + `n` → create new under target (label: tty) |
+| 60b | target-dir/reuse-same-repo/existing-linked/tty/skip-default | TTY default auto-skip; stdout = existing path (label: tty) |
+| 60c | target-dir/reuse-same-repo/existing-linked/tty/proceed-n | TTY + `--confirm` + `n` → create new under target (label: tty) |
 | 60d | target-dir/reuse-same-repo/existing-linked/tty/multi-skip | two linked WTs + Enter → skip lex-smallest (label: tty) |
-| 60e | target-dir/reuse-same-repo/existing-linked/non-tty/refuse | non-TTY + existing linked → hard error; empty stdout; no new WT |
+| 60e | target-dir/reuse-same-repo/existing-linked/non-tty/refuse | non-TTY + existing linked → auto-skip; stdout = existing path; no new WT |
 | 61 | done/no-go-mod | linked wt whose checkout has no go.mod; `--done` merge-back succeeds (guard no-op) |
 | 62 | done/not-linked-no-go-mod | main repo without go.mod; `--done` → `not a linked worktree` (not `no go.mod found`) |
 | 63 | done/sub-module-replace-blocks | main go.mod clean but `sub/go.mod` has local replace → guard blocks `--done` (names go.mod + directive) |
 | 64 | done/cascade-merge-base | cascade must remove dep wt, not crash `failed to find merge base` (dep branch vs consumer main share no history) |
-| 65 | done/cascade-force-removal/ahead-non-tty-errors | ahead external dep + non-TTY `--done` → error; dep wt + commits preserved (no force-remove) |
-| 65a | done/cascade-force-removal/ahead-non-tty-with-y-still-errors | same + `-y` → still errors (cascade guard) |
-| 65b | done/cascade-non-tty-rejects-with-confirm-from-stdin | ahead external + `--confirm-from-stdin` on non-TTY → error before mutations |
-| 65c | done/cascade-dep-merge-back | regression: ahead dep + `--confirm-from-stdin` on non-TTY → error (option A; no cascade merge) |
-| 120 | yes-flag/done/ahead-non-tty | `wrk --done -y` merges own ahead wt on non-TTY |
+| 65 | done/cascade-force-removal/ahead-non-tty-errors | ahead external dep + non-TTY `--done` → exit 0; dep merged; both wts removed |
+| 65a | done/cascade-force-removal/ahead-non-tty-with-y-still-errors | same + `-y` → exit 0 (synonym of default auto-yes) |
+| 65b | done/cascade-non-tty-rejects-with-confirm-from-stdin | ahead external + non-TTY `--done` → exit 0 cascade success |
+| 65c | done/cascade-dep-merge-back | ahead dep + non-TTY `--done` → exit 0; dep fix on dep main; wts removed |
+| 120 | yes-flag/done/ahead-non-tty | `wrk --done -y` merges own ahead wt on non-TTY (synonym) |
 | 121 | yes-flag/done/ahead-no-prompt | TTY + `wrk --done -y` shows no `Proceed?` (label: tty) |
 | 122 | yes-flag/merge-back/ahead-non-tty | `wrk --merge-back -y` merges, keeps worktree |
 | 123 | yes-flag/set-task/rename-non-tty | `wrk --set-task -y` renames on non-TTY |
 | 124 | yes-flag/no-op/create-with-yes | `wrk -y` create same as bare `wrk` |
-| 125 | yes-flag/cascade/non-tty-rejects | ahead external + `wrk --done -y` on non-TTY → error |
+| 125 | yes-flag/cascade/non-tty-rejects | ahead external + `wrk --done -y` on non-TTY → exit 0 success |
 | 126 | yes-flag/cascade/tty-auto-yes | TTY + `wrk --done -y` merges cascade + consumer (label: tty) |
 | 65a | done/cascade-non-external-linked | manual `deps/foo` linked wt (not under `external/`) → cascade removes it, consumer `--done` exit 0 |
 | 65b | done/cascade-external-and-deps | `external/*` + `deps/foo` both linked → cascade removes both, consumer `--done` exit 0 |
@@ -942,7 +945,7 @@ wrk tests
 | 75 | task/spawn/sequence | Two `wrk --task "same"` calls → `-N` suffix on second |
 | 76 | task/spawn/branch-collision | Pre-existing branch with task-slug name → suffix increment |
 | 77 | task/spawn/target-dir | `wrk <dir> <target> --task "desc"` → branch has slug, dir is user-specified |
-| 78 | task/set-task/non-tty | `--set-task` in non-TTY → error "requires terminal" |
+| 78 | task/set-task/non-tty | `--set-task` in non-TTY → exit 0 rename (default auto-yes) |
 | 79 | task/set-task/empty-desc | `--set-task ""` → error |
 | 80 | task/set-task/empty-slug | `--set-task "!!!"` → error |
 | 81 | task/set-task/not-linked | `--set-task` from main repo → error |
@@ -961,18 +964,18 @@ wrk tests
 | 87 | task/set-task/with-dir/empty-desc | `wrk <dir> --set-task ""` → error |
 | 88 | task/set-task/with-dir/mutually-exclusive | `wrk <dir> --set-task "task" --list` → mutual exclusion error |
 | 89 | task/set-task/with-dir/missing-dir | `wrk <nonexistent> --set-task "task"` → does not exist |
-| 89a | forgot-task-flag/two-arg/task-like/non-tty/spaces | `wrk <dir> "fix the login bug"` non-TTY → error + `-t` hint |
-| 89b | forgot-task-flag/two-arg/task-like/non-tty/over-120-bytes | second positional >120 bytes non-TTY → error + hint |
-| 89c | forgot-task-flag/two-arg/task-like/non-tty/over-255-component | second positional >255 component non-TTY → error + hint |
-| 89d | forgot-task-flag/two-arg/task-like/confirm-y/spaces | WRK_TASK_LIKE_CONFIRM + y → promote to WRK_HOME task create |
-| 89e | forgot-task-flag/two-arg/task-like/confirm-n/spaces | confirm n → fixed multi-word target-dir path |
-| 89f | forgot-task-flag/two-arg/task-like/yes-flag/spaces | `-y` auto-promotes multi-word second positional |
+| 89a | forgot-task-flag/two-arg/task-like/non-tty/spaces | `wrk <dir> "fix the login bug"` non-TTY → default auto-promote |
+| 89b | forgot-task-flag/two-arg/task-like/non-tty/over-120-bytes | second positional >120 bytes non-TTY → auto-promote |
+| 89c | forgot-task-flag/two-arg/task-like/non-tty/over-255-component | second positional >255 component non-TTY → auto-promote (fitted slug) |
+| 89d | forgot-task-flag/two-arg/task-like/confirm-y/spaces | `--confirm` + WRK_TASK_LIKE_CONFIRM + y → promote to WRK_HOME task create |
+| 89e | forgot-task-flag/two-arg/task-like/confirm-n/spaces | `--confirm` + n → fixed multi-word target-dir path |
+| 89f | forgot-task-flag/two-arg/task-like/yes-flag/spaces | `-y` synonym auto-promotes multi-word second positional |
 | 89g | forgot-task-flag/two-arg/not-task-like/path-like-dot-slash | `./real-target` → target-dir; no treat-as-task |
 | 89h | forgot-task-flag/two-arg/not-task-like/short-token | short `out` → target-dir |
 | 89i | forgot-task-flag/two-arg/not-task-like/with-explicit-task | `-t` set → second stays target-dir |
-| 89j | forgot-task-flag/one-arg/task-like/non-tty/spaces | one-arg multi-word non-TTY → error + source hint |
-| 89k | forgot-task-flag/one-arg/task-like/confirm-y/spaces | one-arg confirm y → create from cwd with task |
-| 89l | forgot-task-flag/one-arg/task-like/yes-flag/spaces | one-arg `-y` → create from cwd with task |
+| 89j | forgot-task-flag/one-arg/task-like/non-tty/spaces | one-arg multi-word non-TTY → default auto-promote from cwd |
+| 89k | forgot-task-flag/one-arg/task-like/confirm-y/spaces | one-arg `--confirm` + y → create from cwd with task |
+| 89l | forgot-task-flag/one-arg/task-like/yes-flag/spaces | one-arg `-y` synonym → create from cwd with task |
 | 89m | forgot-task-flag/one-arg/not-task-like/existing-source | existing source path → normal create; no prompt |
 | 83 | status/valid-git-cwd/root-clean | `wrk --status` from repo root shows `Dir: .` and clean status |
 | 84 | status/valid-git-cwd/subdir-clean | `wrk --status` from nested subdir shows `Dir: ../..` + Remote |
@@ -1310,11 +1313,17 @@ doctest test ./tests/all-deps/registered/basic
 # Run a dry-run leaf
 doctest test ./tests/all-deps/registered/dry-run/basic
 
-# Run yes-flag / cascade guard leaves (expect RED until -y + option A implemented)
+# Run yes-flag / cascade auto-yes leaves (Classic TDD RED until P2 wrkcli default auto-yes)
 doctest vet ./tests/yes-flag
 doctest test ./tests/yes-flag
+doctest vet ./tests/done
+doctest test ./tests/done/ahead-non-tty
+doctest test ./tests/done/ahead-confirm
+doctest test ./tests/done/ahead-decline
+doctest test ./tests/done/ahead-confirm-flag-prompts
 doctest test ./tests/done/cascade-force-removal
 doctest test ./tests/done/cascade-non-tty-rejects-with-confirm-from-stdin
+doctest test ./tests/done/cascade-dep-merge-back
 
 # Run --exec cut-flag leaves (expect RED until less-flags Cut + wrk --exec implemented)
 doctest vet ./tests/exec

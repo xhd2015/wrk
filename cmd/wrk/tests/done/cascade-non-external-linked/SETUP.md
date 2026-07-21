@@ -57,8 +57,7 @@ func Setup(t *testing.T, req *Request) error {
 	runGitIsolated(t, wtDir, "commit", "-m", "ignore deps worktrees")
 
 	req.RepoDir = wtDir
-	req.Args = []string{"--done", "--confirm-from-stdin"}
-	req.StdinInput = "\n"
+	req.Args = []string{"--done"}
 	return nil
 }
 ```

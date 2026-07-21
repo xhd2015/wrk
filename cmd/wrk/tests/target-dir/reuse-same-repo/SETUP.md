@@ -5,11 +5,10 @@
 ```
 # Policy B: any live linked worktree of source mainRepo (not only under target / external/)
 # none -> create as today
-# some + TTY -> prompt "wrk: warning: <basename> already has a linked worktree at <path>, skip creating another? [Y/n]"
-#   Y/y/empty -> skip create; stdout = lex-smallest existing path
-#   n/N -> create as today under/at target-dir
-# some + non-TTY -> hard error; empty stdout; no new WT
-# multi -> primary path in prompt is lex-smallest; optional also-present warnings
+# some + default auto-yes -> skip create; stdout = lex-smallest existing path
+# some + --confirm -> prompt "… skip creating another? [Y/n]"
+#   Y/y/empty -> skip; n/N -> create as today under/at target-dir
+# multi -> primary path is lex-smallest; optional also-present warnings
 myrepo (main) [+ existing linked WTs]
   -> wrk myrepo <target-dir>
 ```
@@ -27,8 +26,8 @@ myrepo (main) [+ existing linked WTs]
 ## Context
 
 - Identity: cleaned absolute `ResolveMainRepo` of source (`myrepo`).
-- stdout: path only. Prompt + warnings + errors on stderr.
-- No override flags (`-y` / `--force` out of scope for this feature).
+- stdout: path only. Prompt + warnings + errors on stderr when `--confirm`.
+- Default auto-skip (Y default) without TTY; `--confirm` re-enables prompt.
 
 ```go
 import (

@@ -1,3 +1,13 @@
+## Expected
+
+- Exit code 0 (default auto-yes; no TTY / no WRK_SET_TASK_CONFIRM required).
+- Stdout is the new worktree path.
+- Old path gone; new path exists with renamed branch.
+
+## Exit Code
+
+- 0
+
 ```go
 import (
 	"strings"
@@ -8,13 +18,24 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.ExitCode == 0 {
-		t.Fatal("expected non-zero exit for --set-task --confirm without TTY")
+	if resp.ExitCode != 0 {
+		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
-	if !strings.Contains(resp.Stderr, "terminal") && !strings.Contains(resp.Stderr, "tty") {
-		t.Fatalf("expected error about terminal/tty, got stderr=%q", resp.Stderr)
+
+	slug := slugify("new task desc")
+	wantPath := worktreePathWithTask(req.WrkHome, "myrepo", "main", wrkDate, slug, 0)
+	gotPath := strings.TrimSpace(resp.Stdout)
+	if gotPath != wantPath {
+		t.Fatalf("stdout: expected %q, got %q", wantPath, gotPath)
 	}
-	// Worktree should NOT have been moved (original path still exists)
-	assertFileExists(t, req.WtDir)
+
+	assertFileNotExists(t, req.WtDir)
+	assertFileExists(t, wantPath)
+	assertGitFileIsWorktreeLink(t, wantPath)
+
+	oldBranch := branchNameWithTask("main", wrkDate, slugify("original task"), 0)
+	newBranch := branchNameWithTask("main", wrkDate, slug, 0)
+	assertBranchNotExists(t, req.MainRepo, oldBranch)
+	assertBranchExists(t, req.MainRepo, newBranch)
 }
 ```

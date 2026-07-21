@@ -6,7 +6,8 @@
 workspace/ -> wrk --gen-commit-msg -h
   -> exit 0
   -> help mentions gen-commit-msg options:
-     --gen-commit-msg / gen-commit-msg, --model, --dry-run, --commit, --no-verify, --agent-runner
+     --gen-commit-msg / gen-commit-msg, --model, --dry-run, --commit, --no-verify,
+     --agent-runner, --add-all
 ```
 
 ## Steps

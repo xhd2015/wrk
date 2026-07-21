@@ -1,17 +1,17 @@
 # Scenario
 
-**Feature**: wrk --done --confirm with piped confirmation (opt-in prompt)
+**Feature**: wrk --done ff-merges ahead branch by default (no confirm flag / stdin)
 
 ```
-# wt branch ahead of main; --confirm restores Y/n; --confirm-from-stdin + Enter
-myrepo + wt -> commit on wt -> wrk --done --confirm --confirm-from-stdin (\n) -> ff-merge + remove
+# wt branch ahead of main; default auto-yes — no --confirm-from-stdin, no Proceed?
+myrepo + wt -> commit on wt -> wrk --done -> ff-merge + remove
 ```
 
 ## Steps
 
 1. Create main repo and linked worktree via `wrk`.
 2. Commit on worktree so branch is ahead of main.
-3. Run `wrk --done --confirm --confirm-from-stdin` with `\n` on stdin.
+3. Run `wrk --done` with no confirm flags and no stdin.
 
 ```go
 func Setup(t *testing.T, req *Request) error {
@@ -20,8 +20,7 @@ func Setup(t *testing.T, req *Request) error {
 	commitAheadOnWorktree(t, wtDir, "feature-work", "ahead of main")
 
 	req.RepoDir = wtDir
-	req.Args = []string{"--done", "--confirm", "--confirm-from-stdin"}
-	req.StdinInput = "\n"
+	req.Args = []string{"--done"}
 	return nil
 }
 ```

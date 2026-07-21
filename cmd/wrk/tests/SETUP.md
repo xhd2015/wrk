@@ -4,9 +4,8 @@
 
 ```
 # isolated WRK_HOME + work root per test; build wrk once
-wrk --new from cwd -> stdout path only + git worktree side effects (create)
-wrk (no args) from cwd -> dashboard (not create)
-wrk --done [--confirm-from-stdin] from linked wt -> merge-back --rm
+wrk (no args) from cwd -> stdout path only + git worktree side effects
+wrk --done [--confirm [--confirm-from-stdin]] from linked wt -> merge-back --rm
 wrk --list from cwd -> git worktree list stdout unchanged
 ```
 
@@ -614,6 +613,27 @@ func setupConsumerWithAheadExternalDep(t *testing.T, req *Request) {
 	runGitIsolated(t, externalPath, "commit", "-m", "dep fix on external worktree")
 }
 
+// prepareAheadExternalDepConsumerForDone drops the consumer's local replace after
+// setupConsumerWithAheadExternalDep and commits so consumer --done can finish
+// after cascade auto-merges the ahead external dep (no extra-repo replace guard).
+//
+// wrk --dep leaves the consumer dirty (.gitignore /external, go.mod replace, often
+// go.sum). --done requires a clean worktree when removing, so stage+commit all
+// consumer changes (not go.mod alone).
+func prepareAheadExternalDepConsumerForDone(t *testing.T, req *Request) {
+	t.Helper()
+	wtDir := req.WtDir
+	runGoModInDir(t, wtDir, "edit", "-dropreplace="+cascadeAheadExternalDepModule)
+	runGoModInDir(t, wtDir, "edit", "-droprequire="+cascadeAheadExternalDepModule)
+	// Stage every consumer change left by --dep + dropreplace (go.mod, .gitignore,
+	// go.sum if present, etc.). Do not leave porcelain dirty for --done.
+	runGitIsolated(t, wtDir, "add", "-A")
+	runGitIsolated(t, wtDir, "commit", "-m", "drop dep replace for done")
+	if porcelain := strings.TrimSpace(gitOutputIsolated(t, wtDir, "status", "--porcelain")); porcelain != "" {
+		t.Fatalf("consumer worktree must be clean after prepare for --done; porcelain:\n%s", porcelain)
+	}
+}
+
 func runGoModInDir(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("go", append([]string{"mod"}, args...)...)
@@ -1087,6 +1107,7 @@ func ensureHelpersUsed() {
 	_ = compositionResolvePath
 	_ = setupCompositionTwoWTs
 	_ = setupConsumerWithAheadExternalDep
+	_ = prepareAheadExternalDepConsumerForDone
 	_ = runGoModInDir
 	_ = buildWrkCLIArgs
 	_ = execScriptTTYWrk

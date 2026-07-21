@@ -1,6 +1,6 @@
 ---
 label: tty
-explanation: requires `script` fake TTY for skip prompt; platform-specific
+explanation: requires `script` fake TTY; platform-specific
 ---
 
 ## Expected
@@ -9,8 +9,7 @@ explanation: requires `script` fake TTY for skip prompt; platform-specific
 - Stdout (trimmed) equals the existing linked worktree path (lex-smallest / only one).
 - No new worktree under `{WorkRoot}/target/`.
 - Existing path still present and listed on source main.
-- Combined stdout+stderr contains Policy B skip prompt tokens: `already has a linked worktree`, `skip creating` (and/or `skip creating another?`), basename, existing path; preferably `wrk: warning:`.
-- Do not require ANSI color sequences (harness/`script` TTY coloring is not asserted here).
+- Combined output does **not** require skip prompt tokens (default auto-skip is silent).
 
 ## Exit Code
 
@@ -43,10 +42,6 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertFileNotExists(t, newUnderTarget)
 
 	combined := resp.Stdout + resp.Stderr
-	assertContains(t, combined, "already has a linked worktree")
-	assertContains(t, combined, "skip creating")
-	assertContains(t, combined, wantPath)
-	assertContains(t, combined, "myrepo")
-	assertContains(t, combined, "wrk: warning:")
+	assertNotContains(t, combined, "Proceed?")
 }
 ```

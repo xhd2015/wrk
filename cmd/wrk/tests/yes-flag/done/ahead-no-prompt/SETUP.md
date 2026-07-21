@@ -1,6 +1,6 @@
 # Scenario
 
-**Feature**: `wrk --done -y` on TTY shows no `Proceed?` prompt
+**Feature**: TTY `wrk --done -y` shows no `Proceed?` (synonym of default auto-yes)
 
 ```
 wt ahead + fake TTY -> wrk --done -y -> success without Proceed? in output

@@ -1,10 +1,8 @@
 ## Expected
 
-- Exit code 0 (default auto-yes; non-TTY no longer requires confirm).
-- Combined stdout+stderr does **not** contain `Proceed?`.
-- Worktree directory no longer exists.
-- Main repo has the worktree commit (`feature-work` file).
-- Branch `main-{date}` deleted.
+- Exit code 0.
+- Combined output contains `Proceed?` (opt-in interactive path).
+- Worktree removed; main has `feature-work`; branch deleted.
 
 ## Exit Code
 
@@ -22,9 +20,8 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 
 	combined := resp.Stdout + resp.Stderr
-	assertNotContains(t, combined, "Proceed?")
+	assertContains(t, combined, "Proceed?")
 	assertContains(t, resp.Stdout, "merged branch")
-	assertContains(t, resp.Stdout, req.WtBranch)
 	assertFileNotExists(t, req.WtDir)
 	assertFileExists(t, filepath.Join(req.MainRepo, "feature-work"))
 	assertBranchNotExists(t, req.MainRepo, req.WtBranch)

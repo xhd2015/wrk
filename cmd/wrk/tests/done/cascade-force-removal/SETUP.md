@@ -1,11 +1,10 @@
 # Scenario
 
-**Bug**: non-TTY cascade must not force-remove ahead/diverged linked worktrees
+**Feature**: non-TTY cascade auto-yes merges/removes ahead linked worktrees (no hard guard)
 
 ```
 # consumer wt + ahead external dep wt -> wrk --done (non-TTY)
-consumer wt -> wrk --dep -> external wt ahead of dep main
-wrk --done (no TTY, no -y) -> error; external wt + commits preserved (no force-remove)
+# default auto-yes: cascade merges dep into dep main, removes external wt, then consumer done
 ```
 
 ## Preconditions
@@ -14,8 +13,7 @@ wrk --done (no TTY, no -y) -> error; external wt + commits preserved (no force-r
 
 ## Steps
 
-- Descendants build a consumer linked worktree with an external dependency worktree that has unpushed commits ahead of the dep main branch.
-- Run `wrk --done` from the consumer worktree on a non-TTY stdin (default doctest pipe).
+- Descendants build a consumer linked worktree with an external dependency worktree that has unpushed commits ahead of the dep main branch, drop the consumer local replace, and run `wrk --done` (optionally with `-y`) on non-TTY stdin.
 
 ```go
 import (

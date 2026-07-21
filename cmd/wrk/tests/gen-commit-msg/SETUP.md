@@ -9,7 +9,7 @@ wrk --gen-commit-msg [flags...]
 
 # help
 wrk --gen-commit-msg -h | --help
-  -> documents gen-commit-msg options (model, dry-run, commit, no-verify, agent-runner)
+  -> documents gen-commit-msg options (model, dry-run, commit, no-verify, agent-runner, add-all)
 
 # dry-run pure plan (library mock B)
 git repo with staged files
@@ -18,6 +18,13 @@ git repo with staged files
   -> exit 0; no agent
   -> binary staged: would-unstage on stderr; index unchanged
   -> --commit / --commit --no-verify: would: git commit on stderr; HEAD unchanged
+  -> --add-all: would: git add -A on stderr; no unrecognized flag
+
+# compose peel (Classic RED until genCommitMsgBoolFlags includes --add-all)
+linked wt + staged
+  -> wrk --gen-commit-msg --add-all --commit --done --dry-run
+  -> not: unrecognized flag: --add-all
+  -> stderr: would: git add -A; gen-commit + primary dry plan; exit 0
 
 # generate / commit via fake-opencode (no live LLM)
 staged + FAKE_OPENCODE_MOCK_CONFIG + --agent-runner-binary <fake-opencode>

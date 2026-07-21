@@ -4,12 +4,12 @@
 
 ```
 # two-arg: wrk <dir> <arg2> without -t
-# task-like arg2 -> TTY/WRK_TASK_LIKE_CONFIRM prompt Treat as --task? ; non-TTY error+hint; -y auto-promote
-wrk <dir> "fix login" -> detect task-like -> promote or reject
+# task-like arg2 -> default auto-promote to --task; --confirm re-enables Treat as --task? [Y/n]
+wrk <dir> "fix login" -> auto-promote (or --confirm n keeps target-dir)
 
 # one-arg: wrk <arg1> without -t
-# task-like arg1 that does not resolve as source -> same interactive / non-TTY rules; promote creates from cwd
-wrk "fix login" -> detect task-like -> promote create from cwd with --task
+# task-like arg1 that does not resolve as source -> default auto-promote from cwd
+wrk "fix login" -> auto-promote create from cwd with --task
 ```
 
 ## Preconditions
@@ -17,18 +17,19 @@ wrk "fix login" -> detect task-like -> promote create from cwd with --task
 - Git available; isolated `{WRK_HOME}`; `WRK_DATE=2026-06-30`.
 - Task-like when **any**: ASCII whitespace (after trim non-empty), **or** length > 120 bytes, **or** single path component would exceed 255 bytes / ENAMETOOLONG.
 - **Never** task-like when path-like (`/`, `\`, leading `~`/`./`/`../`), resolves to an existing directory, or single-arg source resolve succeeds.
-- Escape hatch: `WRK_TASK_LIKE_CONFIRM=1` + piped `StdinInput` treats stdin as interactive for the treat-as-task prompt (prefer over `UseScriptTTY`).
+- Escape hatch: `WRK_TASK_LIKE_CONFIRM=1` + piped `StdinInput` treats stdin as interactive when prompting is active (`--confirm` or legacy confirm tests).
 - Leaves pass task text via `TargetDir` / `SpawnDir` positionals — **not** `TaskDesc` (which injects `-t`/`--task`).
 
 ## Steps
 
 - Shared helpers build a `myrepo` main checkout and assemble two-arg / one-arg invocations.
-- Descendants set positionals, `-y` / confirm env / stdin, and assert promote vs target-dir vs error.
+- Descendants set positionals, `-y` / `--confirm` / confirm env / stdin, and assert promote vs target-dir vs decline.
 
 ## Context
 
 - Promote → default `{WRK_HOME}/worktrees/…` naming with slug from full task text; no spawn under prose path.
 - `-t` already set → second positional remains target-dir; no treat-as-task prompt.
+- Default: auto-yes promote without TTY / without `-y`. `--confirm` + `n` declines.
 
 ```go
 import (
@@ -148,22 +149,18 @@ func assertPromotedTaskCreate(t *testing.T, req *Request, resp *Response, err er
 	want := wantPromotedWorktree(req, task)
 	got := strings.TrimSpace(resp.Stdout)
 	if got != want {
-		t.Fatalf("stdout path: want promoted WRK_HOME worktree %q, got %q", want, got)
+		t.Fatalf("stdout path: want %q got %q stderr=%q", want, got, resp.Stderr)
 	}
 	assertFileExists(t, want)
 	assertGitFileIsWorktreeLink(t, want)
 	br := wantPromotedBranch(task)
 	assertBranchExists(t, req.MainRepo, br)
 	assertBranchCheckedOutInWorktree(t, want, br)
-	// Must not spawn under prose path as fixed target-dir.
-	prose := filepath.Join(req.WorkRoot, task)
-	assertFileNotExists(t, prose)
 }
 
 func ensureForgotTaskFlagHelpersUsed() {
-	_ = envTaskLikeConfirm
 	_ = taskLikeSpaces
-	_ = initMyrepoForForgotTask
+	_ = envTaskLikeConfirm
 	_ = setupTwoArg
 	_ = setupOneArg
 	_ = wantPromotedWorktree

@@ -4,7 +4,7 @@
 
 ```
 # cwd is subdir inside linked wt; resolves checkout root via ShowToplevel
-myrepo + wt/pkg/sub -> wrk --done --confirm-from-stdin -> success
+myrepo + wt/pkg/sub -> wrk --done (default auto-yes) -> success
 ```
 
 ## Steps
@@ -12,7 +12,7 @@ myrepo + wt/pkg/sub -> wrk --done --confirm-from-stdin -> success
 1. Create main repo and linked worktree via `wrk`.
 2. Commit on worktree so branch is ahead of main.
 3. Create nested subdir inside worktree and set `req.RepoDir` to it.
-4. Run `wrk --done --confirm-from-stdin` with `\n` on stdin.
+4. Run `wrk --done` (no confirm flags).
 
 ```go
 import (
@@ -28,8 +28,7 @@ func Setup(t *testing.T, req *Request) error {
 	mkdirAll(t, subpath)
 
 	req.RepoDir = subpath
-	req.Args = []string{"--done", "--confirm-from-stdin"}
-	req.StdinInput = "\n"
+	req.Args = []string{"--done"}
 	return nil
 }
 ```

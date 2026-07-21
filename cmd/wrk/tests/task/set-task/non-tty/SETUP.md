@@ -1,9 +1,9 @@
 # Scenario
 
-**Feature**: --set-task --confirm in non-TTY environment errors with "requires terminal"
+**Feature**: --set-task on non-TTY auto-yes renames without terminal requirement
 
 ```
-wrk --set-task "new desc" --confirm (non-TTY) -> non-zero exit, stderr "requires terminal"
+wrk --set-task "new task desc" (non-TTY) -> exit 0; worktree + branch renamed
 ```
 
 Default auto-yes skips the rename prompt; --confirm re-enables it and then
@@ -12,8 +12,8 @@ requires a TTY (stdout).
 ## Steps
 
 1. Create a worktree with --task (so branch has wrk naming pattern).
-2. Run from inside the worktree via req.RepoDir + req.SetTaskDesc + --confirm.
-3. Verify non-zero exit and error about terminal.
+2. Run from inside the worktree via req.RepoDir + req.SetTaskDesc (no WRK_SET_TASK_CONFIRM, no -y).
+3. Verify rename succeeds under default auto-yes.
 
 ```go
 func Setup(t *testing.T, req *Request) error {

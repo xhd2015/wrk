@@ -1,11 +1,10 @@
 ## Expected
 
-- Exit non-zero; stderr task-like / not source directory + `-t`/`--task` hint.
-- No worktree created under WRK_HOME for this task.
+- Exit 0; promoted WRK_HOME worktree with task slug (create from cwd).
 
 ## Exit Code
 
-- non-zero
+- 0
 
 ```go
 import (
@@ -13,7 +12,6 @@ import (
 )
 
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
-	assertTaskLikeErrorOneArg(t, resp, err)
-	assertFileNotExists(t, wantPromotedWorktree(req, taskLikeSpaces))
+	assertPromotedTaskCreate(t, req, resp, err, taskLikeSpaces)
 }
 ```

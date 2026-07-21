@@ -20,7 +20,11 @@ mutex pins (`--status`, bare `--sync`) and standalone generate/commit/dry-run.
   (coverage under `done-compose/` + `done-pipeline/dry-run/with-gen-commit-msg/`).
 - **Library path** — wrk imports only `agent/commit_msg` and calls
   `RunGenCommitMsg` with remaining gen-commit-msg flags (`--model`, `--dry-run`,
-  `--commit`, `--no-verify`, `--agent-runner`, `--agent-runner-binary`, …).
+  `--commit`, `--no-verify`, `--add-all`, `--agent-runner`, `--agent-runner-binary`, …).
+- **--add-all** — library bool flag: stage all changes (`git add -A`) before generate.
+  Dry-run prints `would: git add -A` on stderr (no index mutation). Bare wrk path
+  must forward the flag (not reject as unrecognized). Compose peel should treat it
+  like `--commit` / `--no-verify` (`genCommitMsgBoolFlags`). Not wrk project `--add`.
 - **--dry-run allow-list** — bare `wrk --dry-run` stays invalid; pair
   `--gen-commit-msg --dry-run` is valid (pure plan via library mock message B).
 - **Mock message B** — stdout exact:
@@ -51,7 +55,10 @@ mutex pins (`--status`, bare `--sync`) and standalone generate/commit/dry-run.
 
 ```
 gen-commit-msg/
-├── help/                              # wrk --gen-commit-msg -h documents flags
+├── help/                              # wrk --gen-commit-msg -h documents flags (incl. --add-all)
+├── add-all/
+│   ├── dry-run-would-line/            # bare --add-all --dry-run → would: git add -A on stderr
+│   └── compose-done-dry-run/          # RED: peel --add-all with --commit --done --dry-run
 ├── dry-run/
 │   ├── mock-message/                  # staged 1 file → mock B; exit 0
 │   ├── accepts-model/                 # --model some/model accepted under dry-run
@@ -75,7 +82,9 @@ gen-commit-msg/
 
 | # | Leaf | Description |
 |---|------|-------------|
-| H1 | help | `wrk --gen-commit-msg -h` → exit 0; usage tokens for mode + flags |
+| H1 | help | `wrk --gen-commit-msg -h` → exit 0; usage tokens for mode + flags incl. `--add-all` |
+| A1 | add-all/dry-run-would-line | bare `--add-all --dry-run` → stderr `would: git add -A`; mock B; not unrecognized flag |
+| A2 | add-all/compose-done-dry-run | compose `--add-all --commit --done --dry-run` peels flag; **RED** until `genCommitMsgBoolFlags` |
 | D1 | dry-run/mock-message | staged 1 text file → mock B stdout; exit 0 |
 | D2 | dry-run/accepts-model | `--dry-run --model some/model` → mock B success |
 | D3 | dry-run/no-unstage-binary | binary+text staged → would-unstage on stderr; binary still staged; mock N=2 |
@@ -96,6 +105,8 @@ cd /Users/xhd2015/.wrk/worktrees/wrk-master-2026-07-16-wrk-gen-commit-msg-genera
 doctest vet ./cmd/wrk/tests/gen-commit-msg
 doctest test -v ./cmd/wrk/tests/gen-commit-msg
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/help
+doctest test -v ./cmd/wrk/tests/gen-commit-msg/add-all/dry-run-would-line
+doctest test -v ./cmd/wrk/tests/gen-commit-msg/add-all/compose-done-dry-run
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/dry-run/mock-message
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/generate/succeeds
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/commit/succeeds
@@ -108,7 +119,10 @@ doctest test -v ./cmd/wrk/tests/done-pipeline/dry-run/with-gen-commit-msg
 ```
 
 Expect **GREEN** for standalone leaves (dry-run + fake-opencode generate/commit; no live LLM).
-P2 compose allow/reject/help/dry-run leaves under monotree expect **RED** until implemented.
+P2 bare `--add-all` help + dry-run-would-line pins expect **GREEN** when agent-pro already has
+`--add-all` (P1) and bare wrk forwards library flags.
+**A2 compose-done-dry-run** expects **RED** until implementer adds `--add-all` to
+`genCommitMsgBoolFlags` (peel); root `wrk -h` may still need `--add-all` separately.
 
 ```go
 import (
@@ -124,6 +138,8 @@ type Request struct {
 	Args           []string
 	BinaryRel      string // staged binary path (no-unstage-binary)
 	HEADSubject    string // pre-run HEAD subject for dry-run --commit leaves
+	MainRepo       string // main checkout for compose --done leaves
+	WtBranch       string // linked worktree branch name for compose leaves
 	ExtraEnv       []string // KEY=VAL for wrk (FAKE_OPENCODE_MOCK_CONFIG, OPENCODE_CONFIG_DIR)
 	FakeOpencode   string // path to session-built fake-opencode
 	MockConfigPath string // path written for FAKE_OPENCODE_MOCK_CONFIG

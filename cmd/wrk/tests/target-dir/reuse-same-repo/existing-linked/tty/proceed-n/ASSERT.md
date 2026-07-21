@@ -6,8 +6,7 @@ explanation: requires `script` fake TTY for skip prompt; platform-specific
 ## Expected
 
 - Exit code 0.
-- A **new** worktree is created under `{WorkRoot}/target/myrepo-main-{date}` (or collides to `-1` if naming collides with branch — preferred path free except WRK_HOME prior uses branch `main-{date}`).
-- Because preferred branch `main-{date}` is already checked out in the prior WRK_HOME worktree, create under target uses joint path+branch suffix: path `…/target/myrepo-main-{date}-1` and branch `main-{date}-1` (same rules as today).
+- A **new** worktree is created under `{WorkRoot}/target/myrepo-main-{date}-1` (preferred branch taken).
 - Prior WRK_HOME worktree still exists.
 - Combined output showed the Policy B skip prompt before create (`already has a linked worktree`, `skip creating`).
 

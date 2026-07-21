@@ -1,14 +1,15 @@
 # Scenario
 
-**Feature**: universal `-y` / `--yes` auto-confirms Y/n prompts (compat with default auto-yes)
+**Feature**: universal `-y` / `--yes` is a no-op synonym of default auto-yes for Y/n prompts
 
 ```
-# -y parsed at top level; still valid for done/merge-back/set-task (default is already auto-yes)
-wrk --done -y -> skip Proceed? on own ahead/diverged worktree (non-TTY ok)
+# default: all [Y/n] auto-yes without -y; -y remains accepted as synonym
+# --confirm opt-in restores interactive prompts
+wrk --done -y -> same as wrk --done (own ahead, cascade, non-TTY)
 wrk --merge-back -y -> merge without prompt, keep worktree
 wrk --set-task "new" -y -> rename without stdout-TTY requirement
 wrk -y (create) -> no-op, same as bare wrk
-cascade ahead on non-TTY -> -y (and bare --done) auto-yes cascade merge
+cascade ahead on non-TTY -> -y still succeeds (auto-yes)
 ```
 
 ## Preconditions
@@ -17,7 +18,7 @@ cascade ahead on non-TTY -> -y (and bare --done) auto-yes cascade merge
 
 ## Steps
 
-- Descendants set `req.Args` with `-y` or `--yes` and assert prompt-skipping or guard behavior.
+- Descendants set `req.Args` with `-y` or `--yes` and assert synonym success paths.
 - TTY leaves set `req.UseScriptTTY = true` (runs wrk under `script`).
 
 ```go

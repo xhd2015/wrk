@@ -3,7 +3,7 @@
 **Feature**: aborted `--done` does not run `--sync`
 
 ```
-# user declines confirm → merge-back aborted; no sync stdout
+# user declines via --confirm → merge-back aborted; no sync stdout
 myrepo + wtA (ahead)
   -> wrk --done --confirm --confirm-from-stdin --sync  (stdin: n)
   -> merge-back aborted

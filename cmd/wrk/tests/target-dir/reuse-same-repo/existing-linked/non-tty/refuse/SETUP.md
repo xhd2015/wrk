@@ -1,11 +1,10 @@
 # Scenario
 
-**Feature**: non-TTY named bring refuses when a live linked worktree of source already exists
+**Feature**: non-TTY named bring auto-skips when a live linked worktree of source already exists
 
 ```
-# existing WRK_HOME worktree + non-TTY
-# stderr: wrk: <basename> already has a linked worktree at <path>; refusing non-interactive create (default is skip; re-run in a TTY)
-# empty stdout; no new worktree under target
+# existing WRK_HOME worktree + non-TTY default auto-skip (Y default)
+# stdout = existing path; no new worktree under target
 ```
 
 ## Steps

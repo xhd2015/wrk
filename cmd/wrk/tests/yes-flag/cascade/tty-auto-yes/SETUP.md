@@ -55,11 +55,14 @@ func Setup(t *testing.T, req *Request) error {
 	runGitIsolated(t, externalPath, "commit", "-m", "dep fix on external worktree")
 
 	// Remove replace so consumer merge-back succeeds after cascade.
+	// Commit all --dep dirt (.gitignore /external, go.sum, go.mod) so --done sees a clean wt.
 	runYesCascadeGoMod(t, wtDir, "edit", "-dropreplace="+yesCascadeDepModule)
 	runYesCascadeGoMod(t, wtDir, "edit", "-droprequire="+yesCascadeDepModule)
-	// go mod edit can leave go.sum / external/ dirty; --done refuses uncommitted changes.
 	runGitIsolated(t, wtDir, "add", "-A")
-	runGitIsolated(t, wtDir, "commit", "-m", "drop dep replace for done", "--allow-empty")
+	runGitIsolated(t, wtDir, "commit", "-m", "drop dep replace for done")
+	if porcelain := strings.TrimSpace(gitOutputIsolated(t, wtDir, "status", "--porcelain")); porcelain != "" {
+		t.Fatalf("consumer worktree must be clean after drop-replace commit; porcelain:\n%s", porcelain)
+	}
 
 	req.RepoDir = wtDir
 	req.Args = []string{"--done", "-y"}

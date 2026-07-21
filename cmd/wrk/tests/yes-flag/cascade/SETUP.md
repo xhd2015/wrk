@@ -1,9 +1,9 @@
 # Scenario
 
-**Feature**: `-y` cascade behavior — auto-yes on TTY and non-TTY
+**Feature**: `-y` cascade behavior — synonym of default auto-yes on TTY and non-TTY
 
 ```
-# non-TTY: ahead external dep -> wrk --done -y -> cascade + consumer succeed
+# non-TTY: ahead external dep -> wrk --done -y -> exit 0 cascade + consumer
 # TTY: ahead external dep -> wrk --done -y -> cascade + consumer merge-back succeed
 ```
 

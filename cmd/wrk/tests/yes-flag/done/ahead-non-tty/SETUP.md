@@ -1,6 +1,6 @@
 # Scenario
 
-**Feature**: `wrk --done -y` merges ahead own worktree on non-TTY without prompt
+**Feature**: `wrk --done -y` merges ahead own worktree on non-TTY (synonym of default auto-yes)
 
 ```
 myrepo + wt ahead -> wrk --done -y (non-TTY) -> exit 0; merged + removed

@@ -3,7 +3,7 @@
 **Feature**: aborted `--merge-back` runs no sync / tag-next / push even when all flags present
 
 ```
-# user declines confirm → merge-back aborted; no post-pipeline
+# user declines via --confirm → merge-back aborted; no post-pipeline
 myrepo (v0.0.1) + wtA (ahead)
   -> wrk --merge-back --confirm --confirm-from-stdin --sync --tag-next --push  (stdin: n)
   -> merge-back aborted

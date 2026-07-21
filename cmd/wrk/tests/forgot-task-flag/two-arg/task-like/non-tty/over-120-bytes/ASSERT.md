@@ -1,11 +1,11 @@
 ## Expected
 
-- Exit non-zero; stderr task-like / target directory + `-t`/`--task` hint.
-- No worktree under WRK_HOME or under WorkRoot named as the long token.
+- Exit 0; promoted WRK_HOME worktree for the long token.
+- No spawn under WorkRoot named as the long token.
 
 ## Exit Code
 
-- non-zero
+- 0
 
 ```go
 import (
@@ -15,10 +15,8 @@ import (
 )
 
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
-	assertTaskLikeErrorTwoArg(t, resp, err)
 	arg := strings.Repeat("a", 121)
+	assertPromotedTaskCreate(t, req, resp, err, arg)
 	assertFileNotExists(t, filepath.Join(req.WorkRoot, arg))
-	// Soft-capped slug path must not appear either (promote must not happen).
-	assertFileNotExists(t, wantPromotedWorktree(req, arg))
 }
 ```

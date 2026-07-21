@@ -71,13 +71,14 @@ func Setup(t *testing.T, req *Request) error {
 	runGoMod(t, wtDir, "edit", "-dropreplace="+cascadeBothDepModule)
 
 	// Keep consumer wt clean after external/ + deps/ worktrees exist.
+	// Stage all --dep dirt (go.mod, .gitignore, go.sum if present) so --done can remove.
 	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n/deps\n")
-	runGitIsolated(t, wtDir, "add", ".gitignore", "go.mod")
+	runGitIsolated(t, wtDir, "add", "-A")
 	runGitIsolated(t, wtDir, "commit", "-m", "drop replace and ignore nested worktrees")
 
 	req.RepoDir = wtDir
-	req.Args = []string{"--done", "--confirm-from-stdin"}
-	req.StdinInput = "\n"
+	// Default auto-yes: no --confirm / --confirm-from-stdin required for own-wt ahead.
+	req.Args = []string{"--done"}
 	return nil
 }
 

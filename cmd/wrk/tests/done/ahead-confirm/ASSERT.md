@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Stdout contains merge confirmation prompt and success message (`merged branch`).
+- Stdout contains success message (`merged branch`); no `Proceed?` required.
 - Worktree directory no longer exists.
 - Main repo has the worktree commit (`feature-work` file).
 - Branch `main-{date}` deleted.
@@ -21,6 +21,8 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
 
+	combined := resp.Stdout + resp.Stderr
+	assertNotContains(t, combined, "Proceed?")
 	assertContains(t, resp.Stdout, "merged branch")
 	assertContains(t, resp.Stdout, req.WtBranch)
 	assertFileNotExists(t, req.WtDir)

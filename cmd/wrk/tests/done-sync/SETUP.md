@@ -5,7 +5,7 @@
 ```
 # primary --done succeeds (not aborted) then runSync(main TargetPath)
 linked wtA (+ optional wtB behind)
-  -> wrk --done [-y|--confirm-from-stdin] --sync
+  -> wrk --done [-y|--confirm --confirm-from-stdin] --sync
   -> merge-back --rm (message on stdout)
   -> blank line
   -> runSync(main): pass2 distribute / zero-summary

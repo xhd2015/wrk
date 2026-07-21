@@ -1,10 +1,10 @@
 # Scenario
 
-**Feature**: one-arg multi-word, non-TTY from git repo cwd → error + hint
+**Feature**: one-arg multi-word, non-TTY from git repo cwd → default auto-promote
 
 ```
 (cd myrepo && wrk "fix the login bug") non-TTY
-  -> non-zero; task/source messaging; -t hint; no worktree
+  -> exit 0; create from cwd with task slug under WRK_HOME
 ```
 
 ## Steps

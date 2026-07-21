@@ -1,17 +1,17 @@
 # Scenario
 
-**Feature**: wrk --done aborts when user declines via `--confirm` + stdin `n`
+**Feature**: `--confirm` re-enables Proceed? prompt; default Enter accepts
 
 ```
-# wt ahead of main; --confirm re-enables Y/n; --confirm-from-stdin for non-TTY pipe
-myrepo + wt -> commit on wt -> wrk --done --confirm --confirm-from-stdin (n) -> merge-back aborted
+# wt ahead; --confirm + --confirm-from-stdin + Enter → shows Proceed? and merges
+myrepo + wt ahead -> wrk --done --confirm --confirm-from-stdin (\n) -> Proceed? then ff-merge + remove
 ```
 
 ## Steps
 
 1. Create main repo and linked worktree via `wrk`.
 2. Commit on worktree so branch is ahead of main.
-3. Run `wrk --done --confirm --confirm-from-stdin` with `n\n` on stdin.
+3. Run with `--confirm --confirm-from-stdin` and stdin `\n` (default Y).
 
 ```go
 func Setup(t *testing.T, req *Request) error {
@@ -21,7 +21,7 @@ func Setup(t *testing.T, req *Request) error {
 
 	req.RepoDir = wtDir
 	req.Args = []string{"--done", "--confirm", "--confirm-from-stdin"}
-	req.StdinInput = "n\n"
+	req.StdinInput = "\n"
 	return nil
 }
 ```

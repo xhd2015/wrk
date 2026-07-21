@@ -1,22 +1,20 @@
 ## Expected
 
-- Non-zero exit (replace guard after cascade).
-- Dep fix merged into dep main (proves cascade auto-yes; old option A would leave dep unmerged).
+- Exit code 0 (cascade soft auto-yes; no option-A hard rejection).
+- Dep fix merged into dep main.
 - External dependency worktree removed.
-- Consumer linked worktree still exists.
+- Consumer linked worktree removed.
 
 ## Exit Code
 
-- Non-zero
+- 0
 
 ```go
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
-	if resp.ExitCode == 0 {
-		t.Fatalf("expected non-zero exit (replace guard after cascade), got 0 stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
+	if resp.ExitCode != 0 {
+		t.Fatalf("expected exit 0 (cascade auto-yes), got %d stdout=%q stderr=%q", resp.ExitCode, resp.Stdout, resp.Stderr)
 	}
-
-	assertContains(t, resp.Stderr, "blocks wrk --done")
 
 	depLog := gitOutputIsolated(t, req.DepPath, "log", "--oneline")
 	assertContains(t, depLog, "dep fix on external worktree")
@@ -24,6 +22,8 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertFileNotExists(t, req.ExternalWtDir)
 	assertWorktreeListNotContains(t, req.DepPath, req.ExternalWtDir)
 
-	assertFileExists(t, req.WtDir)
+	assertFileNotExists(t, req.WtDir)
+	assertBranchNotExists(t, req.MainRepo, req.WtBranch)
+	assertWorktreeListNotContains(t, req.MainRepo, req.WtDir)
 }
 ```

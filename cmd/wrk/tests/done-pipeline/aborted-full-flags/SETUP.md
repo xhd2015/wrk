@@ -3,7 +3,7 @@
 **Feature**: aborted `--done` runs no sync / tag-next / push / propagate / reinstall even when all flags present
 
 ```
-# user declines confirm → merge-back aborted; no post-pipeline / reinstall tail
+# user declines via --confirm → merge-back aborted; no post-pipeline / reinstall tail
 myrepo (v0.0.1) + wtA (ahead)
   -> wrk --done --confirm --confirm-from-stdin --sync --tag-next --push --propagate-tags --reinstall-local  (stdin: n)
   -> merge-back aborted

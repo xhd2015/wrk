@@ -4,7 +4,7 @@
 
 ```
 # any live linked WT of myrepo (e.g. under WRK_HOME/worktrees) triggers Policy B
-# TTY -> confirm skip default Y; non-TTY -> hard refuse
+# default auto-skip; --confirm restores prompt; n creates under target
 myrepo + existing linked WT(s)
   -> wrk myrepo <target-dir>
 ```
@@ -16,7 +16,7 @@ myrepo + existing linked WT(s)
 
 ## Steps
 
-- This grouping ensures helpers; leaves create prior linked WTs and set TTY/stdin.
+- This grouping ensures helpers; leaves create prior linked WTs and set TTY/stdin/confirm.
 
 ```go
 func Setup(t *testing.T, req *Request) error {
