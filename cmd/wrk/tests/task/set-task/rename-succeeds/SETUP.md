@@ -19,6 +19,10 @@ wrk --set-task "new task" (WRK_SET_TASK_CONFIRM=1)
 4. Verify worktree moved, branch renamed, old paths gone.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

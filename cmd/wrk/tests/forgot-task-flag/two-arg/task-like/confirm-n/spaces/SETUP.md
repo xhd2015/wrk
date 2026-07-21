@@ -21,6 +21,8 @@ import (
 )
 
 func Setup(t *testing.T, req *Request) error {
+req.UseScriptTTY = true
+req.ExtraEnv = append(req.ExtraEnv, envTaskLikeConfirm)
 	mainRepo := initMyrepoForForgotTask(t, req)
 	req.RepoDir = req.WorkRoot
 	req.TargetDir = mainRepo

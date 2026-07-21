@@ -49,9 +49,9 @@ wrk --gen-commit-msg --dry-run --agent-runner codex
   (`cmd/wrk/tests/gen-commit-msg` → module at workspace root).
 - Go toolchain is available on PATH.
 - Session wrk binary is built once per doctest run to
-  `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/wrk`.
+  process-local `MkdirTemp` wrk binary (in-memory mutex).
 - Session fake-opencode is built once to
-  `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/fake-opencode` from
+  process-local fake-opencode binary from
   `external/agent-pro-master-2026-07-16/cmd/fake-opencode`.
 - Git is required for dry-run / generate / commit success leaves
   (and unknown-agent-runner which stages a file).
@@ -81,10 +81,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/xhd2015/doctest/assert"
+	"github.com/xhd2015/doctest/session"
+	"sync"
 )
 
 func findModuleRoot(dir string) string {
@@ -100,72 +101,85 @@ func findModuleRoot(dir string) string {
 	}
 }
 
-func fixtureCacheBase(t *testing.T) string {
-	t.Helper()
-	base := os.Getenv("DOCTEST_FIXTURE_ROOT")
-	if base != "" {
-		return base
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return filepath.Join(home, "Library", "Caches", "doctest", "fixtures")
-}
-
-func fixtureSessionRoot(t *testing.T) string {
-	t.Helper()
-	return filepath.Join(fixtureCacheBase(t), DOCTEST_SESSION_ID)
-}
-
-func sessionWrkBin(t *testing.T) string {
-	t.Helper()
-	return filepath.Join(fixtureSessionRoot(t), "bin", "wrk")
-}
-
-func withFlock(t *testing.T, lockPath string, fn func()) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
-		t.Fatalf("mkdir lock dir: %v", err)
-	}
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		t.Fatalf("open lock %s: %v", lockPath, err)
-	}
-	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatalf("flock %s: %v", lockPath, err)
-	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
-	fn()
-}
+// Process-local wrk binary (one-process suite; in-memory mutex, not session flock).
+var (
+	wrkBinMu   sync.Mutex
+	wrkBinPath string
+	wrkBinErr  error
+	// wrkModRoot set from d.DOCTEST_ROOT in root Setup.
+	wrkModRoot string
+)
 
 func getWrkBin(t *testing.T) string {
 	t.Helper()
-	bin := sessionWrkBin(t)
-	if _, err := os.Stat(bin); err == nil {
-		return bin
+	wrkBinMu.Lock()
+	defer wrkBinMu.Unlock()
+	if wrkBinPath != "" || wrkBinErr != nil {
+		if wrkBinErr != nil {
+			t.Fatal(wrkBinErr)
+		}
+		return wrkBinPath
 	}
-	lockPath := filepath.Join(fixtureSessionRoot(t), "bin", ".lock")
-	withFlock(t, lockPath, func() {
-		if _, err := os.Stat(bin); err == nil {
-			return
-		}
-		modRoot := findModuleRoot(DOCTEST_ROOT)
-		if modRoot == "" {
-			t.Fatal("find module root: no go.mod in ancestors")
-		}
-		cmd := exec.Command("go", "build", "-o", bin, "./cmd/wrk")
-		cmd.Dir = modRoot
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("build wrk: %v\n%s", err, out)
-		}
-	})
+	if wrkModRoot == "" {
+		t.Fatal("wrkModRoot unset; root Setup must run first")
+	}
+	dir, err := os.MkdirTemp("", "wrk-doctest-bin-")
+	if err != nil {
+		wrkBinErr = err
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "wrk")
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/wrk")
+	cmd.Dir = wrkModRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		wrkBinErr = fmt.Errorf("build wrk: %v\n%s", err, out)
+		t.Fatal(wrkBinErr)
+	}
+	wrkBinPath = bin
 	return bin
 }
 
-func Setup(t *testing.T, req *Request) error {
+// Process-local fake-opencode binary (one-process suite; in-memory mutex).
+var (
+	fakeOpencodeBinMu   sync.Mutex
+	fakeOpencodeBinPath string
+	fakeOpencodeBinErr  error
+)
+
+func getFakeOpencodeBin(t *testing.T) string {
+	t.Helper()
+	fakeOpencodeBinMu.Lock()
+	defer fakeOpencodeBinMu.Unlock()
+	if fakeOpencodeBinPath != "" || fakeOpencodeBinErr != nil {
+		if fakeOpencodeBinErr != nil {
+			t.Fatal(fakeOpencodeBinErr)
+		}
+		return fakeOpencodeBinPath
+	}
+	dir, err := os.MkdirTemp("", "wrk-doctest-fake-opencode-")
+	if err != nil {
+		fakeOpencodeBinErr = err
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "fake-opencode")
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/fake-opencode")
+	cmd.Dir = agentProRoot(t)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		fakeOpencodeBinErr = fmt.Errorf("build fake-opencode: %v\n%s", err, out)
+		t.Fatal(fakeOpencodeBinErr)
+	}
+	fakeOpencodeBinPath = bin
+	return bin
+}
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	if root := findModuleRoot(d.DOCTEST_ROOT); root != "" {
+		wrkModRoot = root
+	} else {
+		t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
+	}
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		return fmt.Errorf("resolve work root: %w", err)
@@ -192,9 +206,9 @@ func genCommitMsgWrkEnv(req *Request) []string {
 
 func agentProRoot(t *testing.T) string {
 	t.Helper()
-	modRoot := findModuleRoot(DOCTEST_ROOT)
+	modRoot := wrkModRoot
 	if modRoot == "" {
-		t.Fatal("find module root: no go.mod in ancestors")
+		t.Fatal("wrkModRoot unset; root Setup must run first")
 	}
 	root := filepath.Join(modRoot, "external", "agent-pro-master-2026-07-16")
 	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
@@ -202,35 +216,6 @@ func agentProRoot(t *testing.T) string {
 		t.Skipf("agent-pro root not found at %s: %v", root, err)
 	}
 	return root
-}
-
-func sessionFakeOpencodeBin(t *testing.T) string {
-	t.Helper()
-	return filepath.Join(fixtureSessionRoot(t), "bin", "fake-opencode")
-}
-
-func getFakeOpencodeBin(t *testing.T) string {
-	t.Helper()
-	bin := sessionFakeOpencodeBin(t)
-	if _, err := os.Stat(bin); err == nil {
-		return bin
-	}
-	lockPath := filepath.Join(fixtureSessionRoot(t), "bin", ".fake-opencode.lock")
-	withFlock(t, lockPath, func() {
-		if _, err := os.Stat(bin); err == nil {
-			return
-		}
-		if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
-			t.Fatalf("mkdir fake-opencode bin dir: %v", err)
-		}
-		cmd := exec.Command("go", "build", "-o", bin, "./cmd/fake-opencode")
-		cmd.Dir = agentProRoot(t)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("build fake-opencode: %v\n%s", err, out)
-		}
-	})
-	return bin
 }
 
 // writeMockConfig writes FAKE_OPENCODE_MOCK_CONFIG JSON under WorkRoot.
@@ -500,7 +485,5 @@ func ensureGenCommitMsgHelpersUsed() {
 	_ = writeMockConfig
 	_ = installFakeOpencodeEnv
 	_ = genCommitMsgAgentArgs
-	_ = mockConfigAddFeature
-	_ = mockConfigSkipHooks
 }
 ```

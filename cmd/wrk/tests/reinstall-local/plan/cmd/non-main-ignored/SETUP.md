@@ -16,6 +16,10 @@ PlanLocalReinstalls
 4. Expect empty Items.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/cmd-non-main")
 	writePackageNamed(t, filepath.Join(req.ModuleRoot, "cmd", "lib"), "lib")

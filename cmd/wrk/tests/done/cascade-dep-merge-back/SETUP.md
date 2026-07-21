@@ -1,9 +1,9 @@
 # Scenario
 
-**Feature**: non-TTY `--done` cascade-merges ahead external dep (auto-yes; no pre-flight error)
+**Feature**: non-TTY `--done` cascade-merges ahead external dep (explicit -y (cascade requires -y); no pre-flight error)
 
 ```
-# external dep wt ahead of dep main; default auto-yes merges cascade then consumer
+# external dep wt ahead of dep main; default explicit -y (cascade requires -y) merges cascade then consumer
 consumer wt + ahead external/dep wt -> wrk --done -> exit 0; dep merged; both wts removed
 ```
 
@@ -21,7 +21,7 @@ func Setup(t *testing.T, req *Request) error {
 	setupConsumerWithAheadExternalDep(t, req)
 	prepareAheadExternalDepConsumerForDone(t, req)
 	req.RepoDir = req.WtDir
-	req.Args = []string{"--done"}
+	req.Args = []string{"--done", "-y"}
 	return nil
 }
 ```

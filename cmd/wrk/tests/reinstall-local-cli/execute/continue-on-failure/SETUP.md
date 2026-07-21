@@ -21,6 +21,10 @@ mod/ -> wrk --reinstall-local
 5. Run `wrk --reinstall-local` (no `--dry-run`) from module root.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/cli-exec-partial")
 	writeBrokenPackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "broken"))

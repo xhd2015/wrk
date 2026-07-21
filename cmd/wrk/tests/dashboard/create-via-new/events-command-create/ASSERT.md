@@ -14,6 +14,10 @@
 - 0
 
 ```go
+import (
+	"time"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {

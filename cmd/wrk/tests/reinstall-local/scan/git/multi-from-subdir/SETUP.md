@@ -26,6 +26,10 @@ repo/ (git)
 7. Expect ScanRoot=repo; Modules lex: repo then repo/tools, one install each.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	repo := filepath.Join(req.WorkRoot, "repo")
 	initGitRepoOnMain(t, repo)

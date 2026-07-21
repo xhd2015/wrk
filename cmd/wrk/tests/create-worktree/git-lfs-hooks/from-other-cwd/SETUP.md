@@ -16,6 +16,10 @@ wrk <agent-pro> -> exit 1 (expected)
 4. Run `wrk {WorkRoot}/agent-pro` with stripped PATH.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	req.FakeHome = initFakeHomeWithGitLFS(t, req.WorkRoot)
 	req.UseMinimalPath = true

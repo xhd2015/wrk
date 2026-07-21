@@ -26,6 +26,10 @@ mod/
 5. Expect both installs and both bins executable under GOBIN.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/cli-exec-multi-root")
 	writePackageMainPrints(t, filepath.Join(req.ModuleRoot, "cmd", "rootbin"), "rootbin-ok")

@@ -22,6 +22,10 @@ PlanLocalReinstallsMulti([tools, root], binDir)
 5. Expect Modules ordered root < root/tools with one install item each.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	rootMod := filepath.Join(req.WorkRoot, "root")
 	toolsMod := filepath.Join(rootMod, "tools")

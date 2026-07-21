@@ -23,6 +23,10 @@
 3. Run `wrk --dep <dep-root>` from the consumer.
 
 ```go
+import (
+	"path/filepath"
+)
+
 const subModulePath = "example.com/dep/sub"
 
 func initDepRepoWithSubModule(t *testing.T, workRoot, name string) string {

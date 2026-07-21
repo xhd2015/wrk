@@ -18,6 +18,10 @@ checkout directory exists but its `.git` file still references the pre-move main
 4. Record and run `wrk --projects` (pipe mode, no `--color`).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	ensureDetailedStatusHelpersUsed()
 	origin := setupBareOrigin(t, req.WorkRoot, "origin")

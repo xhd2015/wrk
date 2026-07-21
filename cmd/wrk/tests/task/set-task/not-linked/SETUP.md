@@ -13,6 +13,10 @@ wrk --set-task "x" from main repo -> non-zero exit, error
 3. Verify non-zero exit and error about linked worktree.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

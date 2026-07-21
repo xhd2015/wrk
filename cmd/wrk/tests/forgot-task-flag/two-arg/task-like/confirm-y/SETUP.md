@@ -15,8 +15,8 @@
 
 ```go
 func Setup(t *testing.T, req *Request) error {
-	req.Args = append(req.Args, "--confirm")
-	req.ExtraEnv = append(req.ExtraEnv, envTaskLikeConfirm)
+	req.UseScriptTTY = true
+		req.ExtraEnv = append(req.ExtraEnv, envTaskLikeConfirm)
 	return nil
 }
 ```

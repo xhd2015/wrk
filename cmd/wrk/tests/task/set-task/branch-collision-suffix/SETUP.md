@@ -16,6 +16,10 @@ wrk --set-task "new task" (WRK_SET_TASK_CONFIRM=1)
 3. Run `wrk --set-task "new task"` with confirm env from inside the worktree.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

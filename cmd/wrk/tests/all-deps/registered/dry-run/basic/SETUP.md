@@ -16,7 +16,7 @@ projects.json (mydep1, mydep2) + consumer -> wrk --all-deps --dry-run -> would: 
 ```go
 func Setup(t *testing.T, req *Request) error {
 	allDepsEnsureHelpersUsed()
-	dryRunEnsureHelpersUsed()
+	allDepsEnsureHelpersUsed()
 
 	dep1 := allDepsDepDir(req.WorkRoot, "mydep1")
 	dep2 := allDepsDepDir(req.WorkRoot, "mydep2")

@@ -16,6 +16,10 @@ PlanLocalReinstalls
 4. Expect one install item.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/cmd-present")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "present"))

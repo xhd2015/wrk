@@ -15,6 +15,10 @@ wrk --set-task "x" from that worktree -> non-zero; stderr explains unsupported /
 3. Run `wrk --set-task "my task"` from inside that worktree with confirm env (should still fail before rename).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

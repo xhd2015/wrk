@@ -102,7 +102,7 @@ func seedMainRootBumpAP(t *testing.T, req *Request) string {
 	t.Helper()
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo
-	cloneRepoFromSeed(t, fixtureSeedMainGoMod, buildSeedMainGoMod, mainRepo)
+	cloneMainGoModFromSeed(t, mainRepo)
 	mainRepo = compositionResolvePath(t, mainRepo)
 	req.MainRepo = mainRepo
 	createLightweightTagAP(t, mainRepo, "v0.0.1", "")

@@ -17,6 +17,7 @@ consumer wt + ahead external dep (no local replace) -> TTY wrk --done -y -> both
 import (
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 const yesCascadeDepModule = "example.com/dep"

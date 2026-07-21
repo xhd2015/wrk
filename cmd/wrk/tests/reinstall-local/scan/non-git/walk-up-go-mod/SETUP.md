@@ -21,6 +21,10 @@ mod/
 4. Expect ScanRoot=mod; one module plan with install onlybin.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	modRoot := filepath.Join(req.WorkRoot, "mod")
 	writeGoMod(t, modRoot, "example.com/nongit-mod")

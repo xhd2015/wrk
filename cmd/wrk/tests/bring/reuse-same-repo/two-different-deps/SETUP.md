@@ -17,6 +17,10 @@ consumer (require dep1+dep2)
 3. Run `wrk --bring mydep2` via `Run`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	ensureBringReuseHelpersUsed()
 

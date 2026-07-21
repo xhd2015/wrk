@@ -16,6 +16,10 @@ myrepo (main only) -> wrk myrepo {WorkRoot}/target -> {WorkRoot}/target/myrepo-m
 4. Run `wrk myrepo <target>` via `Run`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	ensureNamedBringReuseHelpersUsed()
 	target := filepath.Join(req.WorkRoot, "target")

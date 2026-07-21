@@ -17,15 +17,15 @@ module github.com/xhd2015/wrk
 
 ```go
 import (
+	"github.com/xhd2015/doctest/session"
 	"os/exec"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	// Package existence check needs go list against the wrk module.
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	_ = moduleRootFromDoctest(t)
 	req.RepoDir = req.WorkRoot
 	req.Args = []string{"-h"}
 	return nil

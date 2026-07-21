@@ -13,6 +13,10 @@ wrk <repo> <target-dir> --task "desc" -> dir is exactly <target-dir>, branch inc
 3. Verify dir is exactly <target-dir>.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

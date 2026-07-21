@@ -22,6 +22,10 @@ would: reinstall 0 binaries (1 skipped)
 - 0
 
 ```go
+import (
+	"fmt"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)

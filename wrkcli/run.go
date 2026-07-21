@@ -2844,9 +2844,9 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 // chdir'd into.
 //
 // Policy B (named bring): if source mainRepo already has any live linked
-// worktree (anywhere, not only under target/external), prompt to skip (TTY,
-// default Y) or hard-error (non-TTY). Skip prints the existing path on stdout
-// and does not create. Answering n proceeds with create as today.
+// worktree (anywhere, not only under target/external), default is skip (print
+// existing path on stdout, no create). Non-TTY always auto-skips; TTY prompts
+// with default Y (skip). Answering n proceeds with create as today.
 func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, branchBase, pathToken, date, slug string, noCd, forceCd bool, execArgs []string, taskDesc string, ux createUXPlan) error {
 	// Resolve <target-dir> against the shell cwd (origWd), not the repo dir.
 	absTarget := targetDir
@@ -2860,8 +2860,23 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 		return err
 	} else if len(existing) > 0 {
 		primary := existing[0]
+		policyBSkip := func() error {
+			absPath, err := filepath.Abs(primary)
+			if err != nil {
+				return fmt.Errorf("resolve worktree path: %w", err)
+			}
+			fmt.Println(absPath)
+			if err := runExecInDir(absPath, execArgs); err != nil {
+				return err
+			}
+			if forceCd {
+				return forceLandInDir(absPath)
+			}
+			return nil
+		}
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
-			return fmt.Errorf("wrk: %s already has a linked worktree at %s; refusing non-interactive create (default is skip; re-run in a TTY)", basename, primary)
+			// Non-TTY: default auto-skip (same as empty/Y answer on TTY).
+			return policyBSkip()
 		}
 		// Color on stderr only when interactive terminal and NO_COLOR is unset.
 		colorOn := term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == ""
@@ -2890,18 +2905,7 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 		answer := strings.TrimSpace(strings.ToLower(line))
 		switch answer {
 		case "", "y", "yes":
-			absPath, err := filepath.Abs(primary)
-			if err != nil {
-				return fmt.Errorf("resolve worktree path: %w", err)
-			}
-			fmt.Println(absPath)
-			if err := runExecInDir(absPath, execArgs); err != nil {
-				return err
-			}
-			if forceCd {
-				return forceLandInDir(absPath)
-			}
-			return nil
+			return policyBSkip()
 		case "n", "no":
 			// Fall through to create as today.
 		default:

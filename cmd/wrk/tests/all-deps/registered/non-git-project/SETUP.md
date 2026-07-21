@@ -14,6 +14,10 @@ consumer (requires dep1) + projects.json (non-git dir) -> wrked 0 deps
 3. Run `wrk --all-deps` from the consumer.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	allDepsEnsureHelpersUsed()
 

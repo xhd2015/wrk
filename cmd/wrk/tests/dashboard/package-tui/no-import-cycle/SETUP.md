@@ -22,14 +22,14 @@ RunDashboardOpts carries callbacks:
 
 ```go
 import (
+	"github.com/xhd2015/doctest/session"
 	"os/exec"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	_ = moduleRootFromDoctest(t)
 	req.RepoDir = req.WorkRoot
 	req.Args = []string{"-h"}
 	return nil

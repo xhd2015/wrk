@@ -13,6 +13,7 @@ import (
 	"os"
 
 	"github.com/xhd2015/doctest/assert"
+	"fmt"
 )
 
 func Assert(t *testing.T, req *Request, resp *Response, err error) {

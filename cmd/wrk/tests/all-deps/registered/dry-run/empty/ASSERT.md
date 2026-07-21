@@ -17,6 +17,10 @@ would: wrked 0 deps
 ```go
 import "github.com/xhd2015/doctest/assert"
 
+import (
+	"path/filepath"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {

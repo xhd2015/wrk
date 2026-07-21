@@ -261,7 +261,6 @@ func assertLastEventCommandStatusWithMain(t *testing.T, wrkHome string, wantExit
 func ensureMainFlagHelpersUsed() {
 	_ = setMainStatusArgs
 	_ = resolvePath
-	_ = statusDirLine
 	_ = runWrkCapture
 	_ = runStatusFromMain
 	_ = assertExitZeroEmptyStderr

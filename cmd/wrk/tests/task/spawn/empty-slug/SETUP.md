@@ -13,6 +13,10 @@ wrk --task "!!!" -> slug is empty -> non-zero exit, error
 3. Verify non-zero exit — slug is empty after sanitization.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

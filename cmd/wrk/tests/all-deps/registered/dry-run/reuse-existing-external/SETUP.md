@@ -14,9 +14,13 @@
 3. Run `wrk --all-deps --dry-run` via `Run`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	allDepsEnsureHelpersUsed()
-	dryRunEnsureHelpersUsed()
+	allDepsEnsureHelpersUsed()
 
 	dep1 := allDepsDepDir(req.WorkRoot, "mydep1")
 	initAllDepsRepo(t, dep1, "example.com/dep1", "dep1")

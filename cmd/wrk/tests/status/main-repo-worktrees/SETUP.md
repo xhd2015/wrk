@@ -51,13 +51,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 	"github.com/xhd2015/gitops/git"
 	"github.com/xhd2015/gitops/git/git_isolated"
+	"github.com/xhd2015/doctest/session"
+	"sync"
 )
 
 const wrkDate = "2026-06-30"
@@ -75,72 +76,51 @@ func findModuleRoot(dir string) string {
 	}
 }
 
-func fixtureCacheBase(t *testing.T) string {
-	t.Helper()
-	base := os.Getenv("DOCTEST_FIXTURE_ROOT")
-	if base != "" {
-		return base
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return filepath.Join(home, "Library", "Caches", "doctest", "fixtures")
-}
-
-func fixtureSessionRoot(t *testing.T) string {
-	t.Helper()
-	return filepath.Join(fixtureCacheBase(t), DOCTEST_SESSION_ID)
-}
-
-func sessionWrkBin(t *testing.T) string {
-	t.Helper()
-	return filepath.Join(fixtureSessionRoot(t), "bin", "wrk")
-}
-
-func withFlock(t *testing.T, lockPath string, fn func()) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
-		t.Fatalf("mkdir lock dir: %v", err)
-	}
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		t.Fatalf("open lock %s: %v", lockPath, err)
-	}
-	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatalf("flock %s: %v", lockPath, err)
-	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
-	fn()
-}
+// Process-local wrk binary (one-process suite; in-memory mutex, not session flock).
+var (
+	wrkBinMu   sync.Mutex
+	wrkBinPath string
+	wrkBinErr  error
+	// wrkModRoot set from d.DOCTEST_ROOT in root Setup.
+	wrkModRoot string
+)
 
 func getWrkBin(t *testing.T) string {
 	t.Helper()
-	bin := sessionWrkBin(t)
-	if _, err := os.Stat(bin); err == nil {
-		return bin
+	wrkBinMu.Lock()
+	defer wrkBinMu.Unlock()
+	if wrkBinPath != "" || wrkBinErr != nil {
+		if wrkBinErr != nil {
+			t.Fatal(wrkBinErr)
+		}
+		return wrkBinPath
 	}
-	lockPath := filepath.Join(fixtureSessionRoot(t), "bin", ".lock")
-	withFlock(t, lockPath, func() {
-		if _, err := os.Stat(bin); err == nil {
-			return
-		}
-		modRoot := findModuleRoot(DOCTEST_ROOT)
-		if modRoot == "" {
-			t.Fatal("find module root: no go.mod in ancestors")
-		}
-		cmd := exec.Command("go", "build", "-o", bin, "./cmd/wrk")
-		cmd.Dir = modRoot
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("build wrk: %v\n%s", err, out)
-		}
-	})
+	if wrkModRoot == "" {
+		t.Fatal("wrkModRoot unset; root Setup must run first")
+	}
+	dir, err := os.MkdirTemp("", "wrk-doctest-bin-")
+	if err != nil {
+		wrkBinErr = err
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "wrk")
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/wrk")
+	cmd.Dir = wrkModRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		wrkBinErr = fmt.Errorf("build wrk: %v\n%s", err, out)
+		t.Fatal(wrkBinErr)
+	}
+	wrkBinPath = bin
 	return bin
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	if root := findModuleRoot(d.DOCTEST_ROOT); root != "" {
+		wrkModRoot = root
+	} else {
+		t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
+	}
 	skipIfNoGit(t)
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {

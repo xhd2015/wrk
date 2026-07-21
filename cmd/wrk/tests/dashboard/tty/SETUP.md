@@ -32,8 +32,6 @@ non-TTY harness path still one-shot snapshot (regression)
 ```go
 func Setup(t *testing.T, req *Request) error {
 	// Grouping only; leaves set fixtures.
-	_ = lookPathTTYWatch
-	_ = runDashboardTTYWatch
 	return nil
 }
 ```

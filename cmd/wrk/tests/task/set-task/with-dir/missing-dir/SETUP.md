@@ -13,6 +13,10 @@ wrk <nonexistent> --set-task "task" -> non-zero exit, "does not exist"
 3. Verify non-zero exit with "does not exist" error.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	req.RepoDir = req.WorkRoot
 	req.TargetDir = filepath.Join(req.WorkRoot, "nonexistent-dir")

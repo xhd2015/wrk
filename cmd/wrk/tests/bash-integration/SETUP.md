@@ -20,7 +20,7 @@ wrk --bash-integration --complete -- <words> <cword> -> basename/flag candidates
 
 - The wrk Go module is two levels above this tree (`go-pkgs/cmd/wrk/`).
 - Go toolchain is available on PATH.
-- Session-built `wrk` binary at `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/wrk`.
+- Process-local `wrk` binary (in-memory mutex once per suite process).
 - Each leaf uses isolated `{WorkRoot}/.wrk` and fake `{WorkRoot}/home` for profile files.
 
 ## Steps
@@ -46,6 +46,7 @@ import (
 	"time"
 
 	"github.com/xhd2015/wrk/wrkcli/storage"
+	"github.com/xhd2015/doctest/session"
 )
 
 const (
@@ -53,7 +54,12 @@ const (
 	wrkMarkerEnd   = "# === wrk integration end ==="
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	if root := findModuleRoot(d.DOCTEST_ROOT); root != "" {
+		wrkModRoot = root
+	} else {
+		t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
+	}
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		return fmt.Errorf("resolve work root: %w", err)

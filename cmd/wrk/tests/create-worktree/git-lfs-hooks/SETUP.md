@@ -78,12 +78,11 @@ func ensureMinimalBinWithoutGitLFS(t *testing.T, workRoot string) string {
 	}
 	// Refuse to proceed if git-lfs still resolves via this PATH (misconfigured).
 	pathEnv := dir + string(os.PathListSeparator) + dir
-	cmd := exec.Command("sh", "-c", "command -v git-lfs")
-	cmd.Env = []string{"PATH=" + dir}
+		cmd := exec.Command("sh", "-c", "command -v git-lfs")
+	cmd.Env = []string{"PATH=" + pathEnv}
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("minimal-bin still resolves git-lfs: %s", strings.TrimSpace(string(out)))
 	}
-	_ = pathEnv
 	return dir
 }
 

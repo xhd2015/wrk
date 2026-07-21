@@ -24,6 +24,10 @@ mod/
 6. Expect non-zero exit at plan time; no install mutation of the stub.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/cli-exec-coll-parent")
 

@@ -18,6 +18,10 @@ wrk --set-task "bar" (WRK_SET_TASK_CONFIRM=1)
 3. Run `wrk --set-task "bar"` from that worktree.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

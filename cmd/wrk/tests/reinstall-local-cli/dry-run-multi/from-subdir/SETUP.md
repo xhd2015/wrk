@@ -25,6 +25,10 @@ repo/ (git)
 8. Expect multi dry-run covering both modules (scan root = git toplevel).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	repo := filepath.Join(req.WorkRoot, "repo")
 	initGitRepoOnMain(t, repo)

@@ -70,14 +70,16 @@ func isExistingDirArg(s, cwd string) bool {
 
 // confirmTaskLikePromote decides whether to treat a task-like positional as --task.
 // kind is "target" (second positional) or "source" (first positional).
-// -y auto-accepts; TTY or WRK_TASK_LIKE_CONFIRM=1 prompts; else non-TTY error + hint.
+// Default auto-yes: -y and non-TTY auto-accept. TTY (or WRK_TASK_LIKE_CONFIRM=1)
+// prompts with default Y; answer n declines promotion (caller surfaces path error).
 func confirmTaskLikePromote(kind, arg string, assumeYes bool) (promote bool, err error) {
 	if assumeYes {
 		return true, nil
 	}
 	interactive := term.IsTerminal(int(os.Stdin.Fd())) || os.Getenv("WRK_TASK_LIKE_CONFIRM") == "1"
 	if !interactive {
-		return false, taskLikeNonTTYError(kind, arg)
+		// Non-TTY default auto-yes (same as empty/Y on TTY).
+		return true, nil
 	}
 
 	colorOn := term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == ""

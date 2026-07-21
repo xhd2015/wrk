@@ -19,6 +19,10 @@ git-mod/ -> wrk --main --reinstall-local --dry-run
 5. Assert last `events.jsonl` event (do not re-invoke wrk before read).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	repo := filepath.Join(req.WorkRoot, "repo")
 	initGitRepoOnMain(t, repo)

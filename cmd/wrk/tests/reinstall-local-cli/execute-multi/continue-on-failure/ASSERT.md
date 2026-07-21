@@ -39,6 +39,10 @@ compiler noise onto stdout.)
 - 1
 
 ```go
+import (
+	"strings"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	assertExitCode(t, resp, 1)

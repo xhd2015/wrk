@@ -16,6 +16,10 @@ PlanLocalReinstalls
 4. Expect one go-run-install install item named `foo`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/script-foo")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "script", "foo", "install"))

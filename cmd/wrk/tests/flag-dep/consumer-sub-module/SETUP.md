@@ -22,6 +22,10 @@
 3. Run `wrk --dep <dep>` from the consumer repo root (not from go-pkgs/).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	consumer := filepath.Join(req.WorkRoot, "consumer")
 	initGitRepoOnMain(t, consumer)

@@ -28,6 +28,10 @@ Current behavior: `findGoModDir` hard-errors `no go.mod found within <top>`
 before merge-back runs, so exit is non-zero and the worktree is left in place.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

@@ -28,6 +28,10 @@ diagnostic. The sibling `done/not-linked` test works around this by writing a
 go.mod; this leaf drops the go.mod to expose the masking.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

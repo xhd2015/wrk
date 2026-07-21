@@ -20,6 +20,10 @@ consumer (require dep1) + projects.json(mydep1)
 4. Run `wrk --all-deps` via `Run` — must reuse that path and apply replace.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	allDepsEnsureHelpersUsed()
 	registeredEnsureHelpersUsed()

@@ -19,6 +19,10 @@ PlanLocalReinstalls
 4. Expect script survivor + ambiguous-cmd warning only.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/amb-cmd-script")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "foo"))

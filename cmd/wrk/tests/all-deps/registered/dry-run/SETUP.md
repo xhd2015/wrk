@@ -22,23 +22,6 @@ no projects.json -> wrk --all-deps --dry-run -> would: wrked 0 deps
 ```go
 func Setup(t *testing.T, req *Request) error {
 	allDepsEnsureHelpersUsed()
-	dryRunEnsureHelpersUsed()
 	return nil
-}
-
-func dryRunEnsureHelpersUsed() {
-	_ = allDepsGoModJSON{}
-	_ = allDepsReadGoMod
-	_ = allDepsHasReplaceForModule
-	_ = allDepsReplacePathForModule
-	_ = allDepsGitignoreContainsExternal
-	_ = allDepsCountGitignoreExternalLines
-	_ = allDepsExternalRelPath
-	_ = allDepsExternalAbsPath
-	_ = registerAllDepsProject
-	_ = registerAllDepsProjects
-	_ = initAllDepsRepo
-	_ = initAllDepsConsumer
-	_ = allDepsEnsureHelpersUsed
 }
 ```

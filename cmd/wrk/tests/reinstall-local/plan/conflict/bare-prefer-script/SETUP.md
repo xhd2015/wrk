@@ -19,6 +19,10 @@ PlanLocalReinstalls
 5. Expect script item + prefer-script notice (paths sorted).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/demo")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "demo"))

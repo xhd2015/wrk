@@ -17,6 +17,10 @@ consumer (require dep) + mydep
 3. Run `wrk --dep <dep>` again via doctest `Run`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	ensureDepReuseHelpersUsed()
 

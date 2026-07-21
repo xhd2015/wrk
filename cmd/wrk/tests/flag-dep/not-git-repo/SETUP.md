@@ -13,6 +13,10 @@
 3. Run `wrk --dep`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	consumer := initConsumerRepo(t, req.WorkRoot, true)
 	dep := filepath.Join(req.WorkRoot, "not-git")

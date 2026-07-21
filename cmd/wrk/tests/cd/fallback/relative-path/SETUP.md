@@ -14,6 +14,10 @@ cwd=workspace; wrk --cd rel/target
 2. Install fake bash; run `wrk --cd rel/target`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	rel := filepath.Join("rel", "target")
 	abs := filepath.Join(req.RepoDir, "rel", "target")

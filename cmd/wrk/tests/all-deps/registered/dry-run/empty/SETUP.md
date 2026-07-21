@@ -16,7 +16,7 @@ consumer (requires dep1) + empty projects -> wrk --all-deps --dry-run
 ```go
 func Setup(t *testing.T, req *Request) error {
 	allDepsEnsureHelpersUsed()
-	dryRunEnsureHelpersUsed()
+	allDepsEnsureHelpersUsed()
 
 	consumer := initAllDepsConsumer(t, req.WorkRoot, []string{"example.com/dep1"}, "")
 

@@ -13,6 +13,10 @@
 - 0 preferred (ignore illegal toggle); non-zero gate error also acceptable if no `--add-all`.
 
 ```go
+import (
+	"strings"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	assertLinkedWorktreeStillPresent(t, req)

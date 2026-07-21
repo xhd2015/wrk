@@ -12,11 +12,11 @@
 - CLI `wrk -h` is incidental (expect 0); failure mode is package list, not help.
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	// Harness run is only to satisfy shared Run; package surface is the contract.
 	if err != nil {
 		t.Fatalf("unexpected Run error for wrk -h: %v", err)
 	}
-	assertPackageListed(t, wrkcliTuiImportPath)
+	assertPackageListed(t, d, wrkcliTuiImportPath)
 }
 ```

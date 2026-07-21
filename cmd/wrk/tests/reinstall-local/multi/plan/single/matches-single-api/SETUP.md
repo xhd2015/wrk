@@ -20,6 +20,10 @@ PlanLocalReinstallsMulti([mod], binDir)
    single-module `PlanLocalReinstalls` item set.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	modRoot := filepath.Join(req.WorkRoot, "mod")
 	writeGoMod(t, modRoot, "example.com/multi-single")

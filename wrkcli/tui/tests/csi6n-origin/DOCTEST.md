@@ -94,6 +94,7 @@ import (
 	"testing"
 
 	"github.com/xhd2015/wrk/wrkcli/tui"
+	"bytes"
 )
 
 // Request drives the product CPR → origin → ResolveMouseHit chain.

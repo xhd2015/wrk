@@ -233,7 +233,5 @@ func ensureColorStatusHelpersUsed() {
 	_ = colorStatusBlockContains
 	_ = colorStatusStdoutV2
 	_ = dirtyColorStatusRepo
-	_ = statusExternalSectionHeaderColored
-	_ = statusStdoutPrimaryExternalColored
 }
 ```

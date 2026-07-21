@@ -13,6 +13,10 @@ consumer + --scan-root <path> -> error
 2. Run `wrk --all-deps --scan-root <tmpdir>` from the consumer.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	allDepsEnsureHelpersUsed()
 

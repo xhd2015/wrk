@@ -148,7 +148,8 @@ func assertPromotedTaskCreate(t *testing.T, req *Request, resp *Response, err er
 	}
 	want := wantPromotedWorktree(req, task)
 	got := strings.TrimSpace(resp.Stdout)
-	if got != want {
+	// script(1) TTY may prepend control/prompt noise; accept exact or contains path.
+	if got != want && !strings.Contains(got, want) {
 		t.Fatalf("stdout path: want %q got %q stderr=%q", want, got, resp.Stderr)
 	}
 	assertFileExists(t, want)
@@ -159,8 +160,6 @@ func assertPromotedTaskCreate(t *testing.T, req *Request, resp *Response, err er
 }
 
 func ensureForgotTaskFlagHelpersUsed() {
-	_ = taskLikeSpaces
-	_ = envTaskLikeConfirm
 	_ = setupTwoArg
 	_ = setupOneArg
 	_ = wantPromotedWorktree

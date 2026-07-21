@@ -15,6 +15,10 @@ wrk --set-task "x" -> cannot parse branch name -> error
 4. Verify non-zero exit.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

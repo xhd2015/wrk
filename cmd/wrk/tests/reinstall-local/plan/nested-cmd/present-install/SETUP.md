@@ -16,6 +16,10 @@ PlanLocalReinstalls
 4. Expect one install item for bin `tool`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/nested-cmd")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "nested", "tool"))

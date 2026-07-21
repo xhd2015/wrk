@@ -13,6 +13,10 @@ wrk <linked-worktree-dir> --set-task "" -> non-zero exit, error about empty desc
 3. Verify non-zero exit with error about empty description.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

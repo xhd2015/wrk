@@ -18,8 +18,8 @@ wrk --bash-integration --install --dry-run
 
 - The wrk Go module main package is two levels above this tree (`go-pkgs/cmd/wrk/`).
 - Go toolchain is available on PATH.
-- Session-built `wrk` binary at `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/wrk`
-  (file-locked across leaf processes).
+- Process-local `wrk` binary (in-memory mutex once per suite process).
+  (process-local under an in-memory mutex).
 - Each leaf uses isolated `{WorkRoot}/.wrk` and fake `{WorkRoot}/home`.
 
 ## Steps
@@ -48,6 +48,7 @@ import (
 	"testing"
 
 	"github.com/xhd2015/doctest/assert"
+	"github.com/xhd2015/doctest/session"
 )
 
 const (
@@ -55,7 +56,12 @@ const (
 	wrkMarkerEnd   = "# === wrk integration end ==="
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	if root := findModuleRoot(d.DOCTEST_ROOT); root != "" {
+		wrkModRoot = root
+	} else {
+		t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
+	}
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		return fmt.Errorf("resolve work root: %w", err)
@@ -215,6 +221,5 @@ func ensureMessagingHelpersUsed() {
 	_ = assertInstallReport
 	_ = assertDryRunUnchanged
 	_ = assertMarkersInstalled
-	_ = wrkMarkerEnd
 }
 ```

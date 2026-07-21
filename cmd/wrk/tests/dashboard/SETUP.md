@@ -101,6 +101,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"github.com/xhd2015/doctest/session"
 )
 
 func Setup(t *testing.T, req *Request) error {
@@ -238,7 +239,6 @@ func assertMutexNewMode(t *testing.T, resp *Response, err error, otherFlag strin
 	if !strings.Contains(se, "--new") && !strings.Contains(se, "new") {
 		// soft preference: still accept generic exclusive wording
 	}
-	_ = otherFlag
 }
 
 // setupDashboardLinkedWorktree creates main + linked worktree (not under WRK_HOME/worktrees).
@@ -955,7 +955,6 @@ func ensureDashboardHelpersUsed() {
 	_ = assertLinkedWorktreeStillPresent
 	_ = assertDryRunComposeEvidence
 	_ = dashComposeArgvLogPath
-	_ = envDashboardAction
 	_ = lookPathTTYWatch
 	_ = runDashboardTTYWatch
 	_ = runDashboardTTYWatchRunThenQuit

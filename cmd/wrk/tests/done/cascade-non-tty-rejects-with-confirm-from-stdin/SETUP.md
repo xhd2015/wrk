@@ -1,6 +1,6 @@
 # Scenario
 
-**Feature**: non-TTY cascade ahead auto-yes succeeds (no pre-flight hard guard)
+**Feature**: non-TTY cascade ahead explicit -y (cascade requires -y) succeeds (no pre-flight hard guard)
 
 ```
 consumer wt + ahead external dep (replace dropped) -> wrk --done (non-TTY)
@@ -11,14 +11,14 @@ consumer wt + ahead external dep (replace dropped) -> wrk --done (non-TTY)
 
 1. Build consumer wt with ahead external dep worktree.
 2. Drop consumer replace/require and commit.
-3. Run `wrk --done` (default auto-yes; no `--confirm`).
+3. Run `wrk --done` (default explicit -y (cascade requires -y); no `--confirm`).
 
 ```go
 func Setup(t *testing.T, req *Request) error {
 	setupConsumerWithAheadExternalDep(t, req)
 	prepareAheadExternalDepConsumerForDone(t, req)
 	req.RepoDir = req.WtDir
-	req.Args = []string{"--done"}
+	req.Args = []string{"--done", "-y"}
 	return nil
 }
 ```

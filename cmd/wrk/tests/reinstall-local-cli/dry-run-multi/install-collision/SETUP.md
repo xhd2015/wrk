@@ -22,6 +22,10 @@ mod/
 5. Run from ModuleRoot; expect non-zero exit and stderr naming the bin.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/cli-coll-parent")
 

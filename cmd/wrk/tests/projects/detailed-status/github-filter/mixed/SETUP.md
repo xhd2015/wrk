@@ -13,6 +13,10 @@ record GH + local bare origin + no-remote -> wrk --projects --github -> only GH 
 3. Run `wrk --projects --github`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	ensureGitHubFilterHelpersUsed()
 

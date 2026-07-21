@@ -14,6 +14,10 @@ wrk --all-deps --dep <dep> -> error (mutually exclusive)
 3. Run `wrk --all-deps --dep <dep>` from the consumer (no `--scan-root`).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	allDepsEnsureHelpersUsed()
 

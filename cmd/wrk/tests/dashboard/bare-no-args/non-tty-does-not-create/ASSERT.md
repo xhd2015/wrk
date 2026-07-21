@@ -14,6 +14,12 @@
 - Any (0 or non-zero); create absence is the gate.
 
 ```go
+import (
+	"path/filepath"
+	"strings"
+	"os"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	assertNoWorktreesCreated(t, req)

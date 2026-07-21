@@ -8,6 +8,11 @@
 - 0
 
 ```go
+import (
+	"github.com/xhd2015/doctest/assert"
+	"strings"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {

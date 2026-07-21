@@ -16,6 +16,10 @@ requires a TTY (stdout).
 3. Verify rename succeeds under default auto-yes.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo
@@ -29,8 +33,7 @@ func Setup(t *testing.T, req *Request) error {
 	req.WtDir = wtDir
 	req.RepoDir = wtDir
 	req.SetTaskDesc = "new task desc"
-	// Force the confirm/TTY path (default auto-yes would skip the prompt).
-	req.Args = []string{"--confirm"}
+	// Default auto-yes: omit --confirm (requires TTY).
 	return nil
 }
 ```

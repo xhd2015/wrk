@@ -13,6 +13,10 @@ wrk --set-task "" -> non-zero exit, error about empty description
 3. Verify non-zero exit (error about empty task).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

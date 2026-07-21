@@ -13,6 +13,10 @@ WorkRoot cwd -> wrk myrepo
 2. Run `wrk <myrepo>` from WorkRoot (TargetDir; no `--new`).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	repoDir := filepath.Join(req.WorkRoot, "myrepo")
 	initGitRepoOnMain(t, repoDir)

@@ -10,6 +10,10 @@
 - Process exits cleanly (tty-watch may not expose exit code; assert exited + no compose).
 
 ```go
+import (
+	"strings"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	// Non-TTY harness Run is fine (static snapshot); drive real TTY via tty-watch.

@@ -18,6 +18,10 @@ mod/ -> wrk --reinstall-local
 4. Assert last `events.jsonl` event (do not re-invoke wrk before read).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/cli-events-exec")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "missing"))

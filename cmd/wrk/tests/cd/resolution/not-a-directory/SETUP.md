@@ -13,6 +13,10 @@ wrk --cd workspace/notdir (abs) -> non-zero; not a directory (or similar)
 2. `wrk --cd <file-abs>`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	filePath := filepath.Join(req.WorkRoot, "notdir")
 	writeFile(t, filePath, "not a directory\n")

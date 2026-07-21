@@ -14,6 +14,10 @@
 - Non-zero
 
 ```go
+import (
+	"strings"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	assertExitNonZero(t, resp)

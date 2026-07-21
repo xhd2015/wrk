@@ -16,6 +16,10 @@ wrk --cd myrepo -> follow-up uses local workspace/myrepo abs (not saved)
 3. In-place `wrk --cd myrepo` so we can assert follow-up without shell.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	skipIfNoGit(t)
 	enableInPlaceChannel(t, req)

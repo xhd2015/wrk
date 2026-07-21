@@ -16,6 +16,10 @@ mod/ -> wrk --reinstall-local --dry-run --color
 3. Run with `--reinstall-local --dry-run --color`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/cli-warn-color")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "foo"))

@@ -49,7 +49,7 @@ func setupDonePushWithOrigin(t *testing.T, req *Request) {
 
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo
-	cloneRepoFromSeed(t, fixtureSeedMainGoMod, buildSeedMainGoMod, mainRepo)
+	cloneMainGoModFromSeed(t, mainRepo)
 	mainRepo = compositionResolvePath(t, mainRepo)
 	req.MainRepo = mainRepo
 

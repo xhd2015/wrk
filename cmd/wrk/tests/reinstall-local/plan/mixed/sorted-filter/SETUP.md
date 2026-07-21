@@ -23,6 +23,10 @@ PlanLocalReinstalls
 5. Expect three items sorted alpha < mid < zed with correct actions.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/mixed-plan")
 	// Write in non-sorted order to ensure product sorts by BinName.

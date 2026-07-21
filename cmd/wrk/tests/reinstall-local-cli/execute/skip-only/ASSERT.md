@@ -22,6 +22,12 @@ reinstalled 0, skipped 1, failed 0
 - 0
 
 ```go
+import (
+	"path/filepath"
+	"fmt"
+	"os"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)

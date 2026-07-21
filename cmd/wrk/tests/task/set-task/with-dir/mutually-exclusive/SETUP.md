@@ -13,6 +13,10 @@ wrk <linked-worktree-dir> --set-task "task" --list -> non-zero exit, mutual excl
 3. Verify non-zero exit with mutual exclusion error.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

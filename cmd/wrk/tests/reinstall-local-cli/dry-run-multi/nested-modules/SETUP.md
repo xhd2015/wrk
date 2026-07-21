@@ -22,6 +22,10 @@ mod/
 5. Expect multi dry-run format with K=2.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/cli-multi-root")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "rootbin"))

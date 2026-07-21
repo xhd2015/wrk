@@ -16,6 +16,10 @@ empty/  <- workDir
 3. Expect non-nil error; substring includes `go.mod`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	empty := filepath.Join(req.WorkRoot, "empty")
 	mkdirAll(t, empty)

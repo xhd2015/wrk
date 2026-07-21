@@ -2,6 +2,7 @@
 import (
 	"strings"
 	"testing"
+	"path/filepath"
 )
 
 func Assert(t *testing.T, req *Request, resp *Response, err error) {

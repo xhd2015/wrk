@@ -19,6 +19,10 @@ PlanLocalReinstallsMulti([mod-a, mod-b], binDir)
    module roots (or at least path bases `mod-a` and `mod-b`).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	modA := filepath.Join(req.WorkRoot, "mod-a")
 	modB := filepath.Join(req.WorkRoot, "mod-b")

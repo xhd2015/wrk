@@ -14,6 +14,10 @@ projects.json (mydep1, mydep2) + consumer go-pkgs/ requires dep1+dep2 -> wrked 2
 3. Run `wrk --all-deps` from the consumer repo root.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	allDepsEnsureHelpersUsed()
 

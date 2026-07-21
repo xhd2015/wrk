@@ -14,6 +14,10 @@
 - 0
 
 ```go
+import (
+	"strings"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertDashboardSnapshotCore(t, req, resp, err)
 	// Soft preference: main may disable DONE / MERGE BACK.

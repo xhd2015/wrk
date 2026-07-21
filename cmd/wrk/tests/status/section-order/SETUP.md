@@ -54,9 +54,6 @@ func addInTreeLinkedWorktree(t *testing.T, mainRepo, relDir, branch string) stri
 func initNestedIndependentRepo(t *testing.T, mainRepo, relPath, subject string) string {
 	t.Helper()
 	// Ensure parent ignores nested path so root stays clean.
-	gi := filepath.Join(mainRepo, ".gitignore")
-	// append if missing — leaves that init main already may commit gitignore.
-	_ = gi
 	child := filepath.Join(mainRepo, filepath.FromSlash(relPath))
 	statusInitRepoWithSubject(t, child, subject)
 	return child
@@ -177,8 +174,5 @@ func ensureSectionOrderHelpersUsed() {
 	_ = appendedHealthyBlockPlain
 	_ = primaryLinkedBlockPlain
 	_ = createSecondExternalWrkWorktree
-	_ = statusStdoutPrimaryExternal
-	_ = assertNoExternalSectionHeader
-	_ = setupWrkWorktreeFromMain
 }
 ```

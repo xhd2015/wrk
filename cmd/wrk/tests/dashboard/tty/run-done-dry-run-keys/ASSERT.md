@@ -6,6 +6,10 @@
 - Worktree still present (dry-run).
 
 ```go
+import (
+	"strings"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	logPath := dashComposeArgvLogPath(req)

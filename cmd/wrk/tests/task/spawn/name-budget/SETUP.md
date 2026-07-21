@@ -137,9 +137,5 @@ func ensureNameBudgetHelpersUsed() {
 	_ = pathBaseWithoutFit
 	_ = branchWithoutFit
 	_ = assertNameBudgetOK
-	_ = longRepoBasenameLen
-	_ = overBudgetBasenameLen
-	_ = nameMaxComponentBytes
-	_ = nameSuffixReserve
 }
 ```

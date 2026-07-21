@@ -13,6 +13,10 @@ wrk --task "Fix: Login & Signup!!! (urgent)" -> slug = "fix-login-signup-urgent"
 3. Verify slug is sanitized: lowercase, non-alphanumeric → "-", collapsed, trimmed.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

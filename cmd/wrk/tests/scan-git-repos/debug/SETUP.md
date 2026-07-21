@@ -45,6 +45,7 @@ HOME=FakeHome
 import (
 	"os/exec"
 	"path/filepath"
+	"os"
 )
 
 // seedScanGitReposNoDebug runs a quiet first scan so projects.json and the

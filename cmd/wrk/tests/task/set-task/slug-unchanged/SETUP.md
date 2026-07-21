@@ -17,6 +17,10 @@ wrk --set-task "my-task" (WRK_SET_TASK_CONFIRM=1)
 3. Verify stdout is "task unchanged", worktree path unchanged, branch unchanged.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

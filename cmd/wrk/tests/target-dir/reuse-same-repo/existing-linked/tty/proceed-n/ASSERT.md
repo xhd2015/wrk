@@ -15,6 +15,11 @@ explanation: requires `script` fake TTY for skip prompt; platform-specific
 - 0
 
 ```go
+import (
+	"path/filepath"
+	"strings"
+)
+
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {

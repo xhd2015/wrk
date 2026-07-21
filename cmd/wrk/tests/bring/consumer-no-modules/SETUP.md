@@ -24,6 +24,10 @@ consumer (git, no go.mod) + mydep (module example.com/dep)
 3. Run `wrk --bring <dep>` from the consumer.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	consumer := filepath.Join(req.WorkRoot, "consumer")
 	initGitRepoOnMain(t, consumer)

@@ -14,6 +14,10 @@ git module repo -> wrk --tag-next --propagate-tags --dry-run -> event command=ta
 2. Run `wrk --tag-next --propagate-tags --dry-run` (plan only; event command still tag-next).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	// setupRootBumpRepo has no go.mod; propagate-tags needs scanned modules.
 	repo := filepath.Join(req.WorkRoot, "myrepo")

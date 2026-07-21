@@ -24,6 +24,10 @@ workDir=linked-wt + useMain=true
    Modules both under mainrepo paths.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "mainrepo")
 	initGitRepoOnMain(t, mainRepo)

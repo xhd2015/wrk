@@ -13,6 +13,10 @@ wrk --task "a very long task description..." -> slug truncated at 64 runes
 3. Verify slug in dir and branch names is at most 64 runes.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

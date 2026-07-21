@@ -16,6 +16,10 @@ PlanLocalReinstalls
 4. Expect one skip item (still listed).
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/cmd-absent")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "missing"))

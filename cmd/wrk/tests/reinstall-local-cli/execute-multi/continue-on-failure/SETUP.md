@@ -26,6 +26,10 @@ mod/
 5. Expect continue-on-failure across module boundaries; later module still installs.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	writeGoMod(t, req.ModuleRoot, "example.com/cli-exec-multi-partial-root")
 	writeBrokenPackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "broken"))

@@ -94,7 +94,7 @@ func uxAgentRunCwdPath(req *Request) string {
 func setupMainRepoForCreateUX(t *testing.T, req *Request) string {
 	t.Helper()
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
-	cloneRepoFromSeed(t, fixtureSeedMainGoMod, buildSeedMainGoMod, mainRepo)
+	cloneMainGoModFromSeed(t, mainRepo)
 	req.MainRepo = mainRepo
 	req.RepoDir = mainRepo
 	return mainRepo
@@ -598,8 +598,6 @@ func ensureCreateUXHelpersUsed() {
 	_ = assertItermFollowUpHasAgentRun
 	_ = shellSafeQuoteUX
 	_ = assertNativeCreateOK
-	_ = envSpaceInvokeLog
-	_ = envFakeAgentRunLog
 	_ = readFollowupFileUX
 	_ = assertFollowupEmptyUX
 	_ = assertFollowupCDUX

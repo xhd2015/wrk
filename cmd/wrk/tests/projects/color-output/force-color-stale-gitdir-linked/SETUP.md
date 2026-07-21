@@ -15,6 +15,10 @@ wrk --projects --color -> red on "1 error" and per-path "error: ..." values
 4. Record and run `wrk --projects --color`.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	ensureColorOutputHelpersUsed()
 	withProjectsColor(req)

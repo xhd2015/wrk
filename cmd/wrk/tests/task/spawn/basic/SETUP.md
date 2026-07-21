@@ -18,6 +18,10 @@ wrk -> [--task "fix login bug"] -> git worktree add -> path on stdout
 4. Verify dir and branch names include `-fix-login-bug` after the date.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo

@@ -11,6 +11,10 @@ wrk --cd /WorkRoot/does-not-exist -> non-zero; does not exist
 1. Use a guaranteed-missing absolute path under WorkRoot.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	missing := filepath.Join(req.WorkRoot, "does-not-exist")
 	req.MainRepo = missing

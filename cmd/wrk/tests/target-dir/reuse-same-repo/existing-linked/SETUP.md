@@ -19,6 +19,10 @@ myrepo + existing linked WT(s)
 - This grouping ensures helpers; leaves create prior linked WTs and set TTY/stdin/confirm.
 
 ```go
+import (
+	"path/filepath"
+)
+
 func Setup(t *testing.T, req *Request) error {
 	ensureNamedBringReuseHelpersUsed()
 	target := filepath.Join(req.WorkRoot, "target")
