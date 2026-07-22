@@ -64,14 +64,27 @@ func findModuleRoot(dir string) string {
 	}
 }
 
-// Process-local wrk binary (one-process suite; in-memory mutex, not session flock).
+// Process-local wrk binary (one-process suite; in-memory mutex, not session.Once/flock).
 var (
 	wrkBinMu   sync.Mutex
 	wrkBinPath string
 	wrkBinErr  error
-	// wrkModRoot set from d.DOCTEST_ROOT in root Setup.
+	// wrkModRoot set once via noteModRoot (sync.Once); not per-leaf Setup writes.
+	wrkModOnce sync.Once
 	wrkModRoot string
 )
+
+
+// noteModRoot records module root once per process (sync.Once). Safe under t.Parallel.
+// Prefer this over writing wrkModRoot from every leaf Setup.
+func noteModRoot(d *session.Doctest) {
+	if d == nil {
+		return
+	}
+	wrkModOnce.Do(func() {
+		wrkModRoot = findModuleRoot(d.DOCTEST_ROOT)
+	})
+}
 
 func getWrkBin(t *testing.T) string {
 	t.Helper()
@@ -84,7 +97,7 @@ func getWrkBin(t *testing.T) string {
 		return wrkBinPath
 	}
 	if wrkModRoot == "" {
-		t.Fatal("wrkModRoot unset; root Setup must run first")
+		t.Fatal("wrkModRoot unset; root Setup must call noteModRoot first")
 	}
 	dir, err := os.MkdirTemp("", "wrk-doctest-bin-")
 	if err != nil {
@@ -104,9 +117,8 @@ func getWrkBin(t *testing.T) string {
 }
 
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	if root := findModuleRoot(d.DOCTEST_ROOT); root != "" {
-		wrkModRoot = root
-	} else {
+	noteModRoot(d)
+	if wrkModRoot == "" {
 		t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
 	}
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())

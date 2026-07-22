@@ -255,6 +255,7 @@ doctest test ./go-pkgs/cmd/wrk/tests/followup-cd/wrapper/create/auto-cd
 ```
 
 ```go
+
 import (
 	"bytes"
 	"fmt"
@@ -264,7 +265,6 @@ import (
 	"strings"
 	"testing"
 	"github.com/xhd2015/doctest/session"
-	"sync"
 )
 
 type Request struct {
@@ -652,14 +652,6 @@ func findModuleRoot(dir string) string {
 	}
 }
 
-// Process-local wrk binary (one-process suite; in-memory mutex, not session flock).
-var (
-	wrkBinMu   sync.Mutex
-	wrkBinPath string
-	wrkBinErr  error
-	// wrkModRoot set from d.DOCTEST_ROOT in root Setup.
-	wrkModRoot string
-)
 
 
 

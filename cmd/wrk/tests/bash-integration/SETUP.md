@@ -55,9 +55,8 @@ const (
 )
 
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	if root := findModuleRoot(d.DOCTEST_ROOT); root != "" {
-		wrkModRoot = root
-	} else {
+	noteModRoot(d)
+	if wrkModRoot == "" {
 		t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
 	}
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
