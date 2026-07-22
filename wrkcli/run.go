@@ -1924,31 +1924,68 @@ func planAssumeYes(assumeYes, forceConfirm bool) bool {
 // are cascade merge-back targets (excludes the consumer checkout itself).
 // Nested main repos under the consumer tree are a hard error (D1) — not
 // warn+skip — so --done aborts before cascade/own mutations.
+//
+// Discovery uses scan_repo.Scan with ListWorktrees: true and Roots: [consumerTop]
+// (scan_repo owns base-path filtering). Targets are collected from top-level
+// RepoTypeWorktree rows and from each repo's inner Worktrees field.
 func listCascadeLinkedWorktrees(consumerTop, checkoutRoot string) ([]string, error) {
-	repos, err := discoverStatusRepos(context.Background(), consumerTop)
+	// Direct Scan with ListWorktrees — do not force ListWorktrees on all
+	// status scans via discoverStatusRepos.
+	result, err := scan_repo.Scan(context.Background(), scan_repo.Options{
+		Roots:         []string{consumerTop},
+		ListWorktrees: true,
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	cleanCheckout := filepath.Clean(checkoutRoot)
+	cleanConsumer := filepath.Clean(consumerTop)
+	seen := make(map[string]struct{})
 	var targets []string
-	for _, repo := range repos {
+	addLinked := func(path string) {
+		if path == "" {
+			return
+		}
+		clean := filepath.Clean(path)
+		if clean == cleanCheckout {
+			return
+		}
+		if _, ok := seen[clean]; ok {
+			return
+		}
+		if !worktree.IsLinked(path) {
+			return
+		}
+		seen[clean] = struct{}{}
+		targets = append(targets, path)
+	}
+
+	for _, repo := range result.Repos {
 		if repo.RepoType == scan_repo.RepoTypeMain {
-			if filepath.Clean(repo.Path) != filepath.Clean(consumerTop) {
+			if filepath.Clean(repo.Path) != cleanConsumer {
 				return nil, fmt.Errorf("Error: nested main repo under consumer blocks cascade: %s", repo.Path)
+			}
+			// consumerTop main (if present): not a cascade target itself;
+			// collect linked worktrees from the inner Worktrees field.
+			for _, wt := range repo.Worktrees {
+				if wt.IsMain {
+					continue
+				}
+				addLinked(wt.Path)
 			}
 			continue
 		}
-		if repo.RepoType != scan_repo.RepoTypeWorktree {
-			continue
+		if repo.RepoType == scan_repo.RepoTypeWorktree {
+			addLinked(repo.Path)
 		}
-		if !worktree.IsLinked(repo.Path) {
-			continue
+		// Inner Worktrees on any remaining row (defensive; normally filled on mains).
+		for _, wt := range repo.Worktrees {
+			if wt.IsMain {
+				continue
+			}
+			addLinked(wt.Path)
 		}
-		if filepath.Clean(repo.Path) == cleanCheckout {
-			continue
-		}
-		targets = append(targets, repo.Path)
 	}
 	return targets, nil
 }
