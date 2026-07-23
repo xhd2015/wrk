@@ -2,6 +2,8 @@ package wrkcli
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/xhd2015/agent-pro/agent/commit_msg"
@@ -128,7 +130,7 @@ func genArgsHasFlag(genArgs []string, flag string) bool {
 // runGenCommitMsgPreStage runs library gen-commit-msg on the source worktree
 // before --done / --merge-back. Requires --commit; rejects composed --dir
 // (wrk workDir wins). Forwards peeled library flags and --dry-run when set.
-func runGenCommitMsgPreStage(workDir string, enabled bool, genArgs []string, dryRun bool, primaryFlag string) error {
+func runGenCommitMsgPreStage(out, errw io.Writer, workDir string, enabled bool, genArgs []string, dryRun bool, primaryFlag string) error {
 	if !enabled {
 		return nil
 	}
@@ -139,13 +141,19 @@ func runGenCommitMsgPreStage(workDir string, enabled bool, genArgs []string, dry
 		return fmt.Errorf("wrk: --dir is not valid with --gen-commit-msg when used with %s", primaryFlag)
 	}
 
-	return runGenCommitMsgStage(workDir, genArgs, dryRun)
+	return runGenCommitMsgStage(out, errw, workDir, genArgs, dryRun)
 }
 
 // runGenCommitMsgStage runs library gen-commit-msg against workDir (activeRoot).
 // Used as stage 1 of multi-stage compose (with or without done/merge-back).
 // Does not require --commit (caller / library may still fail later).
-func runGenCommitMsgStage(workDir string, genArgs []string, dryRun bool) error {
+func runGenCommitMsgStage(out, errw io.Writer, workDir string, genArgs []string, dryRun bool) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	if genArgsHasFlag(genArgs, "--dir") {
 		return fmt.Errorf("wrk: --dir is not valid with --gen-commit-msg when used in multi-stage compose")
 	}
@@ -156,7 +164,7 @@ func runGenCommitMsgStage(workDir string, genArgs []string, dryRun bool) error {
 	if dryRun {
 		forwarded = append(forwarded, "--dry-run")
 	}
-	err := commit_msg.RunGenCommitMsg(forwarded)
+	err := commit_msg.RunGenCommitMsgWithWriters(forwarded, out, errw)
 	if err == nil {
 		return nil
 	}
@@ -164,7 +172,7 @@ func runGenCommitMsgStage(workDir string, genArgs []string, dryRun bool) error {
 	// library prints would: lines then errors "no staged". Continue so primary
 	// dry-run plan can still run; real (non-dry) runs still fail.
 	if dryRun && strings.Contains(err.Error(), "no staged") {
-		fmt.Fprintf(cliStderr(), "would: skip gen-commit-msg (no staged changes)\n")
+		fmt.Fprintf(errw, "would: skip gen-commit-msg (no staged changes)\n")
 		return nil
 	}
 	return err

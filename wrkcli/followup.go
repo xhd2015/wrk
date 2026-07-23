@@ -93,11 +93,12 @@ func normalizeDirPath(p string) string {
 // writeFollowupCDIfCwdIsHome writes cd dest only when shellCwd is exactly the
 // user home directory. Used after successful create so non-home shells are not
 // yanked by auto-cd. Still respects --no-cd and unset WRK_FOLLOWUP_FILE.
-func writeFollowupCDIfCwdIsHome(disabled bool, shellCwd, dest string) error {
+// followupFile is an optional invocation override (same as writeFollowupCDTo).
+func writeFollowupCDIfCwdIsHome(disabled bool, shellCwd, dest, followupFile string) error {
 	if !shouldWriteHomeGatedFollowup(shellCwd) {
 		return nil
 	}
-	return writeFollowupCD(disabled, dest)
+	return writeFollowupCDTo(disabled, dest, followupFile)
 }
 
 // shouldWriteCwdGatedFollowup reports whether a done/set-task follow-up cd should
@@ -116,9 +117,10 @@ func shouldWriteCwdGatedFollowup(shellCwdAtStart string) bool {
 // Used after successful --done remove / --set-task move so a surviving sibling
 // or main checkout is not yanked by auto-cd. Create paths must use
 // writeFollowupCDIfCwdIsHome instead.
-func writeFollowupCDIfCwdMissing(disabled bool, shellCwd, dest string) error {
+// followupFile is an optional invocation override (same as writeFollowupCDTo).
+func writeFollowupCDIfCwdMissing(disabled bool, shellCwd, dest, followupFile string) error {
 	if !shouldWriteCwdGatedFollowup(shellCwd) {
 		return nil
 	}
-	return writeFollowupCD(disabled, dest)
+	return writeFollowupCDTo(disabled, dest, followupFile)
 }

@@ -719,7 +719,7 @@ func needsInProcessCaptureOK(req *Request) bool {
 	// Presence of any of these wins over capture-safe modifiers below.
 	for _, a := range args {
 		switch a {
-		case "--done", "--merge-back", "--dep", "--bring", "--all-deps",
+		case "--dep", "--bring", "--all-deps",
 			"--set-task",
 			"--bash-integration",
 			"--new", "--dashboard":
@@ -739,27 +739,26 @@ func needsInProcessCaptureOK(req *Request) bool {
 	if hasSkill && skillInstall {
 		return false
 	}
-	// --gen-commit-msg multi-stage compose still uses process streams in
-	// activeRoot pipeline (sync/done/etc.) → keep binary until pipeline is threaded.
-	hasGenCommit := false
+	// MergeBack dry-run plans print via library fmt.Print (process stdout) —
+	// keep --done/--merge-back --dry-run on binary until worktree.MergeBack
+	// accepts writers.
+	hasDry, hasDonePrimary := false, false
 	for _, a := range args {
-		if a == "--gen-commit-msg" {
-			hasGenCommit = true
-			break
+		switch a {
+		case "--dry-run":
+			hasDry = true
+		case "--done", "--merge-back":
+			hasDonePrimary = true
 		}
 	}
-	if hasGenCommit {
-		for _, a := range args {
-			switch a {
-			case "--sync", "--done", "--merge-back", "--tag-next", "--push",
-				"--propagate-tags", "--reinstall-local":
-				return false
-			}
-		}
+	if hasDry && hasDonePrimary {
+		return false
 	}
 
 	// Pure modes known to print via ctx.out()/errw (and free modifiers like
 	// --dry-run/--json/--color/--fetch/--push with tag-next compose).
+	// --done/--merge-back apply path + post stages and activeRoot pipeline are
+	// threaded; stdin/FakeShell leaves stay binary via needsProcessIsolation.
 	for _, a := range args {
 		switch a {
 		case "--status", "--repos", "--list":
@@ -775,6 +774,8 @@ func needsInProcessCaptureOK(req *Request) bool {
 		case "--scan-git-repos", "--reinstall-local":
 			return true
 		case "--cd", "--gen-commit-msg":
+			return true
+		case "--done", "--merge-back":
 			return true
 		case "--version", "-h", "--help":
 			return true
