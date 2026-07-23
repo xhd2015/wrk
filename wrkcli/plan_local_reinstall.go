@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -626,8 +627,15 @@ func binAction(binDir, binName string) Action {
 // useMain=false scans the worktree toplevel (or walk-up); useMain=true
 // (from --main) scans the main repository of this checkout.
 // colorFlag forces ANSI on diagnostic prefixes when true.
-func runReinstallLocal(workDir string, dryRun bool, useMain bool, colorFlag bool) error {
-	binDir, err := resolveLocalReinstallBinDir()
+// gobinOverride, when non-empty, replaces process GOBIN without os.Setenv.
+func runReinstallLocal(out, errw io.Writer, workDir string, dryRun bool, useMain bool, colorFlag bool, gobinOverride string) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
+	binDir, err := resolveLocalReinstallBinDir(gobinOverride)
 	if err != nil {
 		return err
 	}
@@ -637,9 +645,9 @@ func runReinstallLocal(workDir string, dryRun bool, useMain bool, colorFlag bool
 	}
 	colorOn := reinstallDiagColorEnabled(colorFlag)
 	if dryRun {
-		return printMultiLocalReinstallDryRun(plan, colorOn)
+		return printMultiLocalReinstallDryRun(out, errw, plan, colorOn)
 	}
-	return executeMultiLocalReinstalls(plan, colorOn)
+	return executeMultiLocalReinstalls(out, errw, plan, colorOn)
 }
 
 // reinstallDiagColorEnabled reports whether diagnostic prefix tokens should use ANSI.
@@ -669,9 +677,14 @@ func findModuleRootWalking(start string) (string, error) {
 	}
 }
 
-// resolveLocalReinstallBinDir returns GOBIN if set, else $(go env GOPATH)/bin.
-func resolveLocalReinstallBinDir() (string, error) {
-	if gobin := strings.TrimSpace(os.Getenv("GOBIN")); gobin != "" {
+// resolveLocalReinstallBinDir returns override (if set), else process GOBIN,
+// else $(go env GOPATH)/bin. Override supports parallel-safe L2 tests without Setenv.
+func resolveLocalReinstallBinDir(override string) (string, error) {
+	gobin := strings.TrimSpace(override)
+	if gobin == "" {
+		gobin = strings.TrimSpace(os.Getenv("GOBIN"))
+	}
+	if gobin != "" {
 		abs, err := filepath.Abs(gobin)
 		if err != nil {
 			return "", fmt.Errorf("resolve GOBIN: %w", err)
@@ -707,13 +720,19 @@ func goEnvGOPATH() (string, error) {
 
 // printLocalReinstallDryRun writes would:/skip: lines and a summary to stdout
 // for a single-module plan (legacy helper; CLI uses printMultiLocalReinstallDryRun).
-func printLocalReinstallDryRun(plan *LocalReinstallPlan, colorOn bool) error {
-	printReinstallDiagnostics(plan.Diagnostics, colorOn)
+func printLocalReinstallDryRun(out, errw io.Writer, plan *LocalReinstallPlan, colorOn bool) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
+	printReinstallDiagnostics(errw, plan.Diagnostics, colorOn)
 	nInstall, nSkip := 0, 0
-	if err := printPlanItemsDryRun(plan.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
+	if err := printPlanItemsDryRun(out, plan.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
 		return err
 	}
-	fmt.Fprintf(cliStdout(), "would: reinstall %d binaries (%d skipped)\n", nInstall, nSkip)
+	fmt.Fprintf(out, "would: reinstall %d binaries (%d skipped)\n", nInstall, nSkip)
 	return nil
 }
 
@@ -724,11 +743,17 @@ func printLocalReinstallDryRun(plan *LocalReinstallPlan, colorOn bool) error {
 // without "across").
 // K>1: for each module in plan order, "# module <ModulePath> (<RelDir>)" then
 // that module's would:/skip: lines; summary ends with " across K modules".
-func printMultiLocalReinstallDryRun(plan *MultiLocalReinstallPlan, colorOn bool) error {
+func printMultiLocalReinstallDryRun(out, errw io.Writer, plan *MultiLocalReinstallPlan, colorOn bool) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	k := len(plan.Modules)
 	// Print all diagnostics first (module order, already sorted within each).
 	for _, mod := range plan.Modules {
-		printReinstallDiagnostics(mod.Diagnostics, colorOn)
+		printReinstallDiagnostics(errw, mod.Diagnostics, colorOn)
 	}
 	nInstall, nSkip := 0, 0
 	for _, mod := range plan.Modules {
@@ -741,25 +766,28 @@ func printMultiLocalReinstallDryRun(plan *MultiLocalReinstallPlan, colorOn bool)
 			if relDir == "" {
 				relDir = "."
 			}
-			fmt.Fprintf(cliStdout(), "# module %s (%s)\n", modulePath, relDir)
+			fmt.Fprintf(out, "# module %s (%s)\n", modulePath, relDir)
 		}
-		if err := printPlanItemsDryRun(mod.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
+		if err := printPlanItemsDryRun(out, mod.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
 			return err
 		}
 	}
 	if k > 1 {
-		fmt.Fprintf(cliStdout(), "would: reinstall %d binaries (%d skipped) across %d modules\n", nInstall, nSkip, k)
+		fmt.Fprintf(out, "would: reinstall %d binaries (%d skipped) across %d modules\n", nInstall, nSkip, k)
 	} else {
-		fmt.Fprintf(cliStdout(), "would: reinstall %d binaries (%d skipped)\n", nInstall, nSkip)
+		fmt.Fprintf(out, "would: reinstall %d binaries (%d skipped)\n", nInstall, nSkip)
 	}
 	return nil
 }
 
 // printReinstallDiagnostics writes one stderr line per diagnostic.
 // Color (when colorOn) applies only to the "notice:" / "warning:" prefix.
-func printReinstallDiagnostics(diags []ReinstallDiagnostic, colorOn bool) {
+func printReinstallDiagnostics(errw io.Writer, diags []ReinstallDiagnostic, colorOn bool) {
+	if errw == nil {
+		errw = os.Stderr
+	}
 	for _, d := range diags {
-		fmt.Fprint(cliStderr(), formatReinstallDiagnosticLine(d, colorOn))
+		fmt.Fprint(errw, formatReinstallDiagnosticLine(d, colorOn))
 	}
 }
 
@@ -820,22 +848,25 @@ func isScriptRelPath(rel string) bool {
 }
 
 // printPlanItemsDryRun writes would:/skip: lines for items; accumulates counters.
-func printPlanItemsDryRun(items []PlanItem, binDir string, nInstall, nSkip *int) error {
+func printPlanItemsDryRun(out io.Writer, items []PlanItem, binDir string, nInstall, nSkip *int) error {
+	if out == nil {
+		out = os.Stdout
+	}
 	for _, it := range items {
 		switch it.Action {
 		case ActionInstall:
 			*nInstall++
 			switch it.Method {
 			case MethodGoInstall:
-				fmt.Fprintf(cliStdout(), "would: go install %s\n", it.RelPath)
+				fmt.Fprintf(out, "would: go install %s\n", it.RelPath)
 			case MethodGoRunInstall:
-				fmt.Fprintf(cliStdout(), "would: go run %s\n", it.RelPath)
+				fmt.Fprintf(out, "would: go run %s\n", it.RelPath)
 			default:
 				return fmt.Errorf("unknown reinstall method %q for %s", it.Method, it.BinName)
 			}
 		case ActionSkip:
 			*nSkip++
-			fmt.Fprintf(cliStdout(), "skip: %s (not in %s)\n", it.BinName, binDir)
+			fmt.Fprintf(out, "skip: %s (not in %s)\n", it.BinName, binDir)
 		default:
 			return fmt.Errorf("unknown reinstall action %q for %s", it.Action, it.BinName)
 		}
@@ -846,15 +877,21 @@ func printPlanItemsDryRun(items []PlanItem, binDir string, nInstall, nSkip *int)
 // executeLocalReinstalls runs planned go install / go run commands sequentially
 // for a single-module plan (legacy helper; CLI uses executeMultiLocalReinstalls).
 // Skip items print the same skip: line as dry-run and do not invoke go.
-// Child stdout/stderr are streamed to the process. Continues after failures.
+// Child stdout/stderr are streamed to out/errw. Continues after failures.
 // Summary: reinstalled N, skipped M, failed F. Exit 1 iff failed > 0.
-func executeLocalReinstalls(plan *LocalReinstallPlan, colorOn bool) error {
-	printReinstallDiagnostics(plan.Diagnostics, colorOn)
+func executeLocalReinstalls(out, errw io.Writer, plan *LocalReinstallPlan, colorOn bool) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
+	printReinstallDiagnostics(errw, plan.Diagnostics, colorOn)
 	nReinstalled, nSkip, nFailed := 0, 0, 0
-	if err := executePlanItems(plan.ModuleRoot, plan.BinDir, plan.Items, &nReinstalled, &nSkip, &nFailed); err != nil {
+	if err := executePlanItems(out, errw, plan.ModuleRoot, plan.BinDir, plan.Items, &nReinstalled, &nSkip, &nFailed); err != nil {
 		return err
 	}
-	fmt.Fprintf(cliStdout(), "reinstalled %d, skipped %d, failed %d\n", nReinstalled, nSkip, nFailed)
+	fmt.Fprintf(out, "reinstalled %d, skipped %d, failed %d\n", nReinstalled, nSkip, nFailed)
 	if nFailed > 0 {
 		return ExitCodeError{Code: 1}
 	}
@@ -864,17 +901,23 @@ func executeLocalReinstalls(plan *LocalReinstallPlan, colorOn bool) error {
 // executeMultiLocalReinstalls runs installs for every module in the multi plan
 // (module order, then BinName order within each module). Same progress/skip
 // lines and summary as single-module execute. Continues after failures.
-func executeMultiLocalReinstalls(plan *MultiLocalReinstallPlan, colorOn bool) error {
+func executeMultiLocalReinstalls(out, errw io.Writer, plan *MultiLocalReinstallPlan, colorOn bool) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	for _, mod := range plan.Modules {
-		printReinstallDiagnostics(mod.Diagnostics, colorOn)
+		printReinstallDiagnostics(errw, mod.Diagnostics, colorOn)
 	}
 	nReinstalled, nSkip, nFailed := 0, 0, 0
 	for _, mod := range plan.Modules {
-		if err := executePlanItems(mod.ModuleRoot, plan.BinDir, mod.Items, &nReinstalled, &nSkip, &nFailed); err != nil {
+		if err := executePlanItems(out, errw, mod.ModuleRoot, plan.BinDir, mod.Items, &nReinstalled, &nSkip, &nFailed); err != nil {
 			return err
 		}
 	}
-	fmt.Fprintf(cliStdout(), "reinstalled %d, skipped %d, failed %d\n", nReinstalled, nSkip, nFailed)
+	fmt.Fprintf(out, "reinstalled %d, skipped %d, failed %d\n", nReinstalled, nSkip, nFailed)
 	if nFailed > 0 {
 		return ExitCodeError{Code: 1}
 	}
@@ -883,18 +926,24 @@ func executeMultiLocalReinstalls(plan *MultiLocalReinstallPlan, colorOn bool) er
 
 // executePlanItems runs install/skip actions for one module's items.
 // Unknown method/action returns a hard error (stops the plan).
-func executePlanItems(moduleRoot, binDir string, items []PlanItem, nReinstalled, nSkip, nFailed *int) error {
+func executePlanItems(out, errw io.Writer, moduleRoot, binDir string, items []PlanItem, nReinstalled, nSkip, nFailed *int) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	for _, it := range items {
 		switch it.Action {
 		case ActionInstall:
 			var err error
 			switch it.Method {
 			case MethodGoInstall:
-				fmt.Fprintf(cliStdout(), "go install %s\n", it.RelPath)
-				err = runGoInModule(moduleRoot, "install", it.RelPath)
+				fmt.Fprintf(out, "go install %s\n", it.RelPath)
+				err = runGoInModule(out, errw, moduleRoot, "install", it.RelPath, binDir)
 			case MethodGoRunInstall:
-				fmt.Fprintf(cliStdout(), "go run %s\n", it.RelPath)
-				err = runGoInModule(moduleRoot, "run", it.RelPath)
+				fmt.Fprintf(out, "go run %s\n", it.RelPath)
+				err = runGoInModule(out, errw, moduleRoot, "run", it.RelPath, binDir)
 			default:
 				return fmt.Errorf("unknown reinstall method %q for %s", it.Method, it.BinName)
 			}
@@ -905,7 +954,7 @@ func executePlanItems(moduleRoot, binDir string, items []PlanItem, nReinstalled,
 			}
 		case ActionSkip:
 			*nSkip++
-			fmt.Fprintf(cliStdout(), "skip: %s (not in %s)\n", it.BinName, binDir)
+			fmt.Fprintf(out, "skip: %s (not in %s)\n", it.BinName, binDir)
 		default:
 			return fmt.Errorf("unknown reinstall action %q for %s", it.Action, it.BinName)
 		}
@@ -913,13 +962,43 @@ func executePlanItems(moduleRoot, binDir string, items []PlanItem, nReinstalled,
 	return nil
 }
 
-// runGoInModule runs `go <subcmd> <relPath>` with Dir=moduleRoot and inherited env
-// (including GOBIN). Streams child stdout/stderr to the process.
-func runGoInModule(moduleRoot, subcmd, relPath string) error {
+// runGoInModule runs `go <subcmd> <relPath>` with Dir=moduleRoot.
+// When binDir is set, child env gets GOBIN=binDir (no process Setenv).
+// Streams child stdout/stderr to out/errw.
+func runGoInModule(out, errw io.Writer, moduleRoot, subcmd, relPath, binDir string) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	cmd := exec.Command("go", subcmd, relPath)
 	cmd.Dir = moduleRoot
-	cmd.Stdout = cliStdout()
-	cmd.Stderr = cliStderr()
-	// Env is inherited (GOBIN, PATH, etc.) so installs land in the caller's bin dir.
+	cmd.Stdout = out
+	cmd.Stderr = errw
+	if strings.TrimSpace(binDir) != "" {
+		cmd.Env = envWithKey(os.Environ(), "GOBIN", binDir)
+	}
 	return cmd.Run()
+}
+
+// envWithKey returns env with KEY=value, replacing any existing KEY= entry.
+func envWithKey(env []string, key, value string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env)+1)
+	replaced := false
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			if !replaced {
+				out = append(out, prefix+value)
+				replaced = true
+			}
+			continue
+		}
+		out = append(out, e)
+	}
+	if !replaced {
+		out = append(out, prefix+value)
+	}
+	return out
 }

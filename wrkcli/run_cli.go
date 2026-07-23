@@ -23,6 +23,9 @@ type RunOptions struct {
 	Dir     string    // logical work dir (origWd); not os.Chdir
 	WrkHome string    // overrides WRK_HOME for this call only
 	WrkDate string    // overrides WRK_DATE for this call only
+	// Gobin overrides GOBIN for --reinstall-local only (no os.Setenv). Empty
+	// falls back to process GOBIN / $(go env GOPATH)/bin.
+	Gobin string
 
 	// Unsupported in-process (hard error). Prefer binary + cmd.Env/cmd.Dir.
 	Stdin       io.Reader
@@ -80,6 +83,7 @@ func RunWithOptions(args []string, opts RunOptions) error {
 	ctx.stderr = stderr
 	ctx.wrkHomeOverride = strings.TrimSpace(opts.WrkHome)
 	ctx.wrkDateOverride = strings.TrimSpace(opts.WrkDate)
+	ctx.gobinOverride = strings.TrimSpace(opts.Gobin)
 
 	var runErr error
 	defer func() {

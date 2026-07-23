@@ -388,7 +388,25 @@ func wrkDateForReq(req *Request) string {
 
 func Run(t *testing.T, req *Request) (*Response, error) {
 	args := append([]string(nil), req.Args...)
-	return runCLIWithEnv(t, req.ModuleRoot, req.WrkHome, args, reinstallLocalCLIEnv(req))
+	// ExtraEnv beyond GOBIN (e.g. NO_COLOR policy overrides) needs process isolation → L3.
+	// GOBIN itself is passed via RunOptions.Gobin (no os.Setenv; DOCTEST_LINT §1).
+	if len(req.ExtraEnv) > 0 {
+		return runCLIWithEnv(t, req.ModuleRoot, req.WrkHome, args, reinstallLocalCLIEnv(req))
+	}
+	var stdout, stderr bytes.Buffer
+	code := wrkcli.RunCLI(args, wrkcli.RunOptions{
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Dir:     req.ModuleRoot,
+		WrkHome: req.WrkHome,
+		WrkDate: wrkDateForReq(req),
+		Gobin:   req.BinDir,
+	})
+	return &Response{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		ExitCode: code,
+	}, nil
 }
 
 ```

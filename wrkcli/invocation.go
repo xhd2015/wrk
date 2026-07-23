@@ -24,6 +24,9 @@ type invocationContext struct {
 	stderr          io.Writer
 	wrkHomeOverride string
 	wrkDateOverride string
+	// gobinOverride, when set, is used as GOBIN for --reinstall-local without
+	// os.Setenv (parallel-safe L2 isolation). Empty → os.Getenv("GOBIN") / GOPATH/bin.
+	gobinOverride string
 }
 
 func newInvocationContext(origWd string, args []string) *invocationContext {

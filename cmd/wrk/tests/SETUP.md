@@ -722,7 +722,7 @@ func needsInProcessCaptureOK(req *Request) bool {
 		switch a {
 		case "--done", "--merge-back", "--dep", "--bring", "--all-deps",
 			"--cd", "--set-task",
-			"--scan-git-repos", "--reinstall-local", "--bash-integration",
+			"--bash-integration",
 			"--gen-commit-msg", "--new", "--dashboard":
 			return false
 		}
@@ -753,6 +753,8 @@ func needsInProcessCaptureOK(req *Request) bool {
 		case "--add", "--rm", "--remove":
 			return true
 		case "--set-config", "--skill":
+			return true
+		case "--scan-git-repos", "--reinstall-local":
 			return true
 		case "--version", "-h", "--help":
 			return true

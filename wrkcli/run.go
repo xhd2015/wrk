@@ -366,7 +366,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if err := ctx.autoRecord(); err != nil {
 			return err
 		}
-		return runScanGitRepos(wrkHome, remaining, noCache, includeWorktrees, verbose)
+		return runScanGitRepos(ctx.out(), ctx.errw(), wrkHome, remaining, noCache, includeWorktrees, verbose, origWd)
 	}
 
 	// --cd requires exactly one path positional before defaulting workDir to cwd.
@@ -795,7 +795,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// Bare / --main --reinstall-local before bare --main so compose does not open a nested shell.
 	// Multi-stage reinstall is handled by activeRoot pipeline below.
 	if reinstallLocal && !done && !mergeBack && !genCommitMsg && !syncFlag && !tagNext && !pushFlag && !propagateTags && !hasExec {
-		return runReinstallLocal(workDir, dryRun, mainFlag, colorFlag)
+		return runReinstallLocal(ctx.out(), ctx.errw(), workDir, dryRun, mainFlag, colorFlag, ctx.gobinOverride)
 	}
 	// --main with pipeline partners: rewrite activeRoot to main (no nested shell).
 	// Bare --main alone still opens a nested shell via runMain.
@@ -1194,7 +1194,13 @@ func envTruthy(s string) bool {
 // Empty CacheRoot uses the scan_repo product default (HOME/.cache/git-repo-scan).
 // verbose (from -v/--verbose) and truthy WRK_SCAN_DEBUG enable scan_repo Debug
 // plus greppable cache_base + filter lines on stderr.
-func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktrees bool, verbose bool) error {
+func runScanGitRepos(out, errw io.Writer, wrkHome string, roots []string, noCache bool, includeWorktrees bool, verbose bool, baseDir string) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	// Resolve home for default root and two-base mapping. Default root requires
 	// home to exist as a directory; mapping uses home only when available.
 	home, homeErr := os.UserHomeDir()
@@ -1215,10 +1221,10 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 		roots = []string{home}
 	}
 
-	// Normalize CLI roots for emit filter + debug mapping.
+	// Normalize CLI roots for emit filter + debug mapping (Dir-relative when baseDir set).
 	filterRoots := make([]string, 0, len(roots))
 	for _, r := range roots {
-		abs, absErr := filepath.Abs(r)
+		abs, absErr := absFromBase(baseDir, r)
 		if absErr != nil {
 			abs = r
 		}
@@ -1245,7 +1251,7 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 		}
 		for _, fr := range filterRoots {
 			cacheBase := scanCacheBaseForRoot(homeClean, fr)
-			fmt.Fprintf(cliStderr(), "scan: cache_base=%s filter=%s\n", cacheBase, fr)
+			fmt.Fprintf(errw, "scan: cache_base=%s filter=%s\n", cacheBase, fr)
 		}
 	}
 
@@ -1275,7 +1281,7 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 		Roots:   filterRoots,
 		NoCache: noCache,
 		Debug:   debug,
-		Stderr:  os.Stderr,
+		Stderr:  errw,
 		OnRepo: func(repo scan_repo.Repo) error {
 			if recordErr != nil {
 				return recordErr
@@ -1295,7 +1301,7 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 			}
 			// Always print each valid path at most once per run (known or new).
 			if !printed[path] {
-				fmt.Fprintln(cliStdout(), path)
+				fmt.Fprintln(out, path)
 				printed[path] = true
 			}
 			// Record only new main repos; worktrees are list-only.
@@ -1313,7 +1319,7 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			fmt.Fprintln(cliStderr(), "warning: scan interrupted; progress saved (cache and newly recorded projects)")
+			fmt.Fprintln(errw, "warning: scan interrupted; progress saved (cache and newly recorded projects)")
 			return ExitCodeError{Code: 130}
 		}
 		return err
@@ -1322,10 +1328,10 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 		return recordErr
 	}
 	if debug {
-		fmt.Fprintf(cliStderr(), "scan: record known=%d newly=%d\n", knownAtStart, newly)
+		fmt.Fprintf(errw, "scan: record known=%d newly=%d\n", knownAtStart, newly)
 	}
 	for _, re := range result.RootErrors {
-		fmt.Fprintf(cliStderr(), "warning: scan root %s: %s\n", re.Root, re.Error)
+		fmt.Fprintf(errw, "warning: scan root %s: %s\n", re.Root, re.Error)
 	}
 	return nil
 }
@@ -1639,8 +1645,8 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 	}
 	if withReinstallLocal {
 		blankBefore()
-		// Scan modules under activeRoot (already the checkout root).
-		if err := runReinstallLocal(activeRoot, dryRun, false, colorFlag); err != nil {
+		// Pipeline helper has no invocation ctx; use process streams (compose stays L3).
+		if err := runReinstallLocal(os.Stdout, os.Stderr, activeRoot, dryRun, false, colorFlag, ""); err != nil {
 			return err
 		}
 		printed = true
@@ -1813,7 +1819,8 @@ func runComposeReinstallLocal(result *worktree.MergeBackResult, withReinstallLoc
 	}
 	fmt.Fprintln(cliStdout()) // blank line before reinstall stage
 	// Scan main tip after merge (useMain equivalent from main path).
-	err := runReinstallLocal(mainPath, dryRun, true, colorFlag)
+	// Compose stays on process streams (L3 binary).
+	err := runReinstallLocal(os.Stdout, os.Stderr, mainPath, dryRun, true, colorFlag, "")
 	if err == nil {
 		return nil
 	}
