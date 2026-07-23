@@ -2,11 +2,16 @@ package wrkcli
 
 import (
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/xhd2015/wrk/wrkcli/storage"
 )
 
-func runWhere(wrkHome, basename string) error {
+func runWhere(out io.Writer, wrkHome, basename string) error {
+	if out == nil {
+		out = os.Stdout
+	}
 	if !isBasename(basename) {
 		return fmt.Errorf("wrk: --where requires a basename-only argument")
 	}
@@ -18,10 +23,10 @@ func runWhere(wrkHome, basename string) error {
 	case 0:
 		return fmt.Errorf("wrk: no saved project for basename %q", basename)
 	case 1:
-		fmt.Fprintln(cliStdout(), matches[0])
+		fmt.Fprintln(out, matches[0])
 	default:
 		for _, p := range matches {
-			fmt.Fprintln(cliStdout(), p)
+			fmt.Fprintln(out, p)
 		}
 	}
 	return nil

@@ -2,6 +2,8 @@ package wrkcli
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -10,7 +12,7 @@ import (
 
 // runBarePush implements wrk --push [--dry-run]: push the current checkout's
 // branch (option R — ShowToplevel of cwd, not always main).
-func runBarePush(workDir string, dryRun bool) error {
+func runBarePush(out io.Writer, workDir string, dryRun bool) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -22,21 +24,24 @@ func runBarePush(workDir string, dryRun bool) error {
 	if err != nil {
 		return fmt.Errorf("%s is not a git repository", cwd)
 	}
-	return runPushMain(checkoutRoot, dryRun, nil)
+	return runPushMain(out, checkoutRoot, dryRun, nil)
 }
 
 // runPushMain pushes the current branch of mainRepo to its upstream remote
 // (preferred) or origin + branch name (fallback). When tags is non-empty,
 // also pushes those tag refs to the same remote. dryRun prints would: lines
 // only and does not push. Human confirmation / would: lines are printed on stdout.
-func runPushMain(mainRepo string, dryRun bool, tags []string) error {
-	return runPushMainWithOutput(mainRepo, dryRun, tags, true)
+func runPushMain(out io.Writer, mainRepo string, dryRun bool, tags []string) error {
+	return runPushMainWithOutput(out, mainRepo, dryRun, tags, true)
 }
 
 // runPushMainWithOutput is like runPushMain. When printOutput is false (e.g.
 // --tag-next --push --json), git push still runs but stdout stays clean of
 // human would:/pushed lines so JSON output is not mixed with confirmations.
-func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOutput bool) error {
+func runPushMainWithOutput(out io.Writer, mainRepo string, dryRun bool, tags []string, printOutput bool) error {
+	if out == nil {
+		out = os.Stdout
+	}
 	branch, err := gitOutputDir(mainRepo, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return fmt.Errorf("wrk: resolve current branch for push: %w", err)
@@ -55,9 +60,9 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 			remote = "origin"
 			remoteBranch = branch
 			if printOutput {
-				fmt.Fprintf(cliStdout(), "would: git push %s %s\n", remote, branch)
+				fmt.Fprintf(out, "would: git push %s %s\n", remote, branch)
 				for _, tag := range tags {
-					fmt.Fprintf(cliStdout(), "would: git push %s %s\n", remote, tag)
+					fmt.Fprintf(out, "would: git push %s %s\n", remote, tag)
 				}
 			}
 			return nil
@@ -67,16 +72,16 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 
 	if dryRun {
 		if printOutput {
-			fmt.Fprintf(cliStdout(), "would: git push %s %s\n", remote, branch)
+			fmt.Fprintf(out, "would: git push %s %s\n", remote, branch)
 			for _, tag := range tags {
-				fmt.Fprintf(cliStdout(), "would: git push %s %s\n", remote, tag)
+				fmt.Fprintf(out, "would: git push %s %s\n", remote, tag)
 			}
 		}
 		return nil
 	}
 
-	if out, err := gitCombinedRunDir(mainRepo, nil, "push", remote, branch); err != nil {
-		msg := strings.TrimSpace(string(out))
+	if outb, err := gitCombinedRunDir(mainRepo, nil, "push", remote, branch); err != nil {
+		msg := strings.TrimSpace(string(outb))
 		if msg != "" {
 			return fmt.Errorf("wrk: git push %s %s failed: %s", remote, branch, msg)
 		}
@@ -84,8 +89,8 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 	}
 
 	for _, tag := range tags {
-		if out, err := gitCombinedRunDir(mainRepo, nil, "push", remote, tag); err != nil {
-			msg := strings.TrimSpace(string(out))
+		if outb, err := gitCombinedRunDir(mainRepo, nil, "push", remote, tag); err != nil {
+			msg := strings.TrimSpace(string(outb))
 			if msg != "" {
 				return fmt.Errorf("wrk: git push %s %s failed: %s", remote, tag, msg)
 			}
@@ -94,7 +99,7 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 	}
 
 	if printOutput {
-		fmt.Fprintf(cliStdout(), "pushed %s → %s/%s\n", branch, remote, remoteBranch)
+		fmt.Fprintf(out, "pushed %s → %s/%s\n", branch, remote, remoteBranch)
 	}
 	return nil
 }

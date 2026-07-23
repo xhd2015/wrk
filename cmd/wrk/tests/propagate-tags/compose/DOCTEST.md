@@ -149,7 +149,24 @@ func wrkDateForReq(req *Request) string {
 
 func Run(t *testing.T, req *Request) (*Response, error) {
 	args := append([]string(nil), req.Args...)
-	return runCLIWithEnv(t, req.RepoDir, req.WrkHome, args, composeWrkEnv(req))
+	// ExtraEnv (e.g. file:// GOPROXY) requires process isolation → L3 binary.
+	if len(req.ExtraEnv) > 0 {
+		return runCLIWithEnv(t, req.RepoDir, req.WrkHome, args, composeWrkEnv(req))
+	}
+	// L2 in-process: WrkHome/Dir only (no ExtraEnv/Setenv/Chdir).
+	var stdout, stderr bytes.Buffer
+	code := wrkcli.RunCLI(args, wrkcli.RunOptions{
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Dir:     req.RepoDir,
+		WrkHome: req.WrkHome,
+		WrkDate: wrkDateForReq(req),
+	})
+	return &Response{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		ExitCode: code,
+	}, nil
 }
 
 

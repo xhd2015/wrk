@@ -764,7 +764,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	if projects {
 		colorEnabled := term.IsTerminal(int(os.Stdout.Fd())) || colorFlag
-		return runProjects(wrkHome, colorEnabled, fetchFlag, githubFlag)
+		return runProjects(ctx.out(), wrkHome, colorEnabled, fetchFlag, githubFlag)
 	}
 	if projectsDepGraph {
 		return runProjectsDepGraph(wrkHome, ctx)
@@ -776,7 +776,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runRemove(wrkHome, *removePath)
 	}
 	if whereFlagSet {
-		return runWhere(wrkHome, *wherePath)
+		return runWhere(ctx.out(), wrkHome, *wherePath)
 	}
 	if status {
 		colorEnabled := term.IsTerminal(int(os.Stdout.Fd())) || colorFlag
@@ -889,9 +889,13 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if hasExec {
 			stageN++
 		}
-		// tag-next + push [+json] stays on the dedicated bare path (json-clean stdout).
-		bareTagPushJSON := tagNext && pushFlag && jsonFlag && stageN == 2
-		if stageN > 1 && !bareTagPushJSON {
+		// Pure tag-family multi-stage (tag-next / push / propagate-tags only) stays on
+		// the dedicated bare paths that write via ctx.out()/errw (L2-capturable).
+		// Pipeline is for gen-commit / sync / reinstall / exec compose on active root
+		// (still process streams until those helpers are threaded).
+		bareTagFamily := !genCommitMsg && !syncFlag && !reinstallLocal && !hasExec &&
+			(tagNext || pushFlag || propagateTags)
+		if stageN > 1 && !bareTagFamily {
 			return runActiveRootPipeline(workDir, wrkHome, genCommitMsg, genCommitArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag, execArgs)
 		}
 	}
@@ -901,7 +905,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if err := requireMainActiveRoot(workDir, "--tag-next"); err != nil {
 			return err
 		}
-		return runTagNextPropagateCompose(workDir, wrkHome, dryRun, pushFlag)
+		return runTagNextPropagateCompose(ctx.out(), ctx.errw(), workDir, wrkHome, dryRun, pushFlag)
 	}
 	if tagNext {
 		if err := requireMainActiveRoot(workDir, "--tag-next"); err != nil {
@@ -909,7 +913,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		}
 		// Create tags locally only; push (if any) is via runPushMain with tag list
 		// so branch + tags are published (not tagscope tags-only push).
-		tagRes, err := runTagNextAtResult(workDir, "HEAD", dryRun, false, jsonFlag)
+		tagRes, err := runTagNextAtResult(ctx.out(), workDir, "HEAD", dryRun, false, jsonFlag)
 		if err != nil {
 			return err
 		}
@@ -918,22 +922,22 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 				fmt.Fprintln(ctx.out()) // blank line between tag-next block and push confirm
 			}
 			// With --json: still push branch+tags, but keep stdout JSON-clean.
-			if err := runPushMainWithOutput(tagRes.MainRepo, dryRun, tagRes.Tags, !jsonFlag); err != nil {
+			if err := runPushMainWithOutput(ctx.out(), tagRes.MainRepo, dryRun, tagRes.Tags, !jsonFlag); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 	if propagateTags {
-		return runPropagateTags(workDir, wrkHome, dryRun)
+		return runPropagateTags(ctx.out(), ctx.errw(), workDir, wrkHome, dryRun)
 	}
 	if syncFlag {
-		return runSync(workDir, dryRun)
+		return runSync(ctx.out(), ctx.errw(), workDir, dryRun)
 	}
 	// Bare --push: option R — push current checkout branch (linked worktree →
 	// that worktree's branch; main → main's branch).
 	if pushFlag {
-		return runBarePush(workDir, dryRun)
+		return runBarePush(ctx.out(), workDir, dryRun)
 	}
 	task := ""
 	if taskDesc != nil {
@@ -1099,7 +1103,10 @@ Environment:
 `
 }
 
-func runProjects(wrkHome string, colorEnabled bool, fetchEnabled bool, githubOnly bool) error {
+func runProjects(out io.Writer, wrkHome string, colorEnabled bool, fetchEnabled bool, githubOnly bool) error {
+	if out == nil {
+		out = os.Stdout
+	}
 	endPerf := beginProjectsPerfRun()
 	defer endPerf()
 
@@ -1123,9 +1130,9 @@ func runProjects(wrkHome string, colorEnabled bool, fetchEnabled bool, githubOnl
 	flush := func() {
 		for nextPrint < len(paths) && done[nextPrint] {
 			if printedAny {
-				fmt.Fprintln(cliStdout())
+				fmt.Fprintln(out)
 			}
-			printProjectStatusFromData(results[nextPrint], colorEnabled)
+			printProjectStatusFromData(out, results[nextPrint], colorEnabled)
 			printedAny = true
 			nextPrint++
 		}
@@ -1551,7 +1558,8 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 	}
 	if withSync {
 		blankBefore()
-		if err := runSync(activeRoot, dryRun); err != nil {
+		// Pipeline helper has no invocation ctx; use process streams (compose stays L3 binary).
+		if err := runSync(os.Stdout, os.Stderr, activeRoot, dryRun); err != nil {
 			return err
 		}
 		printed = true
@@ -1561,7 +1569,8 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 	var tagPlan tagscope.ChangePlan
 	if withTagNext {
 		blankBefore()
-		tagRes, err := runTagNextAtResult(activeRoot, "HEAD", dryRun, false, false)
+		// Pipeline helper has no invocation ctx; use process streams (compose stays L3 binary).
+		tagRes, err := runTagNextAtResult(os.Stdout, activeRoot, "HEAD", dryRun, false, false)
 		if err != nil {
 			return err
 		}
@@ -1575,7 +1584,7 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 		if withTagNext {
 			tags = createdTags
 		}
-		if err := runPushMain(activeRoot, dryRun, tags); err != nil {
+		if err := runPushMain(os.Stdout, activeRoot, dryRun, tags); err != nil {
 			return err
 		}
 		printed = true
@@ -1593,7 +1602,7 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 				return fmt.Errorf("wrk: no usable release tags for source modules")
 			}
 		}
-		if err := runPropagateTagsWithReleases(activeRoot, wrkHome, dryRun, releaseOverride); err != nil {
+		if err := runPropagateTagsWithReleases(os.Stdout, os.Stderr, activeRoot, wrkHome, dryRun, releaseOverride); err != nil {
 			return err
 		}
 		printed = true
@@ -1827,7 +1836,7 @@ func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome 
 	var tagPlan tagscope.ChangePlan
 	if withSync {
 		fmt.Fprintln(cliStdout()) // blank line between primary message and sync block
-		if err := runSyncOpts(mainPath, syncOpts{
+		if err := runSyncOpts(os.Stdout, os.Stderr, mainPath, syncOpts{
 			DryRun:        dryRun,
 			PretendMainAt: pretendMainAt,
 		}); err != nil {
@@ -1839,7 +1848,8 @@ func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome 
 		// Create tags locally only; push (if any) is via runPushMain with tag list.
 		// Dry-run plans against would-be tip; real apply uses main HEAD post-merge.
 		// Keep full result so dry-run can thread planned next tags into propagate.
-		tagRes, err := runTagNextAtResult(mainPath, headRef, dryRun, false, false)
+		// Pipeline compose stays on process streams (L3 binary).
+		tagRes, err := runTagNextAtResult(os.Stdout, mainPath, headRef, dryRun, false, false)
 		if err != nil {
 			return err
 		}
@@ -1852,7 +1862,7 @@ func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome 
 		if withTagNext {
 			tags = createdTags
 		}
-		if err := runPushMain(mainPath, dryRun, tags); err != nil {
+		if err := runPushMain(os.Stdout, mainPath, dryRun, tags); err != nil {
 			return err
 		}
 	}
@@ -1874,7 +1884,7 @@ func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome 
 		}
 		// Apply (or dry-run without tag-next): resolve existing source tags.
 		// Apply after tag-next sees newly created tags on main.
-		if err := runPropagateTagsWithReleases(mainPath, wrkHome, dryRun, releaseOverride); err != nil {
+		if err := runPropagateTagsWithReleases(os.Stdout, os.Stderr, mainPath, wrkHome, dryRun, releaseOverride); err != nil {
 			return err
 		}
 	}

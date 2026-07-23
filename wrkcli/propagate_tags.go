@@ -2,6 +2,7 @@ package wrkcli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,14 +45,20 @@ type plannedConsumerUpdate struct {
 // replaces, edits requires to release versions, runs go mod tidy, then gates
 // on go build ./... per updated module and commits go.mod/go.sum when all
 // modules in a consumer project build cleanly.
-func runPropagateTags(workDir, wrkHome string, dryRun bool) error {
-	return runPropagateTagsWithReleases(workDir, wrkHome, dryRun, nil)
+func runPropagateTags(out, errw io.Writer, workDir, wrkHome string, dryRun bool) error {
+	return runPropagateTagsWithReleases(out, errw, workDir, wrkHome, dryRun, nil)
 }
 
 // runPropagateTagsWithReleases is like runPropagateTags but, when releaseOverride
 // is non-nil, uses that release set instead of ResolveSourceReleases (compose
 // dry-run threads planned next tags that do not exist yet).
-func runPropagateTagsWithReleases(workDir, wrkHome string, dryRun bool, releaseOverride []SourceRelease) error {
+func runPropagateTagsWithReleases(out, errw io.Writer, workDir, wrkHome string, dryRun bool, releaseOverride []SourceRelease) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -85,7 +92,7 @@ func runPropagateTagsWithReleases(workDir, wrkHome string, dryRun bool, releaseO
 		return err
 	}
 	for _, p := range inv.SkippedPaths {
-		fmt.Fprintf(cliStderr(), "warning: project path does not exist: %s\n", p)
+		fmt.Fprintf(errw, "warning: project path does not exist: %s\n", p)
 	}
 
 	var updates []plannedConsumerUpdate
@@ -162,11 +169,11 @@ func runPropagateTagsWithReleases(workDir, wrkHome string, dryRun bool, releaseO
 	}
 
 	if !dryRun {
-		if err := applyPropagateTags(updates); err != nil {
+		if err := applyPropagateTags(errw, updates); err != nil {
 			return err
 		}
 	}
-	fmt.Fprint(cliStdout(), formatPropagateTagsPlan(sourceMain, sourceReleases, updates, dryRun))
+	fmt.Fprint(out, formatPropagateTagsPlan(sourceMain, sourceReleases, updates, dryRun))
 	return nil
 }
 
@@ -175,7 +182,10 @@ func runPropagateTagsWithReleases(workDir, wrkHome string, dryRun bool, releaseO
 // per module. On full project build success, stages only go.mod/go.sum under
 // edited module dirs and creates one chore(deps) commit per project. Build
 // failures are soft: warning on stderr, no commit, continue (overall exit 0).
-func applyPropagateTags(updates []plannedConsumerUpdate) error {
+func applyPropagateTags(errw io.Writer, updates []plannedConsumerUpdate) error {
+	if errw == nil {
+		errw = os.Stderr
+	}
 	for i := range updates {
 		u := &updates[i]
 		opts := &commands.GoModEditOptions{Dir: u.ModuleDir, Stderr: false, Stdout: false}
@@ -215,7 +225,7 @@ func applyPropagateTags(updates []plannedConsumerUpdate) error {
 		for _, i := range g.idxs {
 			if err := goBuildAll(updates[i].ModuleDir); err != nil {
 				allOK = false
-				fmt.Fprintf(cliStderr(), "warning: go build ./... failed for project %s (%s): %v\n",
+				fmt.Fprintf(errw, "warning: go build ./... failed for project %s (%s): %v\n",
 					updates[i].ProjectBase, updates[i].ModuleDir, err)
 				break
 			}

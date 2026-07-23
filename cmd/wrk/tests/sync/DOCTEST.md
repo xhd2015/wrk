@@ -230,8 +230,21 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 			IsWip: wrkcli.IsWipSubject(req.Subject),
 		}, nil
 	}
+	// L2 in-process: only WrkHome/Dir overrides (no ExtraEnv/Setenv/Chdir).
 	args := buildSyncCLIArgs(req)
-	return runCLIWithEnv(t, req.RepoDir, req.WrkHome, args, syncWrkEnv(req))
+	var stdout, stderr bytes.Buffer
+	code := wrkcli.RunCLI(args, wrkcli.RunOptions{
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Dir:     req.RepoDir,
+		WrkHome: req.WrkHome,
+		WrkDate: wrkDateForReq(req),
+	})
+	return &Response{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		ExitCode: code,
+	}, nil
 }
 
 

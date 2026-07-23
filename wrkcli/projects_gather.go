@@ -1,6 +1,7 @@
 package wrkcli
 
 import (
+	"io"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -410,32 +411,35 @@ func gitCommitShortSubject(repoPath string) (short, subject string, err error) {
 	return out, "", nil
 }
 
-func printProjectStatusFromData(data projectStatusData, colorEnabled bool) {
+func printProjectStatusFromData(out io.Writer, data projectStatusData, colorEnabled bool) {
+	if out == nil {
+		out = os.Stdout
+	}
 	if data.mainRepoError != "" {
-		fmt.Fprintf(cliStdout(), "Dir:          %s\n", data.mainRepoPath)
+		fmt.Fprintf(out, "Dir:          %s\n", data.mainRepoPath)
 		statusVal := "error: " + data.mainRepoError
 		if colorEnabled {
 			statusVal = colorize(statusVal, ansiRed)
 		}
-		fmt.Fprintf(cliStdout(), "Status:       %s\n", statusVal)
+		fmt.Fprintf(out, "Status:       %s\n", statusVal)
 		return
 	}
 
-	fmt.Fprintf(cliStdout(), "Dir:          %s\n", data.mainRepoPath)
-	fmt.Fprintf(cliStdout(), "Branch:       %s\n", data.branch)
-	fmt.Fprintf(cliStdout(), "Commit:       %s  %s\n", data.short, data.subject)
+	fmt.Fprintf(out, "Dir:          %s\n", data.mainRepoPath)
+	fmt.Fprintf(out, "Branch:       %s\n", data.branch)
+	fmt.Fprintf(out, "Commit:       %s  %s\n", data.short, data.subject)
 	statusLine := formatStatusCounts(data.counts, colorEnabled, false)
-	fmt.Fprintf(cliStdout(), "Status:       %s\n", statusLine)
-	fmt.Fprintln(cliStdout(), data.remoteLine)
+	fmt.Fprintf(out, "Status:       %s\n", statusLine)
+	fmt.Fprintln(out, data.remoteLine)
 	if len(data.errorDetails) > 0 {
-		fmt.Fprintf(cliStdout(), "Worktrees:    %s\n", data.worktreeSummary)
+		fmt.Fprintf(out, "Worktrees:    %s\n", data.worktreeSummary)
 		for _, detail := range data.errorDetails {
 			line := formatWorktreeErrorDetailLine(detail.path, detail.msg, colorEnabled)
-			fmt.Fprintf(cliStdout(), "%s\n", line)
+			fmt.Fprintf(out, "%s\n", line)
 		}
 		return
 	}
-	fmt.Fprintf(cliStdout(), "Worktrees:    %s\n", data.worktreeSummary)
+	fmt.Fprintf(out, "Worktrees:    %s\n", data.worktreeSummary)
 }
 
 func formatWorktreeErrorDetailLine(path, msg string, colorEnabled bool) string {
@@ -446,12 +450,15 @@ func formatWorktreeErrorDetailLine(path, msg string, colorEnabled bool) string {
 	return fmt.Sprintf("  %s  %s", path, errVal)
 }
 
-func printProjectStatusBlock(mainRepoPath string, colorEnabled bool, fetchEnabled bool) error {
+func printProjectStatusBlock(out io.Writer, mainRepoPath string, colorEnabled bool, fetchEnabled bool) error {
+	if out == nil {
+		out = os.Stdout
+	}
 	data, err := gatherProjectStatus(mainRepoPath, colorEnabled, fetchEnabled)
 	if err != nil {
 		return err
 	}
-	printProjectStatusFromData(data, colorEnabled)
+	printProjectStatusFromData(out, data, colorEnabled)
 	return nil
 }
 

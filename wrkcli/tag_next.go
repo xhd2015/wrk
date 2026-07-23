@@ -2,6 +2,8 @@ package wrkcli
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -24,8 +26,8 @@ type tagNextResult struct {
 // repo. Returns created tag names (or planned names on dry-run). The push
 // parameter is passed to tagscope.Apply; bare --tag-next --push and pipeline
 // composition pass push=false and publish branch+tags via runPushMain instead.
-func runTagNext(workDir string, dryRun, push, jsonOut bool) ([]string, error) {
-	res, err := runTagNextAtResult(workDir, "HEAD", dryRun, push, jsonOut)
+func runTagNext(out io.Writer, workDir string, dryRun, push, jsonOut bool) ([]string, error) {
+	res, err := runTagNextAtResult(out, workDir, "HEAD", dryRun, push, jsonOut)
 	if err != nil {
 		return nil, err
 	}
@@ -35,8 +37,8 @@ func runTagNext(workDir string, dryRun, push, jsonOut bool) ([]string, error) {
 // runTagNextAt is like runTagNext but plans/applies tags at headRef (commit or
 // symbolic ref). Composition dry-run passes the would-be main tip after a
 // planned merge so tag planning is not stuck on stale main HEAD.
-func runTagNextAt(workDir, headRef string, dryRun, push, jsonOut bool) ([]string, error) {
-	res, err := runTagNextAtResult(workDir, headRef, dryRun, push, jsonOut)
+func runTagNextAt(out io.Writer, workDir, headRef string, dryRun, push, jsonOut bool) ([]string, error) {
+	res, err := runTagNextAtResult(out, workDir, headRef, dryRun, push, jsonOut)
 	if err != nil {
 		return nil, err
 	}
@@ -45,22 +47,25 @@ func runTagNextAt(workDir, headRef string, dryRun, push, jsonOut bool) ([]string
 
 // runTagNextAtResult is the full tag-next outcome including the plan for
 // composition with --propagate-tags dry-run (planned next releases).
-func runTagNextAtResult(workDir, headRef string, dryRun, push, jsonOut bool) (tagNextResult, error) {
-	var out tagNextResult
+func runTagNextAtResult(out io.Writer, workDir, headRef string, dryRun, push, jsonOut bool) (tagNextResult, error) {
+	if out == nil {
+		out = os.Stdout
+	}
+	var resultOut tagNextResult
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
-		return out, fmt.Errorf("resolve cwd: %w", err)
+		return resultOut, fmt.Errorf("resolve cwd: %w", err)
 	}
 
 	if !worktree.IsInsideWorkTree(cwd) {
-		return out, fmt.Errorf("%s is not a git repository", cwd)
+		return resultOut, fmt.Errorf("%s is not a git repository", cwd)
 	}
 
 	mainRepo, err := resolveMainRepoForWorkDir(cwd)
 	if err != nil {
-		return out, err
+		return resultOut, err
 	}
-	out.MainRepo = mainRepo
+	resultOut.MainRepo = mainRepo
 
 	if headRef == "" {
 		headRef = "HEAD"
@@ -68,30 +73,30 @@ func runTagNextAtResult(workDir, headRef string, dryRun, push, jsonOut bool) (ta
 
 	plan, collected, err := tagscope.Plan(mainRepo, headRef)
 	if err != nil {
-		return out, err
+		return resultOut, err
 	}
-	out.Plan = plan
+	resultOut.Plan = plan
 
 	result, err := tagscope.Apply(mainRepo, plan, headRef, tagscope.ApplyOptions{
 		DryRun: dryRun,
 		Push:   push,
 	})
 	if err != nil {
-		return out, err
+		return resultOut, err
 	}
 
 	if jsonOut {
 		formatted, err := tagscope.FormatPlanJSON(plan, collected, dryRun, len(result.Created))
 		if err != nil {
-			return out, err
+			return resultOut, err
 		}
-		fmt.Fprint(cliStdout(), formatted)
+		fmt.Fprint(out, formatted)
 		if dryRun {
-			out.Tags = plannedTagNames(plan)
-			return out, nil
+			resultOut.Tags = plannedTagNames(plan)
+			return resultOut, nil
 		}
-		out.Tags = result.Created
-		return out, nil
+		resultOut.Tags = result.Created
+		return resultOut, nil
 	}
 
 	var b strings.Builder
@@ -99,20 +104,20 @@ func runTagNextAtResult(workDir, headRef string, dryRun, push, jsonOut bool) (ta
 	if !dryRun && len(result.Created) > 0 {
 		tagged, err := tagscope.FormatTaggedLines(mainRepo, headRef, result.Created)
 		if err != nil {
-			return out, err
+			return resultOut, err
 		}
 		b.WriteString(tagged)
 	}
 	b.WriteString(tagscope.FormatPlanSummary(plan, dryRun))
 	b.WriteByte('\n')
-	fmt.Fprint(cliStdout(), b.String())
+	fmt.Fprint(out, b.String())
 	if dryRun {
 		// Return planned names so composition --push --dry-run can list would: tag pushes.
-		out.Tags = plannedTagNames(plan)
-		return out, nil
+		resultOut.Tags = plannedTagNames(plan)
+		return resultOut, nil
 	}
-	out.Tags = result.Created
-	return out, nil
+	resultOut.Tags = result.Created
+	return resultOut, nil
 }
 
 func plannedTagNames(plan tagscope.ChangePlan) []string {
@@ -131,21 +136,27 @@ func plannedTagNames(plan tagscope.ChangePlan) []string {
 //
 // Flag order is free; stage order is fixed. --json is rejected at the flag layer.
 // Matches done-pipeline: tags created locally, then runPushMain for branch+tags.
-func runTagNextPropagateCompose(workDir, wrkHome string, dryRun, push bool) error {
+func runTagNextPropagateCompose(out, errw io.Writer, workDir, wrkHome string, dryRun, push bool) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	// Create tags locally only; push (if any) is via runPushMain with tag list.
-	tagRes, err := runTagNextAtResult(workDir, "HEAD", dryRun, false, false)
+	tagRes, err := runTagNextAtResult(out, workDir, "HEAD", dryRun, false, false)
 	if err != nil {
 		return err
 	}
 
 	if push {
-		fmt.Fprintln(cliStdout()) // blank line before push confirmation
-		if err := runPushMain(tagRes.MainRepo, dryRun, tagRes.Tags); err != nil {
+		fmt.Fprintln(out) // blank line before push confirmation
+		if err := runPushMain(out, tagRes.MainRepo, dryRun, tagRes.Tags); err != nil {
 			return err
 		}
 	}
 
-	fmt.Fprintln(cliStdout()) // blank line between major stages
+	fmt.Fprintln(out) // blank line between major stages
 
 	var releaseOverride []SourceRelease
 	if dryRun {
@@ -160,7 +171,7 @@ func runTagNextPropagateCompose(workDir, wrkHome string, dryRun, push bool) erro
 			return fmt.Errorf("wrk: no usable release tags for source modules")
 		}
 	}
-	return runPropagateTagsWithReleases(workDir, wrkHome, dryRun, releaseOverride)
+	return runPropagateTagsWithReleases(out, errw, workDir, wrkHome, dryRun, releaseOverride)
 }
 
 // applyPlannedTagsToReleases overlays tagscope planned NextTag values onto the

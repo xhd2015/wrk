@@ -700,8 +700,9 @@ func needsProcessIsolation(req *Request) bool {
 }
 
 // needsInProcessCaptureOK is true when the leaf's args are modes whose product
-// paths write via ctx.out() (parallel-safe in-process capture). Expand as more
-// printers are threaded off process streams.
+// paths write via ctx.out()/errw (parallel-safe in-process capture).
+// Compose primaries (done/merge-back/pipelines) and other unthreaded modes stay
+// on the binary even if they also pass a capture-safe modifier (e.g. --sync).
 func needsInProcessCaptureOK(req *Request) bool {
 	args := buildWrkCLIArgs(req)
 	// Empty args = dashboard (still process stdout until dashboard is threaded).
@@ -715,10 +716,26 @@ func needsInProcessCaptureOK(req *Request) bool {
 			return false
 		}
 	}
-	// Modes known to print via ctx.out() after status/list/repos writer threading.
+	// Isolation-heavy or still-process-stream primaries → binary (L3).
+	// Presence of any of these wins over capture-safe modifiers below.
+	for _, a := range args {
+		switch a {
+		case "--done", "--merge-back", "--dep", "--bring", "--all-deps",
+			"--add", "--rm", "--remove", "--cd", "--set-task", "--set-config",
+			"--scan-git-repos", "--reinstall-local", "--bash-integration",
+			"--skill", "--gen-commit-msg", "--new", "--dashboard":
+			return false
+		}
+	}
+	// Pure modes known to print via ctx.out()/errw (and free modifiers like
+	// --dry-run/--json/--color/--fetch/--push with tag-next compose).
 	for _, a := range args {
 		switch a {
 		case "--status", "--repos", "--list":
+			return true
+		case "--sync", "--projects", "--where":
+			return true
+		case "--tag-next", "--propagate-tags", "--push":
 			return true
 		case "--version", "-h", "--help":
 			return true
