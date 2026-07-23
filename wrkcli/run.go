@@ -820,7 +820,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		// Fall through to activeRoot pipeline / bare stage handlers with main as workDir.
 	}
 	if cd {
-		return runCd(workDir, execArgs)
+		return runCd(ctx.out(), ctx.errw(), workDir, execArgs, ctx.followupFileOverride)
 	}
 	if repos {
 		return runRepos(ctx.out(), workDir)
@@ -1762,7 +1762,7 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 		return err
 	}
 	if forceCd {
-		if err := forceLandInDir(result.TargetPath); err != nil {
+		if err := forceLandInDir(os.Stderr, result.TargetPath, ""); err != nil {
 			return err
 		}
 	} else if err := writeFollowupCDIfCwdMissing(noCd, shellCwd, result.TargetPath); err != nil {
@@ -2864,7 +2864,7 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 	// --force-cd always lands parent; otherwise skip home-gated auto-cd when
 	// create already opens agent and/or terminal (parent need not cd).
 	if forceCd {
-		return forceLandInDir(result.Path)
+		return forceLandInDir(os.Stderr, result.Path, "")
 	}
 	if ux.agent || ux.terminalMode != "" {
 		return nil
@@ -2903,7 +2903,7 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 				return err
 			}
 			if forceCd {
-				return forceLandInDir(absPath)
+				return forceLandInDir(os.Stderr, absPath, "")
 			}
 			return nil
 		}
@@ -2979,7 +2979,7 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 				return err
 			}
 			if forceCd {
-				return forceLandInDir(absPath)
+				return forceLandInDir(os.Stderr, absPath, "")
 			}
 			return nil
 		}
@@ -3034,7 +3034,7 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 			return err
 		}
 		if forceCd {
-			return forceLandInDir(absPath)
+			return forceLandInDir(os.Stderr, absPath, "")
 		}
 		return nil
 	}
@@ -3457,7 +3457,7 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 	// shell cwd is gone (user was inside the moved worktree). Surviving
 	// sibling/main stays put without --force-cd.
 	if forceCd {
-		return forceLandInDir(newPath)
+		return forceLandInDir(os.Stderr, newPath, "")
 	}
 	if pathChanges {
 		return writeFollowupCDIfCwdMissing(noCd, shellCwd, newPath)

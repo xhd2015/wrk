@@ -684,9 +684,8 @@ func needsProcessIsolation(req *Request) bool {
 	if req.FakeHome != "" || req.UseMinimalPath {
 		return true
 	}
-	if req.UseFollowupEnv || req.FollowupFile != "" {
-		return true
-	}
+	// FollowupFile is passed via RunOptions.FollowupFile (L2); do not force binary.
+	// UseFollowupEnv alone without FakeShell still uses option when dual-mode.
 	if req.SetTaskEnv != "" || req.BasenameEnv != "" {
 		return true
 	}
@@ -721,9 +720,9 @@ func needsInProcessCaptureOK(req *Request) bool {
 	for _, a := range args {
 		switch a {
 		case "--done", "--merge-back", "--dep", "--bring", "--all-deps",
-			"--cd", "--set-task",
+			"--set-task",
 			"--bash-integration",
-			"--gen-commit-msg", "--new", "--dashboard":
+			"--new", "--dashboard":
 			return false
 		}
 	}
@@ -740,6 +739,25 @@ func needsInProcessCaptureOK(req *Request) bool {
 	if hasSkill && skillInstall {
 		return false
 	}
+	// --gen-commit-msg multi-stage compose still uses process streams in
+	// activeRoot pipeline (sync/done/etc.) → keep binary until pipeline is threaded.
+	hasGenCommit := false
+	for _, a := range args {
+		if a == "--gen-commit-msg" {
+			hasGenCommit = true
+			break
+		}
+	}
+	if hasGenCommit {
+		for _, a := range args {
+			switch a {
+			case "--sync", "--done", "--merge-back", "--tag-next", "--push",
+				"--propagate-tags", "--reinstall-local":
+				return false
+			}
+		}
+	}
+
 	// Pure modes known to print via ctx.out()/errw (and free modifiers like
 	// --dry-run/--json/--color/--fetch/--push with tag-next compose).
 	for _, a := range args {
@@ -755,6 +773,8 @@ func needsInProcessCaptureOK(req *Request) bool {
 		case "--set-config", "--skill":
 			return true
 		case "--scan-git-repos", "--reinstall-local":
+			return true
+		case "--cd", "--gen-commit-msg":
 			return true
 		case "--version", "-h", "--help":
 			return true
@@ -792,11 +812,12 @@ func runWrkInProcess(t *testing.T, req *Request, args []string) (*Response, erro
 	}
 	var stdout, stderr bytes.Buffer
 	opts := wrkcli.RunOptions{
-		Stdout:  &stdout,
-		Stderr:  &stderr,
-		Dir:     req.RepoDir,
-		WrkHome: req.WrkHome,
-		WrkDate: wrkDate,
+		Stdout:       &stdout,
+		Stderr:       &stderr,
+		Dir:          req.RepoDir,
+		WrkHome:      req.WrkHome,
+		WrkDate:      wrkDate,
+		FollowupFile: req.FollowupFile,
 	}
 	code := wrkcli.RunCLI(args, opts)
 	return &Response{

@@ -26,6 +26,9 @@ type RunOptions struct {
 	// Gobin overrides GOBIN for --reinstall-local only (no os.Setenv). Empty
 	// falls back to process GOBIN / $(go env GOPATH)/bin.
 	Gobin string
+	// FollowupFile overrides WRK_FOLLOWUP_FILE for --cd / force-cd land paths
+	// without os.Setenv (parallel-safe L2).
+	FollowupFile string
 
 	// Unsupported in-process (hard error). Prefer binary + cmd.Env/cmd.Dir.
 	Stdin       io.Reader
@@ -84,6 +87,7 @@ func RunWithOptions(args []string, opts RunOptions) error {
 	ctx.wrkHomeOverride = strings.TrimSpace(opts.WrkHome)
 	ctx.wrkDateOverride = strings.TrimSpace(opts.WrkDate)
 	ctx.gobinOverride = strings.TrimSpace(opts.Gobin)
+	ctx.followupFileOverride = strings.TrimSpace(opts.FollowupFile)
 
 	var runErr error
 	defer func() {

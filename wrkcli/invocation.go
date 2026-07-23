@@ -27,6 +27,9 @@ type invocationContext struct {
 	// gobinOverride, when set, is used as GOBIN for --reinstall-local without
 	// os.Setenv (parallel-safe L2 isolation). Empty → os.Getenv("GOBIN") / GOPATH/bin.
 	gobinOverride string
+	// followupFileOverride, when set, is the bash-integration follow-up path
+	// (WRK_FOLLOWUP_FILE) without os.Setenv.
+	followupFileOverride string
 }
 
 func newInvocationContext(origWd string, args []string) *invocationContext {

@@ -211,7 +211,7 @@ func runGenCommitMsg(args []string, ctx *invocationContext) error {
 		}
 	}
 
-	forwarded := make([]string, 0, len(args))
+	forwarded := make([]string, 0, len(args)+2)
 	for _, arg := range args {
 		if arg == "--gen-commit-msg" {
 			continue
@@ -243,7 +243,13 @@ func runGenCommitMsg(args []string, ctx *invocationContext) error {
 		return nil
 	}
 
-	return commit_msg.RunGenCommitMsg(forwarded)
+	// Pin library --dir to invocation Dir (origWd) when absent so in-process
+	// RunCLI does not fall back to process Getwd (DOCTEST_LINT §1).
+	if !genArgsHasFlag(forwarded, "--dir") && ctx != nil && strings.TrimSpace(ctx.origWd) != "" {
+		forwarded = append(forwarded, "--dir", ctx.origWd)
+	}
+
+	return commit_msg.RunGenCommitMsgWithWriters(forwarded, ctx.out(), ctx.errw())
 }
 
 // peelTrailingHelp reports whether -h/--help is present and returns args without help flags.

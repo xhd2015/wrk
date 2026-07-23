@@ -164,7 +164,38 @@ func wrkDateForReq(req *Request) string {
 
 func Run(t *testing.T, req *Request) (*Response, error) {
 	args := append([]string(nil), req.Args...)
-	return runCLIWithEnv(t, req.RepoDir, req.WrkHome, args, genCommitMsgWrkEnv(req))
+	// ExtraEnv (fake-opencode) or multi-stage compose (done/sync/…) still use
+	// process streams in pipeline helpers → L3 binary until those are threaded.
+	if len(req.ExtraEnv) > 0 || genCommitNeedsBinaryCompose(args) {
+		return runCLIWithEnv(t, req.RepoDir, req.WrkHome, args, genCommitMsgWrkEnv(req))
+	}
+	// L2 in-process: WrkHome/Dir + writers (dry-run via agent-pro WithWriters).
+	var stdout, stderr bytes.Buffer
+	code := wrkcli.RunCLI(args, wrkcli.RunOptions{
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Dir:     req.RepoDir,
+		WrkHome: req.WrkHome,
+		WrkDate: wrkDateForReq(req),
+	})
+	return &Response{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		ExitCode: code,
+	}, nil
+}
+
+// genCommitNeedsBinaryCompose reports multi-stage partners that still print
+// via process streams (activeRoot / done pipeline).
+func genCommitNeedsBinaryCompose(args []string) bool {
+	for _, a := range args {
+		switch a {
+		case "--sync", "--done", "--merge-back", "--tag-next", "--push",
+			"--propagate-tags", "--reinstall-local":
+			return true
+		}
+	}
+	return false
 }
 
 

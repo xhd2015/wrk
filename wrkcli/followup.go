@@ -10,11 +10,21 @@ import (
 // writeFollowupCD appends a single "cd /absolute/path" line to WRK_FOLLOWUP_FILE
 // when the channel is set and follow-ups are not disabled via --no-cd.
 // No-op when the env is unset/empty or disabled is true.
+// Prefer writeFollowupCDTo when an invocation override is available (L2 tests).
 func writeFollowupCD(disabled bool, absPath string) error {
+	return writeFollowupCDTo(disabled, absPath, "")
+}
+
+// writeFollowupCDTo is like writeFollowupCD but uses followupFile when non-empty
+// instead of process env WRK_FOLLOWUP_FILE (parallel-safe; no os.Setenv).
+func writeFollowupCDTo(disabled bool, absPath, followupFile string) error {
 	if disabled {
 		return nil
 	}
-	outPath := strings.TrimSpace(os.Getenv("WRK_FOLLOWUP_FILE"))
+	outPath := strings.TrimSpace(followupFile)
+	if outPath == "" {
+		outPath = strings.TrimSpace(os.Getenv("WRK_FOLLOWUP_FILE"))
+	}
 	if outPath == "" {
 		return nil
 	}
