@@ -169,15 +169,80 @@ func quoteHintArg(arg string) string {
 // positional. When sourceDir is absent, returns the process cwd.
 func resolveSourceWorkDir(origWd, sourceDir string, allowBasenameFallback bool, wrkHome string, hint *DirHintOptions) (string, error) {
 	if sourceDir == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("get cwd: %w", err)
+		// Prefer invocation origWd (RunOptions.Dir / process cwd at start of Run).
+		// Do not call os.Getwd() here: in-process tests pass Dir without Chdir
+		// (DOCTEST_LINT.md §1 — Parallel-safe workdir isolation).
+		base := strings.TrimSpace(origWd)
+		if base == "" {
+			wd, err := os.Getwd()
+			if err != nil {
+				return "", fmt.Errorf("get cwd: %w", err)
+			}
+			base = wd
 		}
-		return wd, nil
+		return filepath.Abs(base)
 	}
 
-	_ = origWd // resolveDirArg already resolves relative paths against process cwd.
-	return resolveDirArg(sourceDir, allowBasenameFallback, wrkHome, hint)
+	return resolveDirArgFrom(origWd, sourceDir, allowBasenameFallback, wrkHome, hint)
+}
+
+// resolveDirArgFrom resolves dir relative to base when base is set (in-process
+// Dir without Chdir). Basename fallback uses the original token.
+func resolveDirArgFrom(base, dir string, allowBasenameFallback bool, wrkHome string, hint *DirHintOptions) (string, error) {
+	token := dir
+	var absCandidate string
+	var err error
+	if filepath.IsAbs(dir) {
+		absCandidate = filepath.Clean(dir)
+	} else if strings.TrimSpace(base) != "" {
+		// Basename-only + fallback: try base/dir, then projects by token.
+		if allowBasenameFallback && isBasename(dir) {
+			under := filepath.Join(base, dir)
+			if st, statErr := os.Stat(under); statErr == nil && st.IsDir() {
+				return filepath.Abs(under)
+			}
+			// Preserve basename semantics for projects.json lookup.
+			return resolveDirArg(dir, allowBasenameFallback, wrkHome, hint)
+		}
+		absCandidate = filepath.Clean(filepath.Join(base, dir))
+	} else {
+		absCandidate, err = filepath.Abs(dir)
+		if err != nil {
+			return "", fmt.Errorf("resolve dir: %w", err)
+		}
+	}
+
+	info, err := os.Stat(absCandidate)
+	if err == nil {
+		if info.IsDir() {
+			return absCandidate, nil
+		}
+		if allowBasenameFallback && isBasename(token) {
+			return "", fileCollisionGuidedError(wrkHome, token, absCandidate, hint)
+		}
+		return absCandidate, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat dir: %w", err)
+	}
+
+	if allowBasenameFallback && isBasename(token) {
+		resolved, fallbackErr := resolveBasenameFromProjects(wrkHome, token)
+		if fallbackErr != nil {
+			return "", fallbackErr
+		}
+		if resolved != "" {
+			if _, err := os.Stat(resolved); err != nil {
+				if os.IsNotExist(err) {
+					return "", fmt.Errorf("wrk: %s does not exist", resolved)
+				}
+				return "", fmt.Errorf("stat dir: %w", err)
+			}
+			return resolved, nil
+		}
+	}
+
+	return "", fmt.Errorf("wrk: %s does not exist", absCandidate)
 }
 
 func resolveBasenameFromProjects(wrkHome, basename string) (string, error) {

@@ -699,6 +699,29 @@ func needsProcessIsolation(req *Request) bool {
 	return false
 }
 
+// needsInProcessCaptureOK is true when the leaf's args are modes whose product
+// paths write via ctx.out() (parallel-safe in-process capture). Expand as more
+// printers are threaded off process streams.
+func needsInProcessCaptureOK(req *Request) bool {
+	args := buildWrkCLIArgs(req)
+	// Empty args = dashboard (still process stdout until dashboard is threaded).
+	if len(args) == 0 {
+		return false
+	}
+	// Modes known to print via ctx.out() after status/repos writer threading.
+	for _, a := range args {
+		switch a {
+		case "--status", "--repos", "--list":
+			return true
+		case "--version", "-h", "--help":
+			return true
+		}
+	}
+	// skill is nested tree; flag-only short paths above covered.
+	// Default: use binary until mode is known capture-safe.
+	return false
+}
+
 // runWrkBinary runs the product binary with cmd.Env/cmd.Dir only (L3-capable,
 // Parallel-safe). Used for process-boundary leaves and any leaf that needs env
 // isolation.

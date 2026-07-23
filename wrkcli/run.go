@@ -790,7 +790,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			}
 			statusRoot = mainRepo
 		}
-		return runStatus(statusRoot, workDir, colorEnabled, fetchFlag)
+		return runStatus(ctx.out(), statusRoot, workDir, colorEnabled, fetchFlag)
 	}
 	// Bare / --main --reinstall-local before bare --main so compose does not open a nested shell.
 	// Multi-stage reinstall is handled by activeRoot pipeline below.
@@ -823,7 +823,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runCd(workDir, execArgs)
 	}
 	if repos {
-		return runRepos(workDir)
+		return runRepos(ctx.out(), workDir)
 	}
 	if depPath != "" {
 		return runDep(workDir, depPath, wrkHome, args, execArgs)
@@ -835,7 +835,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runAllDeps(workDir, dryRun)
 	}
 	if list {
-		return runList(workDir)
+		return runList(ctx.out(), workDir)
 	}
 	// Prefer done / merge-back over bare tag-next / propagate / sync so composition
 	// runs the primary path (post-pipeline: sync → tag-next → push → propagate-tags → reinstall-local).
@@ -1436,7 +1436,10 @@ func runRemove(wrkHome, removeDir string) error {
 	return nil
 }
 
-func runList(workDir string) error {
+func runList(out io.Writer, workDir string) error {
+	if out == nil {
+		out = os.Stdout
+	}
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -1447,18 +1450,18 @@ func runList(workDir string) error {
 	}
 
 	cmd := gitCommand("-C", cwd, "worktree", "list")
-	out, err := cmd.Output()
+	raw, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
 			return fmt.Errorf("%s", strings.TrimSpace(string(exitErr.Stderr)))
 		}
 		return err
 	}
-	outStr := string(out)
+	outStr := string(raw)
 	if len(outStr) > 0 && !strings.HasSuffix(outStr, "\n") {
 		outStr += "\n"
 	}
-	fmt.Fprint(cliStdout(), outStr)
+	fmt.Fprint(out, outStr)
 	return nil
 }
 

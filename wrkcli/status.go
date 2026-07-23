@@ -2,6 +2,7 @@ package wrkcli
 
 import (
 	"context"
+	"io"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,19 @@ import (
 	"github.com/xhd2015/wrk/wrkcli/storage"
 	"github.com/xhd2015/gitops/git"
 )
+
+// statusPrinter writes status output to out (parallel-safe when out is leaf-local).
+type statusPrinter struct {
+	out io.Writer
+}
+
+func (p statusPrinter) w() io.Writer {
+	if p.out != nil {
+		return p.out
+	}
+	return os.Stdout
+}
+
 
 var wrkCheckoutOpts = checkout.Options{
 	StatusStyle:        status.StyleWrk,
@@ -57,7 +71,8 @@ func sameNormalizedPath(a, b string) bool {
 
 // runStatus prints status for statusRoot. displayCwd is the invocation work
 // directory used only for Dir: labels (kept when --main rewrites status root).
-func runStatus(statusRoot, displayCwd string, colorEnabled bool, fetchEnabled bool) error {
+func runStatus(out io.Writer, statusRoot, displayCwd string, colorEnabled bool, fetchEnabled bool) error {
+	p := statusPrinter{out: out}
 	cwd, err := filepath.Abs(statusRoot)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -77,7 +92,7 @@ func runStatus(statusRoot, displayCwd string, colorEnabled bool, fetchEnabled bo
 	}
 
 	if mainRepo, ok := linkedInTreeMainRepo(cwd); ok {
-		return runStatusLinkedInTreeCwd(displayBase, cwd, mainRepo, colorEnabled)
+		return p.runStatusLinkedInTreeCwd(displayBase, cwd, mainRepo, colorEnabled)
 	}
 
 	repos, err := discoverStatusRepos(context.Background(), checkoutRoot)
@@ -101,9 +116,9 @@ func runStatus(statusRoot, displayCwd string, colorEnabled bool, fetchEnabled bo
 		blocksPrinted := 0
 		for _, repo := range repos {
 			if blocksPrinted > 0 {
-				fmt.Fprintln(cliStdout())
+				fmt.Fprintln(p.w())
 			}
-			if err := printStatusBlock(displayBase, checkoutRoot, repo.Path, colorEnabled, scanColorEnabled, false, false, statusBlockPrintOpts{}); err != nil {
+			if err := p.printStatusBlock(displayBase, checkoutRoot, repo.Path, colorEnabled, scanColorEnabled, false, false, statusBlockPrintOpts{}); err != nil {
 				return err
 			}
 			blocksPrinted++
@@ -137,12 +152,12 @@ func runStatus(statusRoot, displayCwd string, colorEnabled bool, fetchEnabled bo
 	blocksPrinted := 0
 	for _, path := range lists.Primary {
 		if blocksPrinted > 0 {
-			fmt.Fprintln(cliStdout())
+			fmt.Fprintln(p.w())
 		}
 		if statusPathNeedsAppendedPresentation(path, scanPathSet) {
-			printAppendedLinkedBlock(displayBase, path, colorEnabled)
+			p.printAppendedLinkedBlock(displayBase, path, colorEnabled)
 		} else {
-			if err := printStatusBlock(displayBase, checkoutRoot, path, colorEnabled, scanColorEnabled, showRemote, effectiveFetch, statusBlockPrintOpts{}); err != nil {
+			if err := p.printStatusBlock(displayBase, checkoutRoot, path, colorEnabled, scanColorEnabled, showRemote, effectiveFetch, statusBlockPrintOpts{}); err != nil {
 				return err
 			}
 		}
@@ -151,18 +166,18 @@ func runStatus(statusRoot, displayCwd string, colorEnabled bool, fetchEnabled bo
 
 	if len(lists.External) > 0 {
 		if blocksPrinted > 0 {
-			fmt.Fprintln(cliStdout())
+			fmt.Fprintln(p.w())
 		}
 		// Gray ANSI when colorEnabled (P3); plain ASCII otherwise.
 		if colorEnabled {
-			fmt.Fprintln(cliStdout(), colorize("---- external ----", ansiGrey))
+			fmt.Fprintln(p.w(), colorize("---- external ----", ansiGrey))
 		} else {
-			fmt.Fprintln(cliStdout(), "---- external ----")
+			fmt.Fprintln(p.w(), "---- external ----")
 		}
 		for _, path := range lists.External {
-			fmt.Fprintln(cliStdout())
+			fmt.Fprintln(p.w())
 			// External nested: printStatusBlock; Remote only for main identity (none here).
-			if err := printStatusBlock(displayBase, checkoutRoot, path, colorEnabled, scanColorEnabled, showRemote, effectiveFetch, statusBlockPrintOpts{}); err != nil {
+			if err := p.printStatusBlock(displayBase, checkoutRoot, path, colorEnabled, scanColorEnabled, showRemote, effectiveFetch, statusBlockPrintOpts{}); err != nil {
 				return err
 			}
 			blocksPrinted++
@@ -205,7 +220,7 @@ func linkedInTreeMainRepo(cwd string) (string, bool) {
 	return mainRepo, true
 }
 
-func runStatusLinkedInTreeCwd(displayCwd, cwd, mainRepo string, colorEnabled bool) error {
+func (p statusPrinter) runStatusLinkedInTreeCwd(displayCwd, cwd, mainRepo string, colorEnabled bool) error {
 	repos, err := discoverStatusRepos(context.Background(), mainRepo)
 	if err != nil {
 		return err
@@ -214,11 +229,11 @@ func runStatusLinkedInTreeCwd(displayCwd, cwd, mainRepo string, colorEnabled boo
 	blocksPrinted := 0
 	printBlock := func(repoPath string, opts statusBlockPrintOpts) error {
 		if blocksPrinted > 0 {
-			fmt.Fprintln(cliStdout())
+			fmt.Fprintln(p.w())
 		}
 		blocksPrinted++
 		// showRemote false: linked-in-tree cwd path never prints Remote.
-		return printStatusBlock(displayCwd, mainRepo, repoPath, colorEnabled, colorEnabled, false, false, opts)
+		return p.printStatusBlock(displayCwd, mainRepo, repoPath, colorEnabled, colorEnabled, false, false, opts)
 	}
 
 	showMasterFalse := false
@@ -238,7 +253,8 @@ func runStatusLinkedInTreeCwd(displayCwd, cwd, mainRepo string, colorEnabled boo
 	return nil
 }
 
-func runRepos(workDir string) error {
+func runRepos(out io.Writer, workDir string) error {
+	p := statusPrinter{out: out}
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -262,7 +278,7 @@ func runRepos(workDir string) error {
 		if err != nil {
 			return fmt.Errorf("resolve relative repo path: %w", err)
 		}
-		fmt.Fprintln(cliStdout(), filepath.ToSlash(rel))
+		fmt.Fprintln(p.w(), filepath.ToSlash(rel))
 	}
 	return nil
 }
@@ -272,41 +288,41 @@ func discoverStatusRepos(ctx context.Context, root string) ([]scan_repo.Repo, er
 	return result.Repos, err
 }
 
-func printAppendedLinkedBlock(displayCwd, repoPath string, colorEnabled bool) {
+func (p statusPrinter) printAppendedLinkedBlock(displayCwd, repoPath string, colorEnabled bool) {
 	dirLine := statusDirLine(displayCwd, repoPath)
 
 	if worktree.IsDead(repoPath) {
-		fmt.Fprintf(cliStdout(), "Dir:          %s\n", dirLine)
-		fmt.Fprintf(cliStdout(), "Status:       prunable\n")
+		fmt.Fprintf(p.w(), "Dir:          %s\n", dirLine)
+		fmt.Fprintf(p.w(), "Status:       prunable\n")
 		return
 	}
 
 	meta := checkout.Enrich(context.Background(), repoPath, wrkCheckoutOpts)
 	if meta.Error != "" {
-		printBrokenStatusBlock(dirLine, brokenStatusMessage(meta, repoPath), colorEnabled)
+		p.printBrokenStatusBlock(dirLine, brokenStatusMessage(meta, repoPath), colorEnabled)
 		return
 	}
 	applyWrkStatusWithLinkedSkip(repoPath, &meta)
 	masterBrief, _, err := masterBriefForRepo(repoPath, meta.Branch, colorEnabled)
 	if err != nil {
-		printBrokenStatusBlock(dirLine, gitCombinedOutputError(repoPath, "status", "--porcelain"), colorEnabled)
+		p.printBrokenStatusBlock(dirLine, gitCombinedOutputError(repoPath, "status", "--porcelain"), colorEnabled)
 		return
 	}
 
-	fmt.Fprintf(cliStdout(), "Dir:          %s\n", dirLine)
-	fmt.Fprintf(cliStdout(), "Branch:       %s\n", meta.Branch)
-	fmt.Fprintf(cliStdout(), "Commit:       %s  %s\n", meta.CommitSHA, meta.CommitMsg)
-	fmt.Fprintf(cliStdout(), "Status:       %s\n", formatStatusText(meta.Status, colorEnabled, true))
-	fmt.Fprintf(cliStdout(), "Master:       %s\n", masterBrief)
+	fmt.Fprintf(p.w(), "Dir:          %s\n", dirLine)
+	fmt.Fprintf(p.w(), "Branch:       %s\n", meta.Branch)
+	fmt.Fprintf(p.w(), "Commit:       %s  %s\n", meta.CommitSHA, meta.CommitMsg)
+	fmt.Fprintf(p.w(), "Status:       %s\n", formatStatusText(meta.Status, colorEnabled, true))
+	fmt.Fprintf(p.w(), "Master:       %s\n", masterBrief)
 }
 
-func printBrokenStatusBlock(dirLine, msg string, colorEnabled bool) {
+func (p statusPrinter) printBrokenStatusBlock(dirLine, msg string, colorEnabled bool) {
 	statusVal := "error: " + msg
 	if colorEnabled {
 		statusVal = colorize(statusVal, ansiRed)
 	}
-	fmt.Fprintf(cliStdout(), "Dir:          %s\n", dirLine)
-	fmt.Fprintf(cliStdout(), "Status:       %s\n", statusVal)
+	fmt.Fprintf(p.w(), "Dir:          %s\n", dirLine)
+	fmt.Fprintf(p.w(), "Status:       %s\n", statusVal)
 }
 
 func brokenStatusMessage(meta checkout.Meta, repoPath string) string {
@@ -319,12 +335,12 @@ func brokenStatusMessage(meta checkout.Meta, repoPath string) string {
 // printStatusBlock prints one status block. statusRoot is the status checkout root
 // (ShowToplevel of status cwd); Remote is printed only for that block when showRemote
 // is set — not for nested main-repo blocks under a multi-repo scan, and not via Dir==".".
-func printStatusBlock(displayCwd, statusRoot, repoPath string, colorEnabled, scanColorEnabled bool, showRemote bool, fetchEnabled bool, opts statusBlockPrintOpts) error {
+func (p statusPrinter) printStatusBlock(displayCwd, statusRoot, repoPath string, colorEnabled, scanColorEnabled bool, showRemote bool, fetchEnabled bool, opts statusBlockPrintOpts) error {
 	dirLine := statusDirLine(displayCwd, repoPath)
 
 	meta := checkout.Enrich(context.Background(), repoPath, wrkCheckoutOpts)
 	if meta.Error != "" {
-		printBrokenStatusBlock(dirLine, brokenStatusMessage(meta, repoPath), colorEnabled)
+		p.printBrokenStatusBlock(dirLine, brokenStatusMessage(meta, repoPath), colorEnabled)
 		return nil
 	}
 	applyWrkStatusWithLinkedSkip(repoPath, &meta)
@@ -338,26 +354,26 @@ func printStatusBlock(displayCwd, statusRoot, repoPath string, colorEnabled, sca
 		var err error
 		masterBrief, _, err = masterBriefForRepo(repoPath, meta.Branch, scanColorEnabled)
 		if err != nil {
-			printBrokenStatusBlock(dirLine, gitCombinedOutputError(repoPath, "status", "--porcelain"), colorEnabled)
+			p.printBrokenStatusBlock(dirLine, gitCombinedOutputError(repoPath, "status", "--porcelain"), colorEnabled)
 			return nil
 		}
 	}
 
-	fmt.Fprintf(cliStdout(), "Dir:          %s\n", dirLine)
-	fmt.Fprintf(cliStdout(), "Branch:       %s\n", meta.Branch)
-	fmt.Fprintf(cliStdout(), "Commit:       %s  %s\n", meta.CommitSHA, meta.CommitMsg)
+	fmt.Fprintf(p.w(), "Dir:          %s\n", dirLine)
+	fmt.Fprintf(p.w(), "Branch:       %s\n", meta.Branch)
+	fmt.Fprintf(p.w(), "Commit:       %s  %s\n", meta.CommitSHA, meta.CommitMsg)
 
 	statusLine := formatStatusText(meta.Status, scanColorEnabled, true)
-	fmt.Fprintf(cliStdout(), "Status:       %s\n", statusLine)
+	fmt.Fprintf(p.w(), "Status:       %s\n", statusLine)
 	if hasMaster {
-		fmt.Fprintf(cliStdout(), "Master:       %s\n", masterBrief)
+		fmt.Fprintf(p.w(), "Master:       %s\n", masterBrief)
 	} else if showRemote && sameNormalizedPath(repoPath, statusRoot) {
 		// Primary status root only (may be Dir ../.. when cwd is a subdir — not Dir==".").
 		remoteLine, err := formatStatusRemoteLine(repoPath, meta.Branch, scanColorEnabled, fetchEnabled, meta.Status == "clean")
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(cliStdout(), remoteLine)
+		fmt.Fprintln(p.w(), remoteLine)
 	}
 	return nil
 }

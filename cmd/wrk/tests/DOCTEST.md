@@ -1578,12 +1578,16 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 		return nil, err
 	}
 
-	// DOCTEST_LINT.md §1: this mega-root exercises full CLI (status/create/done/…).
-	// Product paths still print via process streams (cliStdout), and many leaves
-	// need cmd.Env/cmd.Dir isolation. Use the product binary only — Parallel-safe
-	// (no Setenv/Chdir). True L2 short paths live in nested roots (version/skill/
-	// set-config/…) that call RunCLI with ctx.out()/WrkHome overrides.
-	return runWrkBinary(t, req, args)
+	// DOCTEST_LINT.md §1 dual-mode:
+	// - Process isolation (ExtraEnv/Stdin/PATH fakes/TTY/web) → binary cmd.Env/Dir (L3)
+	// - Pure leaves → in-process RunCLI with WrkHome override + ctx writers (L2)
+	// Status/list/repos print via ctx.out(); other modes may still write to process
+	// streams until fully threaded — pure leaves for those may need binary if
+	// capture is empty (see needsInProcessCaptureOK).
+	if req.UseScriptTTY || req.WebProbe || needsProcessIsolation(req) || !needsInProcessCaptureOK(req) {
+		return runWrkBinary(t, req, args)
+	}
+	return runWrkInProcess(t, req, args)
 }
 
 // prepareFollowupFile truncates FollowupFile so in-place --cd leaves can detect writes.
