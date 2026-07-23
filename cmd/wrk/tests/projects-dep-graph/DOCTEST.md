@@ -1,7 +1,7 @@
 # wrk --projects-dep-graph — cross-project module dependency graph (P2)
 
 ## Version
-0.0.2
+0.0.3
 
 Decision tree for root-level exclusive mode `wrk --projects-dep-graph`: print
 registered projects, all Go modules (including nested), and **cross-project**
@@ -9,8 +9,8 @@ require edges only (among wrk-registered projects). Implementation must call
 existing `wrkcli.BuildInventory` / `Inventory.CrossEdges` (P1); this tree
 asserts **CLI behavior only**.
 
-**Classic TDD (RED):** the flag and command do not exist yet. Leaves must fail
-(unknown flag / non-zero / wrong output) until implementer wires CLI + formatter.
+**Layer: L2 in-process CLI** — `Run` calls `wrkcli.RunCLI` (captured writers).
+Help leaf lives under nested `help/` (also L2).
 
 # DSN (Domain Specific Notion)
 
@@ -102,19 +102,18 @@ doctest test ./cmd/wrk/tests/projects-dep-graph/graph/multi-cross-nested
 doctest test ./cmd/wrk/tests/projects-dep-graph/mutual-exclusion/with-projects
 ```
 
-Expect **RED** until implementer lands `--projects-dep-graph` (Classic TDD).
-
 ```go
 import (
 	"bytes"
-	"os/exec"
 	"testing"
+
+	"github.com/xhd2015/wrk/wrkcli"
 )
 
 type Request struct {
 	WorkRoot string
 	WrkHome  string
-	RepoDir  string // process cwd when running wrk (neutral non-git by default)
+	RepoDir  string // effective cwd for in-process Run
 	Args     []string
 
 	// Fixture paths filled by graph leaves for Assert templates.
@@ -132,31 +131,17 @@ type Response struct {
 }
 
 func Run(t *testing.T, req *Request) (*Response, error) {
-	bin := getWrkBin(t)
-
-	args := append([]string(nil), req.Args...)
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	cmd.Env = depGraphWrkEnv(req)
-
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			return nil, err
-		}
-	}
-
+	code := wrkcli.RunCLI(req.Args, wrkcli.RunOptions{
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Dir:     req.RepoDir,
+		WrkHome: req.WrkHome,
+	})
 	return &Response{
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
-		ExitCode: exitCode,
+		ExitCode: code,
 	}, nil
 }
 ```

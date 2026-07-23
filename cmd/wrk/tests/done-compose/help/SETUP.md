@@ -1,29 +1,62 @@
 # Scenario
 
-**Feature**: root help documents full-band composition (gen-commit pre + primary + posts + reinstall tail)
+**Feature**: root help documents full-band composition
 
 ```
-# user-facing usage() matches composition: optional gen-commit pre + primary + optional posts/tail
-wrk --help
-  -> exit 0
-  -> --done / --merge-back synopsis lists optional --gen-commit-msg (pre), post modifiers, --reinstall-local
-  -> --gen-commit-msg documents pre-stage with --done/--merge-back (and --commit when composed)
-  -> --reinstall-local documents validity after primary (and --main)
-  -> --push dual meaning (not only with --tag-next)
-  -> no claim that --tag-next is exclusive with --done
-  -> fluent recipes (or equivalent flag lists) for ship flows:
-       wrk --done --sync --tag-next --push -y
-       wrk --done --sync --tag-next --push --reinstall-local -y
-       wrk --gen-commit-msg --commit --model=… --done --sync --tag-next --push [-y]
+wrk --help -> composition flags on usage, exit 0
 ```
+
+## Preconditions
+
+- L2 in-process CLI via `wrkcli.RunCLI` (no product binary).
+- Isolated `WRK_HOME` per leaf.
 
 ## Steps
 
-1. Run `wrk --help` from isolated WorkRoot (no git required).
+1. Root `Setup` creates work root + WRK_HOME.
+2. Leaves set `req.Args` for the help invocation.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
-	req.Args = []string{"--help"}
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	workRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		return fmt.Errorf("resolve work root: %w", err)
+	}
+	req.WorkRoot = workRoot
+	req.WrkHome = filepath.Join(req.WorkRoot, ".wrk")
+	if err := os.MkdirAll(req.WrkHome, 0o755); err != nil {
+		return err
+	}
+	if req.RepoDir == "" {
+		req.RepoDir = req.WorkRoot
+	}
+	if len(req.Args) == 0 {
+		req.Args = []string{"--help"}
+	}
 	return nil
+}
+
+func assertErrIsNil(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func assertExitZero(t *testing.T, resp *Response) {
+	t.Helper()
+	if resp.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%q stderr=%q", resp.ExitCode, resp.Stdout, resp.Stderr)
+	}
 }
 ```

@@ -20,19 +20,15 @@ wrk --projects-dep-graph + --projects|--list -> non-zero exclusive error
 ## Preconditions
 
 - Nested root: **no inheritance** from `cmd/wrk/tests` monotree (`DOCTEST.md` firewall).
-- The wrk Go module is found by walking ancestors of `d.DOCTEST_ROOT` for `go.mod`.
-- Go toolchain is available on PATH.
-- Session wrk binary is built once per doctest run to
-  process-local `MkdirTemp` wrk binary (in-memory mutex). (in-memory mutex, process-local).
+- L2 in-process CLI via `wrkcli.RunCLI` (no product binary).
 - Git is **not** required (fixtures are plain directories with `go.mod`).
-- Classic TDD: flag absent → RED until CLI implements the mode.
 
 ## Steps
 
 1. Root `Setup` creates isolated `{WorkRoot}` and `{WorkRoot}/.wrk`, neutral
    non-git `RepoDir` (`workspace/`).
 2. Descendants set `req.Args` and seed `projects.json` / module fixtures as needed.
-3. Root `Run` executes the session-built `wrk` binary with `WRK_HOME` set.
+3. Root `Run` executes `wrkcli.RunCLI` with `WrkHome` / `Dir` options.
 4. Leaf `Assert` checks exit code, stdout graph (v2 templates), and stderr.
 
 ## Context
@@ -42,14 +38,12 @@ wrk --projects-dep-graph + --projects|--list -> non-zero exclusive error
 - Module `dir` uses scan convention: `.` for root, relative slash path for nested.
 - Cross-edge owner label is `filepath.Base(OwnerProject)`.
 - Stdout assertions use `github.com/xhd2015/doctest/assert` v2 full-match templates.
-- Shared only: session binary under fixture cache; per-leaf temp dirs stay isolated.
 
 ```go
 import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -57,82 +51,10 @@ import (
 
 	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
-	"sync"
 )
-
-func findModuleRoot(dir string) string {
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
-// Process-local wrk binary (one-process suite; in-memory mutex, not session.Once/flock).
-var (
-	wrkBinMu   sync.Mutex
-	wrkBinPath string
-	wrkBinErr  error
-	// wrkModRoot set once via noteModRoot (sync.Once); not per-leaf Setup writes.
-	wrkModOnce sync.Once
-	wrkModRoot string
-)
-
-
-// noteModRoot records module root once per process (sync.Once). Safe under t.Parallel.
-// Prefer this over writing wrkModRoot from every leaf Setup.
-func noteModRoot(d *session.Doctest) {
-	if d == nil {
-		return
-	}
-	wrkModOnce.Do(func() {
-		wrkModRoot = findModuleRoot(d.DOCTEST_ROOT)
-	})
-}
-
-func getWrkBin(t *testing.T) string {
-	t.Helper()
-	wrkBinMu.Lock()
-	defer wrkBinMu.Unlock()
-	if wrkBinPath != "" || wrkBinErr != nil {
-		if wrkBinErr != nil {
-			t.Fatal(wrkBinErr)
-		}
-		return wrkBinPath
-	}
-	if wrkModRoot == "" {
-		t.Fatal("wrkModRoot unset; root Setup must call noteModRoot first")
-	}
-	dir, err := os.MkdirTemp("", "wrk-doctest-bin-")
-	if err != nil {
-		wrkBinErr = err
-		t.Fatal(err)
-	}
-	bin := filepath.Join(dir, "wrk")
-	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/wrk")
-	cmd.Dir = wrkModRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		wrkBinErr = fmt.Errorf("build wrk: %v\n%s", err, out)
-		t.Fatal(wrkBinErr)
-	}
-	wrkBinPath = bin
-	return bin
-}
 
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	noteModRoot(d)
-	if wrkModRoot == "" {
-		t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
-	}
-	if _, err := exec.LookPath("go"); err != nil {
-		return fmt.Errorf("go not found in PATH: %w", err)
-	}
+	_ = d
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		return fmt.Errorf("resolve work root: %w", err)
@@ -147,10 +69,6 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	}
 	depGraphEnsureHelpersUsed()
 	return nil
-}
-
-func depGraphWrkEnv(req *Request) []string {
-	return append(os.Environ(), "WRK_HOME="+req.WrkHome)
 }
 
 func initNeutralCwd(t *testing.T, workRoot, name string) string {

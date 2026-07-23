@@ -767,7 +767,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runProjects(wrkHome, colorEnabled, fetchFlag, githubFlag)
 	}
 	if projectsDepGraph {
-		return runProjectsDepGraph(wrkHome)
+		return runProjectsDepGraph(wrkHome, ctx)
 	}
 	if addFlagSet {
 		return runAdd(wrkHome, *addPath)

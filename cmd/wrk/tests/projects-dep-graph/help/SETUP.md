@@ -1,23 +1,59 @@
 # Scenario
 
-**Feature**: root help documents --projects-dep-graph
+**Feature**: root help mentions --projects-dep-graph
 
 ```
-# user discovers the flag from usage
-wrk -h / wrk --help -> usage lists --projects-dep-graph
+wrk -h -> usage contains --projects-dep-graph
 ```
+
+## Preconditions
+
+- L2 in-process CLI via `wrkcli.RunCLI` (no product binary).
+- Isolated `WRK_HOME` per leaf.
 
 ## Steps
 
-1. Descendants invoke help and assert the flag is mentioned.
-
-## Context
-
-- Help may print on stdout and/or stderr; leaves search both.
+1. Root `Setup` creates work root + WRK_HOME.
+2. Leaves set `req.Args` for the help invocation.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
-	depGraphEnsureHelpersUsed()
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	workRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		return fmt.Errorf("resolve work root: %w", err)
+	}
+	req.WorkRoot = workRoot
+	req.WrkHome = filepath.Join(req.WorkRoot, ".wrk")
+	if err := os.MkdirAll(req.WrkHome, 0o755); err != nil {
+		return err
+	}
+	if req.RepoDir == "" {
+		req.RepoDir = req.WorkRoot
+	}
 	return nil
+}
+
+func assertErrIsNil(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func assertExitZero(t *testing.T, resp *Response) {
+	t.Helper()
+	if resp.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%q stderr=%q", resp.ExitCode, resp.Stdout, resp.Stderr)
+	}
 }
 ```

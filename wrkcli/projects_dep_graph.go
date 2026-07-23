@@ -11,15 +11,21 @@ import (
 // runProjectsDepGraph prints the human-readable cross-project module dependency
 // graph for registered WRK_HOME projects. Soft-skips missing registry paths with
 // a stderr warning; never requires a git cwd.
-func runProjectsDepGraph(wrkHome string) error {
+func runProjectsDepGraph(wrkHome string, ctx *invocationContext) error {
 	inv, err := BuildInventory(wrkHome)
 	if err != nil {
 		return err
 	}
-	for _, p := range inv.SkippedPaths {
-		fmt.Fprintf(os.Stderr, "warning: project path does not exist: %s\n", p)
+	errw := io.Writer(os.Stderr)
+	out := io.Writer(os.Stdout)
+	if ctx != nil {
+		errw = ctx.errw()
+		out = ctx.out()
 	}
-	return writeProjectsDepGraph(os.Stdout, inv)
+	for _, p := range inv.SkippedPaths {
+		fmt.Fprintf(errw, "warning: project path does not exist: %s\n", p)
+	}
+	return writeProjectsDepGraph(out, inv)
 }
 
 // writeProjectsDepGraph formats Inventory.Projects and CrossEdges to w.

@@ -233,5 +233,52 @@ func runGenCommitMsg(args []string, ctx *invocationContext) error {
 
 	ctx.skipEvent = true
 	ctx.command = "gen-commit-msg"
+
+	// agent-pro less-gen Help() calls os.Exit(0), which panics under in-process
+	// RunCLI / go test. Short-circuit help here so L2 tests and nested help stay safe.
+	if help, rest := peelTrailingHelp(forwarded); help {
+		if len(rest) > 0 {
+			// help with extra tokens still shows usage (same as typical -h after flags).
+		}
+		fmt.Fprint(ctx.out(), genCommitMsgUsage())
+		return nil
+	}
+
 	return commit_msg.RunGenCommitMsg(forwarded)
+}
+
+// peelTrailingHelp reports whether -h/--help is present and returns args without help flags.
+func peelTrailingHelp(args []string) (help bool, rest []string) {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			help = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+	return help, rest
+}
+
+// genCommitMsgUsage mirrors agent-pro commit_msg help (flags must stay in sync for
+// doctest help assertions). Printed by wrk so in-process CLI can capture it.
+func genCommitMsgUsage() string {
+	return `Usage: gen-commit-msg [options]
+
+Generate a commit message for the currently staged changes using AI.
+Logs are printed to stderr; the resulting commit message is printed to stdout.
+
+Options:
+  --dir DIR    Git directory to use (defaults to current directory)
+  --model MODEL
+              Model to use for generation
+  --agent-runner RUNNER
+              Agent runner to use (opencode|commandcode, default: opencode)
+  --agent-runner-binary PATH
+              Override the agent runner executable path
+  --add-all    Stage all changes (git add -A) before generate; dry-run prints would: git add -A
+  --commit     Run git commit with the generated message after printing it
+  --no-verify  Skip git commit hooks (requires --commit)
+  --dry-run    Pure plan: inspect staged set, print mock message; no agent, no unstage, no commit
+  -h, --help   Show this help message
+`
 }
