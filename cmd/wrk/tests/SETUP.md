@@ -708,7 +708,14 @@ func needsInProcessCaptureOK(req *Request) bool {
 	if len(args) == 0 {
 		return false
 	}
-	// Modes known to print via ctx.out() after status/repos writer threading.
+	// --main rewrites workDir via ResolveMainRepo + more Getwd-adjacent edges;
+	// keep on binary until that path is fully origWd-based.
+	for _, a := range args {
+		if a == "--main" {
+			return false
+		}
+	}
+	// Modes known to print via ctx.out() after status/list/repos writer threading.
 	for _, a := range args {
 		switch a {
 		case "--status", "--repos", "--list":
@@ -717,8 +724,7 @@ func needsInProcessCaptureOK(req *Request) bool {
 			return true
 		}
 	}
-	// skill is nested tree; flag-only short paths above covered.
-	// Default: use binary until mode is known capture-safe.
+	// Default: binary until mode is known capture-safe.
 	return false
 }
 
