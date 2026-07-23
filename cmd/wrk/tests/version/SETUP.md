@@ -15,11 +15,8 @@ wrk --version + other mode flag -> non-zero, mutually exclusive
 
 ## Preconditions
 
-- The wrk Go module is at `go-pkgs/cmd/wrk/` (three levels above this tree root).
-- Go toolchain is available on PATH.
-- Session wrk binary is built once per doctest run to
-  process-local `MkdirTemp` wrk binary (in-memory mutex).
-- Embedded version lives in `wrkcli/VERSION.txt` (compiled into the binary).
+- In-process CLI via `wrkcli.RunCLI` (L2); no product binary build.
+- Embedded version lives in `wrkcli/VERSION.txt` (compiled into the test binary).
 
 ## Steps
 
@@ -29,7 +26,7 @@ wrk --version + other mode flag -> non-zero, mutually exclusive
 ## Context
 
 - Version commands do not require a git repository; cwd is a neutral empty dir.
-- Only `WRK_HOME` is passed via `versionWrkEnv`; no other wrk env overrides.
+- `WrkHome` is passed via `RunOptions.WrkHome` (no `os.Setenv`).
 - Stdout assertions use `assert.Output` v2 full-match templates where output is
   bounded; help uses substring checks for `--version`.
 - Printed version string is exactly `v0.0.1` (file content `0.0.1` plus `v` prefix).
@@ -38,86 +35,16 @@ wrk --version + other mode flag -> non-zero, mutually exclusive
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
-	"sync"
 )
-
-func findModuleRoot(dir string) string {
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
-// Process-local wrk binary (one-process suite; in-memory mutex, not session.Once/flock).
-var (
-	wrkBinMu   sync.Mutex
-	wrkBinPath string
-	wrkBinErr  error
-	// wrkModRoot set once via noteModRoot (sync.Once); not per-leaf Setup writes.
-	wrkModOnce sync.Once
-	wrkModRoot string
-)
-
-
-// noteModRoot records module root once per process (sync.Once). Safe under t.Parallel.
-// Prefer this over writing wrkModRoot from every leaf Setup.
-func noteModRoot(d *session.Doctest) {
-	if d == nil {
-		return
-	}
-	wrkModOnce.Do(func() {
-		wrkModRoot = findModuleRoot(d.DOCTEST_ROOT)
-	})
-}
-
-func getWrkBin(t *testing.T) string {
-	t.Helper()
-	wrkBinMu.Lock()
-	defer wrkBinMu.Unlock()
-	if wrkBinPath != "" || wrkBinErr != nil {
-		if wrkBinErr != nil {
-			t.Fatal(wrkBinErr)
-		}
-		return wrkBinPath
-	}
-	if wrkModRoot == "" {
-		t.Fatal("wrkModRoot unset; root Setup must call noteModRoot first")
-	}
-	dir, err := os.MkdirTemp("", "wrk-doctest-bin-")
-	if err != nil {
-		wrkBinErr = err
-		t.Fatal(err)
-	}
-	bin := filepath.Join(dir, "wrk")
-	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/wrk")
-	cmd.Dir = wrkModRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		wrkBinErr = fmt.Errorf("build wrk: %v\n%s", err, out)
-		t.Fatal(wrkBinErr)
-	}
-	wrkBinPath = bin
-	return bin
-}
 
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	noteModRoot(d)
-	if wrkModRoot == "" {
-		t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
-	}
+	_ = d
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		return fmt.Errorf("resolve work root: %w", err)
@@ -132,10 +59,6 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	}
 	ensureVersionHelpersUsed()
 	return nil
-}
-
-func versionWrkEnv(req *Request) []string {
-	return append(os.Environ(), "WRK_HOME="+req.WrkHome)
 }
 
 func initNeutralCwd(t *testing.T, workRoot, name string) string {

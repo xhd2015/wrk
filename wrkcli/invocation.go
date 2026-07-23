@@ -1,6 +1,8 @@
 package wrkcli
 
 import (
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -16,6 +18,13 @@ type invocationContext struct {
 	eventArgs []string
 	wrkHome   string
 	skipEvent bool
+
+	// Per-invocation I/O and env overrides (for in-process CLI / RunWithWriters).
+	// Nil writers mean process defaults (os.Stdout / os.Stderr).
+	stdout          io.Writer
+	stderr          io.Writer
+	wrkHomeOverride string
+	wrkDateOverride string
 }
 
 func newInvocationContext(origWd string, args []string) *invocationContext {
@@ -24,6 +33,22 @@ func newInvocationContext(origWd string, args []string) *invocationContext {
 		rawArgs: args,
 		command: "create",
 	}
+}
+
+// out returns the invocation stdout writer (default os.Stdout).
+func (ctx *invocationContext) out() io.Writer {
+	if ctx != nil && ctx.stdout != nil {
+		return ctx.stdout
+	}
+	return os.Stdout
+}
+
+// errw returns the invocation stderr writer (default os.Stderr).
+func (ctx *invocationContext) errw() io.Writer {
+	if ctx != nil && ctx.stderr != nil {
+		return ctx.stderr
+	}
+	return os.Stderr
 }
 
 func (ctx *invocationContext) finish(exitCode int) {

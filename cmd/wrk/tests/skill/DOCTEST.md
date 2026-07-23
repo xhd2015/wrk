@@ -1,11 +1,14 @@
 # wrk skill — flag actions `--list` / `--show` / `--install`
 
 ## Version
-0.0.2
+0.0.3
 
 Decision tree for `wrk skill`: early-dispatched flag actions that read the wrk
-skill from `//go:embed SKILL.md` in the wrk binary and optionally install
+skill from `//go:embed SKILL.md` in the wrk package and optionally install
 `SKILL.md` to agent tool directories. No git checkout is required.
+
+**Layer: L2 in-process CLI** — `Run` calls `wrkcli.RunCLI` (same dispatch as the
+binary, captured writers). Not product-binary e2e.
 
 # DSN (Domain Specific Notion)
 
@@ -14,7 +17,7 @@ skill from `//go:embed SKILL.md` in the wrk binary and optionally install
   create, etc.). Skill-local flags (`--list`/`-l`, `--show`, `--install`) are
   skill actions, not wrk project-list modes.
 - **Embedded SKILL.md** — `go-pkgs/wrkcli/SKILL.md` is compiled into the wrk
-  binary via `//go:embed`; no filesystem skills project lookup at runtime.
+  package via `//go:embed`; no filesystem skills project lookup at runtime.
 - **Shape 1 single skill** — no skill name argument; one embedded skill (`wrk`).
 - **Action flags (exactly one)** — `--list` / `-l`, `--show`, or `--install`
   select the skill action. Subcommands `list` / `show` / `install` are rejected.
@@ -76,26 +79,27 @@ skill/
 ## How to Run
 
 ```sh
-doctest vet ./tests/skill
-doctest test ./tests/skill
-doctest test ./tests/skill/list/basic
-doctest test ./tests/skill/show/header
-doctest test ./tests/skill/help/empty
-doctest test ./tests/skill/reject-old-subcommand/list
-doctest test ./tests/skill/install/dry-run-cursor
+doctest vet ./cmd/wrk/tests/skill
+doctest test ./cmd/wrk/tests/skill
+doctest test ./cmd/wrk/tests/skill/list/basic
+doctest test ./cmd/wrk/tests/skill/show/header
+doctest test ./cmd/wrk/tests/skill/help/empty
+doctest test ./cmd/wrk/tests/skill/reject-old-subcommand/list
+doctest test ./cmd/wrk/tests/skill/install/dry-run-cursor
 ```
 
 ```go
 import (
 	"bytes"
-	"os/exec"
 	"testing"
+
+	"github.com/xhd2015/wrk/wrkcli"
 )
 
 type Request struct {
 	WorkRoot string
 	WrkHome  string
-	RepoDir  string // process cwd when running wrk
+	RepoDir  string // process effective cwd for in-process Run
 	Args     []string
 }
 
@@ -106,31 +110,17 @@ type Response struct {
 }
 
 func Run(t *testing.T, req *Request) (*Response, error) {
-	bin := getWrkBin(t)
-
-	args := append([]string(nil), req.Args...)
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	cmd.Env = skillWrkEnv(req)
-
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			return nil, err
-		}
-	}
-
+	code := wrkcli.RunCLI(req.Args, wrkcli.RunOptions{
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Dir:     req.RepoDir,
+		WrkHome: req.WrkHome,
+	})
 	return &Response{
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
-		ExitCode: exitCode,
+		ExitCode: code,
 	}, nil
 }
 ```

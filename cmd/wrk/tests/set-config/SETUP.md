@@ -20,6 +20,7 @@ wrk --set-config --show
 - Isolated `{WRK_HOME}` per leaf (root `Setup`).
 - Management does not require a git checkout; default cwd is `{WorkRoot}`.
 - Config path is always `{WRK_HOME}/config.json`.
+- L2 in-process CLI via `wrkcli.RunCLI` (no product binary).
 
 ## Steps
 
@@ -33,10 +34,10 @@ wrk --set-config --show
 - `--new-window` under set-config also persists `terminal.mode=new` (implication).
 - Negatives clear/disable that axis (`window` removed/off; `terminal` removed/off; `agent.enabled=false`).
 - Unknown top-level keys are preserved.
-- Reuses root `Request` / `Run` / `ExtraEnv` harness; no nested `DOCTEST.md`.
 
 ```go
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -44,9 +45,24 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/wrk/wrkcli"
 )
 
-func Setup(t *testing.T, req *Request) error {
+const wrkDate = "2026-06-30"
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	workRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		return fmt.Errorf("resolve work root: %w", err)
+	}
+	req.WorkRoot = workRoot
+	req.WrkHome = filepath.Join(req.WorkRoot, ".wrk")
+	if err := os.MkdirAll(req.WrkHome, 0o755); err != nil {
+		return err
+	}
 	if req.RepoDir == "" {
 		req.RepoDir = req.WorkRoot
 	}
@@ -61,6 +77,16 @@ func setConfigPath(wrkHome string) string {
 func setConfigArgs(extra ...string) []string {
 	args := []string{"--set-config"}
 	return append(args, extra...)
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }
 
 func writeSetConfigRaw(t *testing.T, wrkHome, content string) {
@@ -117,10 +143,10 @@ func decodeModeObject(t *testing.T, raw json.RawMessage) string {
 func decodeAgent(t *testing.T, raw json.RawMessage) (enabled bool, runner, prompt string, args []string) {
 	t.Helper()
 	var obj struct {
-		Enabled         *bool    `json:"enabled"`
-		Runner          string   `json:"runner"`
-		PromptTemplate  string   `json:"prompt_template"`
-		Args            []string `json:"args"`
+		Enabled        *bool    `json:"enabled"`
+		Runner         string   `json:"runner"`
+		PromptTemplate string   `json:"prompt_template"`
+		Args           []string `json:"args"`
 	}
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		t.Fatalf("parse agent: %v", err)
@@ -194,7 +220,6 @@ func assertWindowAbsentOrOff(t *testing.T, wrkHome string) {
 	if !ok {
 		return
 	}
-	// tolerate explicit off/empty mode if implementer prefers
 	var obj map[string]interface{}
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		t.Fatalf("parse window: %v", err)
@@ -227,29 +252,62 @@ func assertEmptyStdout(t *testing.T, stdout string) {
 	}
 }
 
-// runWrkSetConfig runs wrk once with isolated WRK_HOME (same leaf) for multi-step merge leaves.
+func assertErrIsNil(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func skipIfNoGit(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+}
+
+// initGitRepoOnMain creates a minimal git repo on branch main (for positional
+// create-dir mutual exclusion only).
+func initGitRepoOnMain(t *testing.T, path string) {
+	t.Helper()
+	skipIfNoGit(t)
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+	runGit(t, path, "init", "-b", "main")
+	runGit(t, path, "config", "user.email", "test@example.com")
+	runGit(t, path, "config", "user.name", "test")
+	writeFile(t, filepath.Join(path, "README"), "seed\n")
+	runGit(t, path, "add", "README")
+	runGit(t, path, "commit", "-m", "init")
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+	}
+}
+
+// runWrkSetConfig runs wrk once in-process with isolated WRK_HOME for multi-step merge leaves.
 func runWrkSetConfig(t *testing.T, req *Request, args ...string) *Response {
 	t.Helper()
-	bin := getWrkBin(t)
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	if cmd.Dir == "" {
-		cmd.Dir = req.WorkRoot
+	dir := req.RepoDir
+	if dir == "" {
+		dir = req.WorkRoot
 	}
-	cmd.Env = append(os.Environ(), "WRK_HOME="+req.WrkHome, "WRK_DATE="+wrkDate)
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	exit := 0
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			exit = ee.ExitCode()
-		} else {
-			t.Fatalf("wrk %v: %v", args, err)
-		}
-	}
-	return &Response{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: exit}
+	var stdout, stderr bytes.Buffer
+	code := wrkcli.RunCLI(args, wrkcli.RunOptions{
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Dir:     dir,
+		WrkHome: req.WrkHome,
+		WrkDate: wrkDate,
+	})
+	return &Response{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: code}
 }
 
 func ensureSetConfigHelpersUsed() {
@@ -268,7 +326,10 @@ func ensureSetConfigHelpersUsed() {
 	_ = assertWindowAbsentOrOff
 	_ = assertAgentEnabled
 	_ = assertEmptyStdout
+	_ = assertErrIsNil
 	_ = runWrkSetConfig
+	_ = initGitRepoOnMain
+	_ = skipIfNoGit
 	_ = fmt.Sprintf
 }
 ```

@@ -21,12 +21,9 @@ wrk skill list|show|install (subcommand) -> non-zero exit
 
 ## Preconditions
 
-- The wrk Go module is at `go-pkgs/cmd/wrk/` (three levels above this tree root).
-- Go toolchain is available on PATH.
-- Session wrk binary is built once per doctest run to
-  process-local `MkdirTemp` wrk binary (in-memory mutex).
-- Embedded skill content lives in `go-pkgs/wrkcli/SKILL.md` (compiled into the
-  binary); doctest `show/basic` asserts `WRK_SKILL_DOCTEST_MARKER` and
+- In-process CLI via `wrkcli.RunCLI` (L2); no product binary build.
+- Embedded skill content lives in `wrkcli/SKILL.md` (compiled into the test binary);
+  doctest `show/basic` asserts `WRK_SKILL_DOCTEST_MARKER` and
   `name: wrk` in stdout.
 
 ## Steps
@@ -39,97 +36,30 @@ wrk skill list|show|install (subcommand) -> non-zero exit
 
 - Skill commands do not require a git repository; cwd is a neutral empty dir
   unless a descendant overrides `req.RepoDir`.
-- Only `WRK_HOME` is passed via `skillWrkEnv`; no `WRK_SKILLS_ROOT`.
+- `WrkHome` is passed via `RunOptions.WrkHome` (no `os.Setenv`).
 - Stdout assertions use `assert.Output` v2 full-match templates where output is
   bounded; `show/basic` uses substring checks for embedded content.
 - User-facing help and list/show stdout must end with trailing `\n`.
+- **Note:** `skill install` dry-run may still print via the skills install package
+  to process stdout when that library does not accept a writer; list/show/help
+  paths use `RunOptions.Stdout` fully.
 
 ```go
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
-	"sync"
 )
 
 const embeddedSkillMarker = "WRK_SKILL_DOCTEST_MARKER"
 
-func findModuleRoot(dir string) string {
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
-// Process-local wrk binary (one-process suite; in-memory mutex, not session.Once/flock).
-var (
-	wrkBinMu   sync.Mutex
-	wrkBinPath string
-	wrkBinErr  error
-	// wrkModRoot set once via noteModRoot (sync.Once); not per-leaf Setup writes.
-	wrkModOnce sync.Once
-	wrkModRoot string
-)
-
-
-// noteModRoot records module root once per process (sync.Once). Safe under t.Parallel.
-// Prefer this over writing wrkModRoot from every leaf Setup.
-func noteModRoot(d *session.Doctest) {
-	if d == nil {
-		return
-	}
-	wrkModOnce.Do(func() {
-		wrkModRoot = findModuleRoot(d.DOCTEST_ROOT)
-	})
-}
-
-func getWrkBin(t *testing.T) string {
-	t.Helper()
-	wrkBinMu.Lock()
-	defer wrkBinMu.Unlock()
-	if wrkBinPath != "" || wrkBinErr != nil {
-		if wrkBinErr != nil {
-			t.Fatal(wrkBinErr)
-		}
-		return wrkBinPath
-	}
-	if wrkModRoot == "" {
-		t.Fatal("wrkModRoot unset; root Setup must call noteModRoot first")
-	}
-	dir, err := os.MkdirTemp("", "wrk-doctest-bin-")
-	if err != nil {
-		wrkBinErr = err
-		t.Fatal(err)
-	}
-	bin := filepath.Join(dir, "wrk")
-	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/wrk")
-	cmd.Dir = wrkModRoot
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		wrkBinErr = fmt.Errorf("build wrk: %v\n%s", err, out)
-		t.Fatal(wrkBinErr)
-	}
-	wrkBinPath = bin
-	return bin
-}
-
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	noteModRoot(d)
-	if wrkModRoot == "" {
-		t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
-	}
+	_ = d
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		return fmt.Errorf("resolve work root: %w", err)
@@ -144,10 +74,6 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	}
 	ensureSkillHelpersUsed()
 	return nil
-}
-
-func skillWrkEnv(req *Request) []string {
-	return append(os.Environ(), "WRK_HOME="+req.WrkHome)
 }
 
 func initNeutralCwd(t *testing.T, workRoot, name string) string {

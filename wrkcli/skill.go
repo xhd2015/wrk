@@ -3,6 +3,8 @@ package wrkcli
 import (
 	_ "embed"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	lessflags "github.com/xhd2015/less-flags"
@@ -99,13 +101,16 @@ Examples:
 `
 }
 
-func runSkill(origWd string, args []string, wrkHome string) error {
+func runSkill(origWd string, args []string, wrkHome string, ctx *invocationContext) error {
+	_ = origWd
+	_ = wrkHome
+	out := skillOut(ctx)
 	if flag, found := findConflictingWrkModeFlag(args); found {
 		return fmt.Errorf("wrk: %s is mutually exclusive with skill", flag)
 	}
 
 	if len(args) == 0 || isSkillHelpOnly(args) {
-		fmt.Print(skillUsage())
+		fmt.Fprint(out, skillUsage())
 		return nil
 	}
 
@@ -135,12 +140,19 @@ func runSkill(origWd string, args []string, wrkHome string) error {
 
 	switch {
 	case list:
-		return runSkillList(rest)
+		return runSkillList(rest, out)
 	case show:
-		return runSkillShow(rest)
+		return runSkillShow(rest, out)
 	default:
 		return runSkillInstall(rest)
 	}
+}
+
+func skillOut(ctx *invocationContext) io.Writer {
+	if ctx != nil {
+		return ctx.out()
+	}
+	return os.Stdout
 }
 
 func isSkillHelpOnly(args []string) bool {
@@ -218,32 +230,32 @@ func findWrkModeFlag(args []string) (string, bool) {
 	return "", false
 }
 
-func runSkillList(args []string) error {
+func runSkillList(args []string, out io.Writer) error {
 	if len(args) > 0 {
 		return fmt.Errorf("wrk: unexpected arguments")
 	}
-	fmt.Println(skillSubcommandName)
+	fmt.Fprintln(out, skillSubcommandName)
 	return nil
 }
 
-func runSkillShow(args []string) error {
+func runSkillShow(args []string, out io.Writer) error {
 	headerOnly, err := parseSkillShowArgs(args)
 	if err != nil {
 		return err
 	}
 	content := skillContent
 	if headerOnly {
-		out, err := skill_file.FormatHeaderWithDelimiters(content)
+		header, err := skill_file.FormatHeaderWithDelimiters(content)
 		if err != nil {
 			return fmt.Errorf("wrk: parse skill header: %w", err)
 		}
-		fmt.Print(out)
+		fmt.Fprint(out, header)
 		return nil
 	}
 	if !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
-	fmt.Print(content)
+	fmt.Fprint(out, content)
 	return nil
 }
 

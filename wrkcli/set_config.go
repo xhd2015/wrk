@@ -3,6 +3,7 @@ package wrkcli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,12 +47,12 @@ func runSetConfig(origWd string, args []string, ctx *invocationContext) error {
 	if help, create, show := peelSetConfigHelp(args); help {
 		switch {
 		case create && !show:
-			fmt.Print(setConfigCreateUsage())
+			fmt.Fprint(ctx.out(), setConfigCreateUsage())
 		case show && !create:
-			fmt.Print(setConfigShowUsage())
+			fmt.Fprint(ctx.out(), setConfigShowUsage())
 		default:
 			// No action, or both create+show with help: dispatcher page.
-			fmt.Print(setConfigUsage())
+			fmt.Fprint(ctx.out(), setConfigUsage())
 		}
 		return nil
 	}
@@ -61,7 +62,7 @@ func runSetConfig(origWd string, args []string, ctx *invocationContext) error {
 		return err
 	}
 
-	wrkHome, err := resolveWrkHome()
+	wrkHome, err := ctx.resolveHome()
 	if err != nil {
 		return err
 	}
@@ -84,7 +85,7 @@ func runSetConfig(origWd string, args []string, ctx *invocationContext) error {
 		if opts.create || opts.anyCreateFlag() {
 			return fmt.Errorf("wrk: --set-config --show is mutually exclusive with --create flags")
 		}
-		return setConfigShow(wrkHome)
+		return setConfigShow(wrkHome, ctx.out())
 	}
 
 	if !opts.create {
@@ -288,13 +289,16 @@ func isSetConfigDisallowed(arg string) bool {
 	return false
 }
 
-func setConfigShow(wrkHome string) error {
+func setConfigShow(wrkHome string, w io.Writer) error {
+	if w == nil {
+		w = os.Stdout
+	}
 	path := filepath.Join(wrkHome, "config.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Empty object is valid JSON for show when no config yet.
-			fmt.Println("{}")
+			fmt.Fprintln(w, "{}")
 			return nil
 		}
 		return fmt.Errorf("wrk: read config.json: %w", err)
@@ -308,7 +312,7 @@ func setConfigShow(wrkHome string) error {
 	if err != nil {
 		return fmt.Errorf("wrk: marshal config.json: %w", err)
 	}
-	fmt.Println(string(out))
+	fmt.Fprintln(w, string(out))
 	return nil
 }
 

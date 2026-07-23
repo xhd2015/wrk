@@ -32,31 +32,6 @@ import (
 	"golang.org/x/term"
 )
 
-// Run executes wrk logic with args. The first positional argument,
-// if present, is the source directory for all modes.
-func Run(args []string) error {
-	origWd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("get cwd: %w", err)
-	}
-	ctx := newInvocationContext(origWd, args)
-	var runErr error
-	defer func() {
-		exitCode := 0
-		if runErr != nil {
-			var ece ExitCodeError
-			if errors.As(runErr, &ece) {
-				exitCode = ece.Code
-			} else {
-				exitCode = 1
-			}
-		}
-		ctx.finish(exitCode)
-	}()
-	runErr = run(origWd, args, ctx)
-	return runErr
-}
-
 func validateWhereFlagArg(args []string) error {
 	for i, arg := range args {
 		if arg != "--where" {
@@ -71,7 +46,7 @@ func validateWhereFlagArg(args []string) error {
 
 func run(origWd string, args []string, ctx *invocationContext) error {
 	if len(args) > 0 && args[0] == "skill" {
-		wrkHome, err := resolveWrkHome()
+		wrkHome, err := ctx.resolveHome()
 		if err != nil {
 			return err
 		}
@@ -85,7 +60,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if err := ctx.autoRecord(); err != nil {
 			return err
 		}
-		return runSkill(origWd, args[1:], wrkHome)
+		return runSkill(origWd, args[1:], wrkHome, ctx)
 	}
 	if hasArg(args, "--bash-integration") {
 		ctx.skipEvent = true
@@ -99,7 +74,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	}
 	if hasArg(args, "--version") {
 		if len(args) == 1 && args[0] == "--version" {
-			fmt.Println(Version())
+			fmt.Fprintln(ctx.out(), Version())
 			ctx.skipEvent = true
 			return nil
 		}
@@ -233,12 +208,20 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		String("--set-task", &setTaskDesc).
 		String("--where", &wherePath).
 		Cut("--exec", &execArgs).
-		Help("-h,--help", usage()).
+		// HelpFunc writes to the invocation stdout so RunWithWriters can capture
+		// root -h/--help (less-flags Help() always prints to os.Stdout).
+		HelpFunc("-h,--help", func() {
+			txt := usage()
+			fmt.Fprint(ctx.out(), txt)
+			if txt != "" && !strings.HasSuffix(txt, "\n") {
+				fmt.Fprintln(ctx.out())
+			}
+		}).
 		HelpNoExit().
 		Parse(parseArgs)
 	if err != nil {
 		if errors.Is(err, lessflags.ErrHelp) {
-			// Help text already printed by Parse; exit 0.
+			// Help text already printed by HelpFunc; exit 0.
 			ctx.skipEvent = true
 			return nil
 		}
@@ -317,7 +300,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		spawnTarget = remaining[1]
 	}
 
-	wrkHome, err := resolveWrkHome()
+	wrkHome, err := ctx.resolveHome()
 	if err != nil {
 		return err
 	}
@@ -3009,6 +2992,15 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 }
 
 func resolveWrkHome() (string, error) {
+	return resolveWrkHomeWith("")
+}
+
+// resolveWrkHomeWith prefers an explicit override (per-invocation, no Setenv),
+// then WRK_HOME, then ~/.wrk.
+func resolveWrkHomeWith(override string) (string, error) {
+	if v := strings.TrimSpace(override); v != "" {
+		return filepath.Abs(pathfmt.Expand(v))
+	}
 	if v := os.Getenv("WRK_HOME"); v != "" {
 		return filepath.Abs(pathfmt.Expand(v))
 	}
@@ -3019,11 +3011,32 @@ func resolveWrkHome() (string, error) {
 	return filepath.Join(home, ".wrk"), nil
 }
 
+func (ctx *invocationContext) resolveHome() (string, error) {
+	if ctx == nil {
+		return resolveWrkHome()
+	}
+	return resolveWrkHomeWith(ctx.wrkHomeOverride)
+}
+
 func resolveWrkDate() string {
+	return resolveWrkDateWith("")
+}
+
+func resolveWrkDateWith(override string) string {
+	if v := strings.TrimSpace(override); v != "" {
+		return v
+	}
 	if v := os.Getenv("WRK_DATE"); v != "" {
 		return v
 	}
 	return time.Now().Format("2006-01-02")
+}
+
+func (ctx *invocationContext) resolveDate() string {
+	if ctx == nil {
+		return resolveWrkDate()
+	}
+	return resolveWrkDateWith(ctx.wrkDateOverride)
 }
 
 func resolveNamingInputs(cwd, baseBranch string) (branchBase, pathToken string, err error) {

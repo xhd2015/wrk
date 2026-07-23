@@ -1,10 +1,13 @@
 # wrk --version — embedded build version
 
 ## Version
-0.0.2
+0.0.3
 
 Decision tree for root-level `wrk --version`: prints the embedded version from
 `wrkcli/VERSION.txt` via `go:embed`. No git checkout is required.
+
+**Layer: L2 in-process CLI** — `Run` calls `wrkcli.RunCLI` (same dispatch as the
+binary, captured writers). Not product-binary e2e.
 
 # DSN (Domain Specific Notion)
 
@@ -54,14 +57,15 @@ doctest test ./cmd/wrk/tests/version/mutual-exclusion/with-list
 ```go
 import (
 	"bytes"
-	"os/exec"
 	"testing"
+
+	"github.com/xhd2015/wrk/wrkcli"
 )
 
 type Request struct {
 	WorkRoot string
 	WrkHome  string
-	RepoDir  string // process cwd when running wrk
+	RepoDir  string // process effective cwd for in-process Run
 	Args     []string
 }
 
@@ -72,31 +76,17 @@ type Response struct {
 }
 
 func Run(t *testing.T, req *Request) (*Response, error) {
-	bin := getWrkBin(t)
-
-	args := append([]string(nil), req.Args...)
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	cmd.Env = versionWrkEnv(req)
-
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			return nil, err
-		}
-	}
-
+	code := wrkcli.RunCLI(req.Args, wrkcli.RunOptions{
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Dir:     req.RepoDir,
+		WrkHome: req.WrkHome,
+	})
 	return &Response{
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
-		ExitCode: exitCode,
+		ExitCode: code,
 	}, nil
 }
 ```
