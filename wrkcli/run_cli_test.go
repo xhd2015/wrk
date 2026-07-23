@@ -97,3 +97,17 @@ func TestRunCLISetConfigShowEmpty(t *testing.T) {
 		t.Fatalf("stdout=%q", stdout.String())
 	}
 }
+
+func TestRunCLIRejectsProcessIsolationFields(t *testing.T) {
+	var stderr bytes.Buffer
+	code := RunCLI([]string{"--version"}, RunOptions{
+		Stderr:   &stderr,
+		ExtraEnv: []string{"FOO=bar"},
+	})
+	if code != 2 {
+		t.Fatalf("exit %d want 2 stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "product-binary isolation") {
+		t.Fatalf("stderr=%q", stderr.String())
+	}
+}

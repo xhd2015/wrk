@@ -334,7 +334,7 @@ func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
 		return nil, err
 	}
 
-	bin := ""
+	bin := getWrkBin(t)
 	resp := &Response{
 		Home:       req.FakeHome,
 		WrkHome:    req.WrkHome,
@@ -593,25 +593,35 @@ func shellQuote(s string) string {
 
 func runWrkOnce(t *testing.T, req *Request, bin string, args []string, followEnv string) (stdout, stderr string, exitCode int, err error) {
 	t.Helper()
-	_ = bin
-	var outBuf, errBuf bytes.Buffer
-	opts := wrkcli.RunOptions{
-		Stdout:  &outBuf,
-		Stderr:  &errBuf,
-		Dir:     req.RepoDir,
-		WrkHome: req.WrkHome,
+	if bin == "" {
+		bin = getWrkBin(t)
 	}
-	var extra []string
-	if req.FakeHome != "" {
-		extra = append(extra, "HOME="+req.FakeHome)
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = req.RepoDir
+	env := []string{
+		"HOME=" + req.FakeHome,
+		"WRK_HOME=" + req.WrkHome,
+		"PATH=" + os.Getenv("PATH"),
 	}
 	if followEnv != "" {
-		extra = append(extra, "WRK_FOLLOWUP_FILE="+followEnv)
+		env = append(env, "WRK_FOLLOWUP_FILE="+followEnv)
 	}
-	opts.ExtraEnv = extra
-	code := wrkcli.RunCLI(args, opts)
-	return outBuf.String(), errBuf.String(), code, nil
+	cmd.Env = env
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	runErr := cmd.Run()
+	exitCode = 0
+	if runErr != nil {
+		if ee, ok := runErr.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		} else {
+			return "", "", 0, runErr
+		}
+	}
+	return outBuf.String(), errBuf.String(), exitCode, nil
 }
+
 
 func findModuleRoot(dir string) string {
 	for {

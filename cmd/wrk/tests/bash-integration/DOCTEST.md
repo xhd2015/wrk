@@ -156,7 +156,7 @@ func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
 		}
 	}
 
-	bin := ""
+	bin := getWrkBin(t)
 
 	if req.PreInstall {
 		if _, _, _, err := runWrkOnce(t, req, bin, buildBashIntegrationArgs("install", false)); err != nil {
@@ -261,22 +261,31 @@ func buildBashIntegrationArgs(action string, dryRun bool) []string {
 
 func runWrkOnce(t *testing.T, req *Request, bin string, args []string) (stdout, stderr string, exitCode int, err error) {
 	t.Helper()
-	_ = bin
+	if bin == "" {
+		bin = getWrkBin(t)
+	}
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = req.RepoDir
+	cmd.Env = []string{
+		"HOME=" + req.FakeHome,
+		"WRK_HOME=" + req.WrkHome,
+		"PATH=" + os.Getenv("PATH"),
+	}
 	var outBuf, errBuf bytes.Buffer
-	opts := wrkcli.RunOptions{
-		Stdout:  &outBuf,
-		Stderr:  &errBuf,
-		Dir:     req.RepoDir,
-		WrkHome: req.WrkHome,
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	runErr := cmd.Run()
+	exitCode = 0
+	if runErr != nil {
+		if ee, ok := runErr.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		} else {
+			return "", "", 0, runErr
+		}
 	}
-	var extra []string
-	if req.FakeHome != "" {
-		extra = append(extra, "HOME="+req.FakeHome)
-	}
-	opts.ExtraEnv = extra
-	code := wrkcli.RunCLI(args, opts)
-	return outBuf.String(), errBuf.String(), code, nil
+	return outBuf.String(), errBuf.String(), exitCode, nil
 }
+
 
 func findModuleRoot(dir string) string {
 	for {

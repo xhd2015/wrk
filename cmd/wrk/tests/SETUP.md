@@ -668,9 +668,41 @@ func buildWrkCLIArgs(req *Request) []string {
 	return args
 }
 
-// runWrkBinaryBoundary runs the product binary for process-boundary leaves only
-// (script TTY, long-running --web probe). Labeled e2e in those leaves.
-func runWrkBinaryBoundary(t *testing.T, req *Request, args []string) (*Response, error) {
+// needsProcessIsolation is true when the leaf requires child-process isolation
+// (cmd.Env / cmd.Dir). Parallel-safe; matches DOCTEST_LINT.md §1.
+// In-process RunCLI must not Setenv/Chdir/stdin-hijack for these.
+func needsProcessIsolation(req *Request) bool {
+	if req.StdinInput != "" {
+		return true
+	}
+	if len(req.ExtraEnv) > 0 {
+		return true
+	}
+	if req.PathPrepend != "" || req.FakeShellDir != "" {
+		return true
+	}
+	if req.FakeHome != "" || req.UseMinimalPath {
+		return true
+	}
+	if req.UseFollowupEnv || req.FollowupFile != "" {
+		return true
+	}
+	if req.SetTaskEnv != "" || req.BasenameEnv != "" {
+		return true
+	}
+	if req.ProjectsPerfLog != "" {
+		return true
+	}
+	if req.ShellEnv != "" || req.FakeShellLog != "" || req.FakeShellExit != 0 {
+		return true
+	}
+	return false
+}
+
+// runWrkBinary runs the product binary with cmd.Env/cmd.Dir only (L3-capable,
+// Parallel-safe). Used for process-boundary leaves and any leaf that needs env
+// isolation.
+func runWrkBinary(t *testing.T, req *Request, args []string) (*Response, error) {
 	t.Helper()
 	bin := getWrkBin(t)
 	if req.UseScriptTTY {
@@ -679,14 +711,20 @@ func runWrkBinaryBoundary(t *testing.T, req *Request, args []string) (*Response,
 	if req.WebProbe {
 		return runWebProbe(t, req, bin, args)
 	}
-	t.Fatal("runWrkBinaryBoundary: neither UseScriptTTY nor WebProbe set")
-	return nil, nil
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = req.RepoDir
+	cmd.Env = wrkEnv(req)
+	return captureCommandOutput(cmd, req.StdinInput)
 }
 
-// runWrkInProcess runs wrk via wrkcli.RunCLI (L2). Maps harness env fields onto
-// RunOptions so fixtures do not need a product binary.
+// runWrkInProcess runs wrk via wrkcli.RunCLI (L2). Parallel-safe: only
+// Stdout/Stderr/Dir/WrkHome/WrkDate — no ExtraEnv/PathPrepend/Stdin.
+// Product output is captured only on paths that write via ctx.out()/ctx.errw().
 func runWrkInProcess(t *testing.T, req *Request, args []string) (*Response, error) {
 	t.Helper()
+	if needsProcessIsolation(req) {
+		t.Fatal("runWrkInProcess: leaf needs process isolation; use runWrkBinary (cmd.Env/cmd.Dir)")
+	}
 	var stdout, stderr bytes.Buffer
 	opts := wrkcli.RunOptions{
 		Stdout:  &stdout,
@@ -694,53 +732,6 @@ func runWrkInProcess(t *testing.T, req *Request, args []string) (*Response, erro
 		Dir:     req.RepoDir,
 		WrkHome: req.WrkHome,
 		WrkDate: wrkDate,
-	}
-	if req.StdinInput != "" {
-		opts.Stdin = strings.NewReader(req.StdinInput)
-	}
-	// Collect ExtraEnv-like keys from the same sources as wrkEnv (minus base environ).
-	var extra []string
-	if req.UseMinimalPath {
-		home := req.FakeHome
-		if home == "" {
-			home = req.WorkRoot
-		}
-		path := filepath.Join(req.WorkRoot, "minimal-bin")
-		if st, err := os.Stat(path); err != nil || !st.IsDir() {
-			path = "/usr/bin:/bin"
-		}
-		extra = append(extra, "HOME="+home, "PATH="+path)
-	} else if req.FakeHome != "" {
-		extra = append(extra, "HOME="+req.FakeHome)
-	}
-	if req.SetTaskEnv != "" {
-		extra = append(extra, req.SetTaskEnv)
-	}
-	if req.BasenameEnv != "" {
-		extra = append(extra, req.BasenameEnv)
-	}
-	if req.ProjectsPerfLog != "" {
-		extra = append(extra, "WRK_PROJECTS_PERF_LOG="+req.ProjectsPerfLog)
-	}
-	extra = append(extra, req.ExtraEnv...)
-	if req.UseFollowupEnv && req.FollowupFile != "" {
-		extra = append(extra, "WRK_FOLLOWUP_FILE="+req.FollowupFile)
-	}
-	if req.ShellEnv != "" {
-		extra = append(extra, "SHELL="+req.ShellEnv)
-	}
-	if req.FakeShellLog != "" {
-		extra = append(extra, "WRK_FAKE_SHELL_LOG="+req.FakeShellLog)
-	}
-	if req.FakeShellExit != 0 {
-		extra = append(extra, fmt.Sprintf("WRK_FAKE_SHELL_EXIT=%d", req.FakeShellExit))
-	}
-	opts.ExtraEnv = extra
-	if req.PathPrepend != "" {
-		opts.PathPrepend = append(opts.PathPrepend, req.PathPrepend)
-	}
-	if req.FakeShellDir != "" {
-		opts.PathPrepend = append(opts.PathPrepend, req.FakeShellDir)
 	}
 	code := wrkcli.RunCLI(args, opts)
 	return &Response{

@@ -46,10 +46,13 @@ wrk skill list|show|install (subcommand) -> non-zero exit
 
 ```go
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/xhd2015/doctest/assert"
@@ -58,8 +61,89 @@ import (
 
 const embeddedSkillMarker = "WRK_SKILL_DOCTEST_MARKER"
 
+// Process-local wrk binary for --install only (skills/install prints to os.Stdout).
+var (
+	wrkBinMu   sync.Mutex
+	wrkBinPath string
+	wrkBinErr  error
+	wrkModOnce sync.Once
+	wrkModRoot string
+)
+
+func noteModRoot(d *session.Doctest) {
+	if d == nil {
+		return
+	}
+	wrkModOnce.Do(func() {
+		dir := d.DOCTEST_ROOT
+		for {
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				wrkModRoot = dir
+				return
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				return
+			}
+			dir = parent
+		}
+	})
+}
+
+func getWrkBin(t *testing.T) string {
+	t.Helper()
+	wrkBinMu.Lock()
+	defer wrkBinMu.Unlock()
+	if wrkBinPath != "" || wrkBinErr != nil {
+		if wrkBinErr != nil {
+			t.Fatal(wrkBinErr)
+		}
+		return wrkBinPath
+	}
+	if wrkModRoot == "" {
+		t.Fatal("wrkModRoot unset; root Setup must call noteModRoot first")
+	}
+	dir, err := os.MkdirTemp("", "wrk-skill-doctest-bin-")
+	if err != nil {
+		wrkBinErr = err
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "wrk")
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/wrk")
+	cmd.Dir = wrkModRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		wrkBinErr = fmt.Errorf("build wrk: %v\n%s", err, out)
+		t.Fatal(wrkBinErr)
+	}
+	wrkBinPath = bin
+	return bin
+}
+
+// runSkillInstallBinary runs wrk skill --install… as a child process (cmd.Env/Dir).
+func runSkillInstallBinary(t *testing.T, req *Request) (*Response, error) {
+	t.Helper()
+	bin := getWrkBin(t)
+	cmd := exec.Command(bin, req.Args...)
+	cmd.Dir = req.RepoDir
+	cmd.Env = append(os.Environ(), "WRK_HOME="+req.WrkHome)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	exitCode := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		} else {
+			return nil, err
+		}
+	}
+	return &Response{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: exitCode}, nil
+}
+
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
+	noteModRoot(d)
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		return fmt.Errorf("resolve work root: %w", err)

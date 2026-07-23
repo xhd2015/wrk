@@ -874,35 +874,40 @@ func composeEnsureHelpersUsed() {
 	_ = padRight
 }
 
-// runCLIWithEnv maps a full env slice (as historically used with exec.Command)
-// onto wrkcli.RunOptions for L2 in-process CLI.
+
+// runCLIWithEnv runs the product binary with cmd.Dir/cmd.Env (Parallel-safe).
+// Named historically; DOCTEST_LINT.md §1 forbids Setenv/Chdir for leaf isolation.
 func runCLIWithEnv(t *testing.T, dir, wrkHome string, args, env []string) (*Response, error) {
 	t.Helper()
-	var stdout, stderr bytes.Buffer
-	opts := wrkcli.RunOptions{
-		Stdout:  &stdout,
-		Stderr:  &stderr,
-		Dir:     dir,
-		WrkHome: wrkHome,
+	bin := getWrkBin(t)
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = dir
+	if len(env) > 0 {
+		cmd.Env = env
+	} else {
+		cmd.Env = append(os.Environ(), "WRK_HOME="+wrkHome)
 	}
-	for _, e := range env {
-		key, val, ok := strings.Cut(e, "=")
-		if !ok {
-			continue
-		}
-		switch key {
-		case "WRK_HOME":
-			if strings.TrimSpace(val) != "" {
-				opts.WrkHome = val
-			}
-		case "WRK_DATE":
-			opts.WrkDate = val
-		default:
-			opts.ExtraEnv = append(opts.ExtraEnv, e)
-		}
-	}
-	code := wrkcli.RunCLI(args, opts)
-	return &Response{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: code}, nil
+	return captureCommandOutput(cmd, "")
 }
+
+func captureCommandOutput(cmd *exec.Cmd, stdinInput string) (*Response, error) {
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if stdinInput != "" {
+		cmd.Stdin = strings.NewReader(stdinInput)
+	}
+	err := cmd.Run()
+	exitCode := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		} else {
+			return nil, err
+		}
+	}
+	return &Response{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: exitCode}, nil
+}
+
 
 ```

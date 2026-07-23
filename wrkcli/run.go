@@ -813,7 +813,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if absErr == nil {
 			top, topErr := worktree.ShowToplevel(cwdAbs)
 			if topErr == nil && sameDirPath(top, mainRepo) {
-				fmt.Fprintf(cliStderr(), "wrk: --main is not necessary (already at main repository root); continuing\n")
+				fmt.Fprintf(ctx.errw(), "wrk: --main is not necessary (already at main repository root); continuing\n")
 			}
 		}
 		workDir = mainRepo
@@ -915,7 +915,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		}
 		if pushFlag {
 			if !jsonFlag {
-				fmt.Fprintln(cliStdout()) // blank line between tag-next block and push confirm
+				fmt.Fprintln(ctx.out()) // blank line between tag-next block and push confirm
 			}
 			// With --json: still push branch+tags, but keep stdout JSON-clean.
 			if err := runPushMainWithOutput(tagRes.MainRepo, dryRun, tagRes.Tags, !jsonFlag); err != nil {

@@ -1578,14 +1578,12 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 		return nil, err
 	}
 
-	// True process-boundary paths stay binary e2e (TTY script / long-running web).
-	// Helpers live in SETUP.md so this Run body stays L2 in-process by default.
-	if req.UseScriptTTY || req.WebProbe {
-		return runWrkBinaryBoundary(t, req, args)
-	}
-
-	// L2 in-process CLI (design center): same dispatch as the product binary.
-	return runWrkInProcess(t, req, args)
+	// DOCTEST_LINT.md §1: this mega-root exercises full CLI (status/create/done/…).
+	// Product paths still print via process streams (cliStdout), and many leaves
+	// need cmd.Env/cmd.Dir isolation. Use the product binary only — Parallel-safe
+	// (no Setenv/Chdir). True L2 short paths live in nested roots (version/skill/
+	// set-config/…) that call RunCLI with ctx.out()/WrkHome overrides.
+	return runWrkBinary(t, req, args)
 }
 
 // prepareFollowupFile truncates FollowupFile so in-place --cd leaves can detect writes.

@@ -110,6 +110,14 @@ type Response struct {
 }
 
 func Run(t *testing.T, req *Request) (*Response, error) {
+	// --install uses github.com/xhd2015/skills/install which prints to
+	// os.Stdout (no writer injection). Capture requires a child process
+	// (cmd.Env/cmd.Dir) per DOCTEST_LINT.md §1 — not Setenv/Chdir.
+	for _, a := range req.Args {
+		if a == "--install" {
+			return runSkillInstallBinary(t, req)
+		}
+	}
 	var stdout, stderr bytes.Buffer
 	code := wrkcli.RunCLI(req.Args, wrkcli.RunOptions{
 		Stdout:  &stdout,
