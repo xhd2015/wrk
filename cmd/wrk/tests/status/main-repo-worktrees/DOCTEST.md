@@ -146,8 +146,21 @@ func wrkDateForReq(req *Request) string {
 }
 
 func Run(t *testing.T, req *Request) (*Response, error) {
+	// L2 in-process: WrkHome/Dir only (status prints via ctx.out; no ExtraEnv).
 	args := append([]string(nil), req.Args...)
-	return runCLIWithEnv(t, req.RepoDir, req.WrkHome, args, wrkEnv(req))
+	var stdout, stderr bytes.Buffer
+	code := wrkcli.RunCLI(args, wrkcli.RunOptions{
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Dir:     req.RepoDir,
+		WrkHome: req.WrkHome,
+		WrkDate: wrkDateForReq(req),
+	})
+	return &Response{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		ExitCode: code,
+	}, nil
 }
 
 

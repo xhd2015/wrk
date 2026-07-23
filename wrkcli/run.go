@@ -770,10 +770,10 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runProjectsDepGraph(wrkHome, ctx)
 	}
 	if addFlagSet {
-		return runAdd(wrkHome, *addPath)
+		return runAdd(ctx.out(), wrkHome, *addPath, origWd)
 	}
 	if removeFlagSet {
-		return runRemove(wrkHome, *removePath)
+		return runRemove(ctx.out(), wrkHome, *removePath, origWd)
 	}
 	if whereFlagSet {
 		return runWhere(ctx.out(), wrkHome, *wherePath)
@@ -1382,10 +1382,37 @@ func pathUnderAnyRoot(path string, roots []string) bool {
 	return false
 }
 
-func runAdd(wrkHome, addDir string) error {
-	abs, err := filepath.Abs(addDir)
+// absFromBase resolves dir to an absolute path without os.Chdir: absolute dirs
+// are cleaned; relative dirs join base (invocation Dir / origWd) when set.
+func absFromBase(base, dir string) (string, error) {
+	if filepath.IsAbs(dir) {
+		return filepath.Clean(dir), nil
+	}
+	base = strings.TrimSpace(base)
+	if base != "" {
+		if !filepath.IsAbs(base) {
+			b, err := filepath.Abs(base)
+			if err != nil {
+				return "", fmt.Errorf("resolve base: %w", err)
+			}
+			base = b
+		}
+		return filepath.Clean(filepath.Join(base, dir)), nil
+	}
+	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return fmt.Errorf("resolve dir: %w", err)
+		return "", fmt.Errorf("resolve dir: %w", err)
+	}
+	return abs, nil
+}
+
+func runAdd(out io.Writer, wrkHome, addDir, baseDir string) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	abs, err := absFromBase(baseDir, addDir)
+	if err != nil {
+		return err
 	}
 	if _, err := os.Stat(abs); err != nil {
 		if os.IsNotExist(err) {
@@ -1408,14 +1435,17 @@ func runAdd(wrkHome, addDir string) error {
 	if err := storage.RecordProject(wrkHome, mainRepo, storage.SourceManual); err != nil {
 		return err
 	}
-	fmt.Fprintln(cliStdout(), mainRepo)
+	fmt.Fprintln(out, mainRepo)
 	return nil
 }
 
-func runRemove(wrkHome, removeDir string) error {
-	abs, err := filepath.Abs(removeDir)
+func runRemove(out io.Writer, wrkHome, removeDir, baseDir string) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	abs, err := absFromBase(baseDir, removeDir)
 	if err != nil {
-		return fmt.Errorf("resolve dir: %w", err)
+		return err
 	}
 	mainRepoPath := storage.NormalizePath(abs)
 	if _, err := os.Stat(abs); err == nil {
@@ -1438,7 +1468,7 @@ func runRemove(wrkHome, removeDir string) error {
 		return err
 	}
 	if removed {
-		fmt.Fprintln(cliStdout(), mainRepoPath)
+		fmt.Fprintln(out, mainRepoPath)
 	}
 	return nil
 }

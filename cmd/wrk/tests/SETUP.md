@@ -721,11 +721,24 @@ func needsInProcessCaptureOK(req *Request) bool {
 	for _, a := range args {
 		switch a {
 		case "--done", "--merge-back", "--dep", "--bring", "--all-deps",
-			"--add", "--rm", "--remove", "--cd", "--set-task", "--set-config",
+			"--cd", "--set-task",
 			"--scan-git-repos", "--reinstall-local", "--bash-integration",
-			"--skill", "--gen-commit-msg", "--new", "--dashboard":
+			"--gen-commit-msg", "--new", "--dashboard":
 			return false
 		}
+	}
+	// --skill --install prints via skills/install process stdout → binary.
+	hasSkill, skillInstall := false, false
+	for _, a := range args {
+		if a == "--skill" {
+			hasSkill = true
+		}
+		if a == "--install" {
+			skillInstall = true
+		}
+	}
+	if hasSkill && skillInstall {
+		return false
 	}
 	// Pure modes known to print via ctx.out()/errw (and free modifiers like
 	// --dry-run/--json/--color/--fetch/--push with tag-next compose).
@@ -736,6 +749,10 @@ func needsInProcessCaptureOK(req *Request) bool {
 		case "--sync", "--projects", "--where":
 			return true
 		case "--tag-next", "--propagate-tags", "--push":
+			return true
+		case "--add", "--rm", "--remove":
+			return true
+		case "--set-config", "--skill":
 			return true
 		case "--version", "-h", "--help":
 			return true
