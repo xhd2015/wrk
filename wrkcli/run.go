@@ -1275,64 +1275,104 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 		}
 	}()
 
+	// Opt-in async warm polish: WRK_SCAN_REFRESH_ASYNC=1|true|yes.
+	// Serve/OnRepo results freeze at warm serve; durable cache may continue
+	// until Join (min WarmRefreshBudget, then while process still joining).
+	asyncRefresh := envTruthy(os.Getenv("WRK_SCAN_REFRESH_ASYNC"))
+	mode := scan_repo.WarmRefreshSync
+	if asyncRefresh && !noCache {
+		mode = scan_repo.WarmRefreshAsync
+	}
+
 	// scan_repo absorbs OnRepo errors into repo.Error and continues; capture
 	// RecordProject failures so the run still fails after Scan returns.
 	// CacheRoot left empty → product default under $HOME when cache enabled.
 	var recordErr error
 	var newly int
 	printed := make(map[string]bool)
-	result, err := scan_repo.Scan(ctx, scan_repo.Options{
-		Roots:   filterRoots,
-		NoCache: noCache,
-		Debug:   debug,
-		Stderr:  os.Stderr,
-		OnRepo: func(repo scan_repo.Repo) error {
-			if recordErr != nil {
-				return recordErr
-			}
-			isMain := repo.RepoType == scan_repo.RepoTypeMain
-			isWorktree := repo.RepoType == scan_repo.RepoTypeWorktree
-			if !isMain && !(includeWorktrees && isWorktree) {
-				return nil
-			}
-			if repo.Error != "" {
-				return nil
-			}
-			path := storage.NormalizePath(repo.Path)
-			// Emit filter: only record/print paths under CLI-provided roots.
-			if !pathUnderAnyRoot(path, filterRoots) {
-				return nil
-			}
-			// Always print each valid path at most once per run (known or new).
-			if !printed[path] {
-				fmt.Println(path)
-				printed[path] = true
-			}
-			// Record only new main repos; worktrees are list-only.
-			if !isMain || known[path] {
-				return nil
-			}
-			if err := storage.RecordProject(wrkHome, path, storage.SourceScan); err != nil {
-				recordErr = err
-				return err
-			}
-			known[path] = true
-			newly++
+	onRepo := func(repo scan_repo.Repo) error {
+		if recordErr != nil {
+			return recordErr
+		}
+		isMain := repo.RepoType == scan_repo.RepoTypeMain
+		isWorktree := repo.RepoType == scan_repo.RepoTypeWorktree
+		if !isMain && !(includeWorktrees && isWorktree) {
 			return nil
-		},
-	})
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
+		}
+		if repo.Error != "" {
+			return nil
+		}
+		path := storage.NormalizePath(repo.Path)
+		// Emit filter: only record/print paths under CLI-provided roots.
+		if !pathUnderAnyRoot(path, filterRoots) {
+			return nil
+		}
+		// Always print each valid path at most once per run (known or new).
+		if !printed[path] {
+			fmt.Println(path)
+			printed[path] = true
+		}
+		// Record only new main repos; worktrees are list-only.
+		if !isMain || known[path] {
+			return nil
+		}
+		if err := storage.RecordProject(wrkHome, path, storage.SourceScan); err != nil {
+			recordErr = err
+			return err
+		}
+		known[path] = true
+		newly++
+		return nil
+	}
+
+	opts := scan_repo.Options{
+		Roots:           filterRoots,
+		NoCache:         noCache,
+		Debug:           debug,
+		Stderr:          os.Stderr,
+		OnRepo:          onRepo,
+		WarmRefreshMode: mode,
+	}
+
+	var result scan_repo.Result
+	var scanErr error
+	if mode == scan_repo.WarmRefreshAsync {
+		var sess scan_repo.Session
+		sess, scanErr = scan_repo.ScanSession(ctx, opts)
+		result = sess.Result
+		// Always Join: min-budget wait if main finishes early. Join(ctx) so
+		// SIGINT cancels the budget wait (Stop + flush already-written index).
+		if sess.Refresh != nil {
+			if joinErr := sess.Join(ctx); joinErr != nil && scanErr == nil && !errors.Is(joinErr, context.Canceled) {
+				// Polish errors are best-effort; surface only when scan ok and debug.
+				if debug {
+					fmt.Fprintf(os.Stderr, "warning: async refresh: %v\n", joinErr)
+				}
+			}
+		}
+	} else {
+		result, scanErr = scan_repo.Scan(ctx, opts)
+	}
+	if scanErr != nil {
+		if errors.Is(scanErr, context.Canceled) {
 			fmt.Fprintln(os.Stderr, "warning: scan interrupted; progress saved (cache and newly recorded projects)")
 			return ExitCodeError{Code: 130}
 		}
-		return err
+		return scanErr
+	}
+	// Interrupt during async Join (min-budget wait) after successful serve.
+	if errors.Is(ctx.Err(), context.Canceled) {
+		fmt.Fprintln(os.Stderr, "warning: scan interrupted; progress saved (cache and newly recorded projects)")
+		return ExitCodeError{Code: 130}
 	}
 	if recordErr != nil {
 		return recordErr
 	}
 	if debug {
 		fmt.Fprintf(os.Stderr, "scan: record known=%d newly=%d\n", knownAtStart, newly)
+		if asyncRefresh {
+			fmt.Fprintf(os.Stderr, "scan: refresh_mode=async\n")
+		}
 	}
 	for _, re := range result.RootErrors {
 		fmt.Fprintf(os.Stderr, "warning: scan root %s: %s\n", re.Root, re.Error)
@@ -1652,9 +1692,16 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 	}
 	// Nested main under consumer is a hard error (D1). Dry-run still runs
 	// preflight (D7). Phase banners only when cascade targets ≥ 1.
-	cascadeTargets, err := listCascadeLinkedWorktrees(consumerTop, checkoutRoot)
+	// When WRK_SCAN_REFRESH_ASYNC is set, defer Join so polish can steal time
+	// during cascade/merge-back (Result stays serve-frozen for cascade targets).
+	cascadeTargets, cascadeRefresh, err := listCascadeLinkedWorktrees(consumerTop, checkoutRoot)
 	if err != nil {
 		return err
+	}
+	if cascadeRefresh != nil {
+		defer func() {
+			_ = cascadeRefresh.Join(context.Background())
+		}()
 	}
 	// D2/D7: all-or-nothing dirty preflight on cascade targets + own before any
 	// mutation or successful would: cascade plan.
@@ -1925,19 +1972,28 @@ func planAssumeYes(assumeYes, forceConfirm bool) bool {
 // Nested main repos under the consumer tree are a hard error (D1) — not
 // warn+skip — so --done aborts before cascade/own mutations.
 //
-// Discovery uses scan_repo.Scan with ListWorktrees: true and Roots: [consumerTop]
-// (scan_repo owns base-path filtering). Targets are collected from top-level
-// RepoTypeWorktree rows and from each repo's inner Worktrees field.
-func listCascadeLinkedWorktrees(consumerTop, checkoutRoot string) ([]string, error) {
-	// Direct Scan with ListWorktrees — do not force ListWorktrees on all
-	// status scans via discoverStatusRepos.
-	result, err := scan_repo.Scan(context.Background(), scan_repo.Options{
-		Roots:         []string{consumerTop},
-		ListWorktrees: true,
+// Discovery uses scan_repo.ScanSession with ListWorktrees: true and
+// Roots: [consumerTop] (scan_repo owns base-path filtering). Targets are
+// collected from top-level RepoTypeWorktree rows and from each repo's inner
+// Worktrees field.
+//
+// When WRK_SCAN_REFRESH_ASYNC is truthy, warm polish may run in the background;
+// the returned RefreshHandle must be Joined by the caller (after cascade work
+// so polish can use that wall time). Result used for targets is serve-frozen.
+func listCascadeLinkedWorktrees(consumerTop, checkoutRoot string) ([]string, *scan_repo.RefreshHandle, error) {
+	mode := scan_repo.WarmRefreshSync
+	if envTruthy(os.Getenv("WRK_SCAN_REFRESH_ASYNC")) {
+		mode = scan_repo.WarmRefreshAsync
+	}
+	sess, err := scan_repo.ScanSession(context.Background(), scan_repo.Options{
+		Roots:           []string{consumerTop},
+		ListWorktrees:   true,
+		WarmRefreshMode: mode,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	result := sess.Result
 
 	cleanCheckout := filepath.Clean(checkoutRoot)
 	cleanConsumer := filepath.Clean(consumerTop)
@@ -1964,7 +2020,11 @@ func listCascadeLinkedWorktrees(consumerTop, checkoutRoot string) ([]string, err
 	for _, repo := range result.Repos {
 		if repo.RepoType == scan_repo.RepoTypeMain {
 			if filepath.Clean(repo.Path) != cleanConsumer {
-				return nil, fmt.Errorf("Error: nested main repo under consumer blocks cascade: %s", repo.Path)
+				if sess.Refresh != nil {
+					sess.Stop()
+					_ = sess.Join(context.Background())
+				}
+				return nil, nil, fmt.Errorf("Error: nested main repo under consumer blocks cascade: %s", repo.Path)
 			}
 			// consumerTop main (if present): not a cascade target itself;
 			// collect linked worktrees from the inner Worktrees field.
@@ -1987,7 +2047,7 @@ func listCascadeLinkedWorktrees(consumerTop, checkoutRoot string) ([]string, err
 			addLinked(wt.Path)
 		}
 	}
-	return targets, nil
+	return targets, sess.Refresh, nil
 }
 
 // preflightCascadeDirty fails hard if any cascade target or the own checkout

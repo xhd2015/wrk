@@ -40,6 +40,7 @@ import (
 	"unicode"
 
 	"github.com/xhd2015/doctest/assert"
+	"github.com/xhd2015/doctest/session"
 	"github.com/xhd2015/gitops/git/git_isolated"
 )
 
@@ -76,9 +77,18 @@ func fixtureCacheBase(t *testing.T) string {
 	return filepath.Join(home, "Library", "Caches", "doctest", "fixtures")
 }
 
+func doctestSessionID(t *testing.T) string {
+	t.Helper()
+	sid := os.Getenv("DOCTEST_SESSION_ID")
+	if sid == "" {
+		t.Fatal("DOCTEST_SESSION_ID not set")
+	}
+	return sid
+}
+
 func fixtureSessionRoot(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(fixtureCacheBase(t), DOCTEST_SESSION_ID)
+	return filepath.Join(fixtureCacheBase(t), doctestSessionID(t))
 }
 
 func sessionWrkBin(t *testing.T) string {
@@ -103,6 +113,53 @@ func withFlock(t *testing.T, lockPath string, fn func()) {
 	fn()
 }
 
+func findWrkModuleRoot(t *testing.T) string {
+	t.Helper()
+	// 1) DOCTEST_ROOT is the tests tree (…/cmd/wrk/tests); walk up to wrk go.mod.
+	if start := os.Getenv("DOCTEST_ROOT"); start != "" {
+		if m := findModuleRoot(start); m != "" {
+			if _, err := os.Stat(filepath.Join(m, "cmd", "wrk")); err == nil {
+				return m
+			}
+		}
+	}
+	// 2) Parse replace github.com/xhd2015/wrk => path from nearest go.mod.
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		data, readErr := os.ReadFile(filepath.Join(dir, "go.mod"))
+		if readErr == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				line = strings.TrimSpace(line)
+				// replace github.com/xhd2015/wrk => /abs/path
+				if !strings.Contains(line, "github.com/xhd2015/wrk") || !strings.Contains(line, "=>") {
+					continue
+				}
+				parts := strings.Split(line, "=>")
+				if len(parts) != 2 {
+					continue
+				}
+				target := strings.TrimSpace(parts[1])
+				if target == "" {
+					continue
+				}
+				if _, err := os.Stat(filepath.Join(target, "cmd", "wrk")); err == nil {
+					return target
+				}
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	t.Fatal("find wrk module root: set DOCTEST_ROOT or go.mod replace github.com/xhd2015/wrk")
+	return ""
+}
+
 func getWrkBin(t *testing.T) string {
 	t.Helper()
 	bin := sessionWrkBin(t)
@@ -114,10 +171,7 @@ func getWrkBin(t *testing.T) string {
 		if _, err := os.Stat(bin); err == nil {
 			return
 		}
-		modRoot := findModuleRoot(DOCTEST_ROOT)
-		if modRoot == "" {
-			t.Fatal("find module root: no go.mod in ancestors")
-		}
+		modRoot := findWrkModuleRoot(t)
 		cmd := exec.Command("go", "build", "-o", bin, "./cmd/wrk")
 		cmd.Dir = modRoot
 		out, err := cmd.CombinedOutput()
@@ -128,7 +182,16 @@ func getWrkBin(t *testing.T) string {
 	return bin
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	// Seed env from session so helpers can resolve fixture paths and wrk module.
+	if d != nil {
+		if d.DOCTEST_ROOT != "" {
+			_ = os.Setenv("DOCTEST_ROOT", d.DOCTEST_ROOT)
+		}
+		if d.DOCTEST_SESSION_ID != "" {
+			_ = os.Setenv("DOCTEST_SESSION_ID", d.DOCTEST_SESSION_ID)
+		}
+	}
 	// Resolve symlinks so derived paths match git's resolved output (macOS
 	// serves /var from /private/var; t.TempDir returns the symlinked form).
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
