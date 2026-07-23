@@ -20,8 +20,8 @@ func runExecInDir(dir string, argv []string) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = absDir
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = cliStdout()
+	cmd.Stderr = cliStderr()
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			code := exitErr.ExitCode()

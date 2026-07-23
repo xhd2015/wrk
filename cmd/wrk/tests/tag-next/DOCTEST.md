@@ -1,6 +1,8 @@
 # wrk --tag-next — version tagging wire-up (Phase 3)
 
 ## Version
+
+**Layer: L2 in-process CLI** via `wrkcli.RunCLI`.
 0.0.3
 
 Decision tree for `wrk --tag-next`: plan and apply lightweight release tags per
@@ -98,6 +100,8 @@ doctest test ./cmd/wrk/tests/tag-next/push/pushes-tag
 
 ```go
 import (
+	"github.com/xhd2015/wrk/wrkcli"
+	"strings"
 	"bytes"
 	"os/exec"
 	"testing"
@@ -119,32 +123,17 @@ type Response struct {
 	ExitCode int
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
-	bin := getWrkBin(t)
-	args := buildTagNextCLIArgs(req)
 
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	cmd.Env = tagNextWrkEnv(req)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			return nil, err
-		}
-	}
-
-	return &Response{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		ExitCode: exitCode,
-	}, nil
+func wrkDateForReq(req *Request) string {
+	_ = req
+	// Harness default date used by monotree fixtures (YYYY-MM-DD).
+	return "2026-06-30"
 }
+
+func Run(t *testing.T, req *Request) (*Response, error) {
+	args := append([]string(nil), req.Args...)
+	return runCLIWithEnv(t, req.RepoDir, req.WrkHome, args, tagNextWrkEnv(req))
+}
+
+
 ```

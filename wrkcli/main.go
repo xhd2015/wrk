@@ -3,7 +3,6 @@ package wrkcli
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 
@@ -48,7 +47,7 @@ func runMain(workDir string) error {
 
 	// Already at main repo root: notice on stderr, no shell, exit 0.
 	if sameDirPath(cwd, mainRepo) {
-		fmt.Fprintf(os.Stderr, "wrk: already at main repository root: %s\n", mainRepo)
+		fmt.Fprintf(cliStderr(), "wrk: already at main repository root: %s\n", mainRepo)
 		return nil
 	}
 

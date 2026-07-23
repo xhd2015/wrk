@@ -1,6 +1,8 @@
 # wrk --tag-next --propagate-tags — compose pipeline (P6)
 
 ## Version
+
+**Layer: L2 in-process CLI** via `wrkcli.RunCLI`.
 0.0.2
 
 Decision tree for **composing** root modes `wrk --tag-next --propagate-tags`
@@ -97,6 +99,8 @@ All four leaves are **Classic TDD RED** until P6 composition is implemented
 
 ```go
 import (
+	"github.com/xhd2015/wrk/wrkcli"
+	"strings"
 	"bytes"
 	"os/exec"
 	"testing"
@@ -136,32 +140,17 @@ type Response struct {
 	ExitCode int
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
-	bin := getWrkBin(t)
 
-	args := append([]string(nil), req.Args...)
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	cmd.Env = composeWrkEnv(req)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			return nil, err
-		}
-	}
-
-	return &Response{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		ExitCode: exitCode,
-	}, nil
+func wrkDateForReq(req *Request) string {
+	_ = req
+	// Harness default date used by monotree fixtures (YYYY-MM-DD).
+	return "2026-06-30"
 }
+
+func Run(t *testing.T, req *Request) (*Response, error) {
+	args := append([]string(nil), req.Args...)
+	return runCLIWithEnv(t, req.RepoDir, req.WrkHome, args, composeWrkEnv(req))
+}
+
+
 ```

@@ -1,6 +1,8 @@
 # wrk --sync — CLI skeleton (P1) + IsWipSubject (P2) + full FF sync (P3)
 
 ## Version
+
+**Layer: L2 in-process CLI** via `wrkcli.RunCLI`.
 0.0.5
 
 Decision tree for `wrk --sync`:
@@ -177,6 +179,7 @@ and Phase 2 `wip-subject/*` must stay GREEN (sealed ASSERT bodies unchanged).
 
 ```go
 import (
+	"strings"
 	"bytes"
 	"os/exec"
 	"testing"
@@ -214,38 +217,22 @@ type Response struct {
 	IsWip    bool // set when WipProbe; result of wrkcli.IsWipSubject
 }
 
+
+func wrkDateForReq(req *Request) string {
+	_ = req
+	// Harness default date used by monotree fixtures (YYYY-MM-DD).
+	return "2026-06-30"
+}
+
 func Run(t *testing.T, req *Request) (*Response, error) {
 	if req.WipProbe {
 		return &Response{
 			IsWip: wrkcli.IsWipSubject(req.Subject),
 		}, nil
 	}
-
-	bin := getWrkBin(t)
 	args := buildSyncCLIArgs(req)
-
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	cmd.Env = syncWrkEnv(req)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			return nil, err
-		}
-	}
-
-	return &Response{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		ExitCode: exitCode,
-	}, nil
+	return runCLIWithEnv(t, req.RepoDir, req.WrkHome, args, syncWrkEnv(req))
 }
+
+
 ```

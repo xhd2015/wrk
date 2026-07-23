@@ -43,6 +43,8 @@ WorkRoot/{mod,gobin,.wrk}
 
 ```go
 import (
+	"github.com/xhd2015/wrk/wrkcli"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -570,4 +572,25 @@ func ensureReinstallLocalCLIHelpersUsed() {
 	_ = eventsJSONLPath
 	_ = filterEnvKeys
 }
+
+func runCLIWithEnv(t *testing.T, dir, wrkHome string, args, env []string) (*Response, error) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	opts := wrkcli.RunOptions{Stdout: &stdout, Stderr: &stderr, Dir: dir, WrkHome: wrkHome}
+	for _, e := range env {
+		key, val, ok := strings.Cut(e, "=")
+		if !ok { continue }
+		switch key {
+		case "WRK_HOME":
+			if strings.TrimSpace(val) != "" { opts.WrkHome = val }
+		case "WRK_DATE":
+			opts.WrkDate = val
+		default:
+			opts.ExtraEnv = append(opts.ExtraEnv, e)
+		}
+	}
+	code := wrkcli.RunCLI(args, opts)
+	return &Response{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: code}, nil
+}
+
 ```

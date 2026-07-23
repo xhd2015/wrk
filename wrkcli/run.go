@@ -813,7 +813,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if absErr == nil {
 			top, topErr := worktree.ShowToplevel(cwdAbs)
 			if topErr == nil && sameDirPath(top, mainRepo) {
-				fmt.Fprintf(os.Stderr, "wrk: --main is not necessary (already at main repository root); continuing\n")
+				fmt.Fprintf(cliStderr(), "wrk: --main is not necessary (already at main repository root); continuing\n")
 			}
 		}
 		workDir = mainRepo
@@ -915,7 +915,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		}
 		if pushFlag {
 			if !jsonFlag {
-				fmt.Println() // blank line between tag-next block and push confirm
+				fmt.Fprintln(cliStdout()) // blank line between tag-next block and push confirm
 			}
 			// With --json: still push branch+tags, but keep stdout JSON-clean.
 			if err := runPushMainWithOutput(tagRes.MainRepo, dryRun, tagRes.Tags, !jsonFlag); err != nil {
@@ -1123,7 +1123,7 @@ func runProjects(wrkHome string, colorEnabled bool, fetchEnabled bool, githubOnl
 	flush := func() {
 		for nextPrint < len(paths) && done[nextPrint] {
 			if printedAny {
-				fmt.Println()
+				fmt.Fprintln(cliStdout())
 			}
 			printProjectStatusFromData(results[nextPrint], colorEnabled)
 			printedAny = true
@@ -1238,7 +1238,7 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 		}
 		for _, fr := range filterRoots {
 			cacheBase := scanCacheBaseForRoot(homeClean, fr)
-			fmt.Fprintf(os.Stderr, "scan: cache_base=%s filter=%s\n", cacheBase, fr)
+			fmt.Fprintf(cliStderr(), "scan: cache_base=%s filter=%s\n", cacheBase, fr)
 		}
 	}
 
@@ -1288,7 +1288,7 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 			}
 			// Always print each valid path at most once per run (known or new).
 			if !printed[path] {
-				fmt.Println(path)
+				fmt.Fprintln(cliStdout(), path)
 				printed[path] = true
 			}
 			// Record only new main repos; worktrees are list-only.
@@ -1306,7 +1306,7 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			fmt.Fprintln(os.Stderr, "warning: scan interrupted; progress saved (cache and newly recorded projects)")
+			fmt.Fprintln(cliStderr(), "warning: scan interrupted; progress saved (cache and newly recorded projects)")
 			return ExitCodeError{Code: 130}
 		}
 		return err
@@ -1315,10 +1315,10 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 		return recordErr
 	}
 	if debug {
-		fmt.Fprintf(os.Stderr, "scan: record known=%d newly=%d\n", knownAtStart, newly)
+		fmt.Fprintf(cliStderr(), "scan: record known=%d newly=%d\n", knownAtStart, newly)
 	}
 	for _, re := range result.RootErrors {
-		fmt.Fprintf(os.Stderr, "warning: scan root %s: %s\n", re.Root, re.Error)
+		fmt.Fprintf(cliStderr(), "warning: scan root %s: %s\n", re.Root, re.Error)
 	}
 	return nil
 }
@@ -1401,7 +1401,7 @@ func runAdd(wrkHome, addDir string) error {
 	if err := storage.RecordProject(wrkHome, mainRepo, storage.SourceManual); err != nil {
 		return err
 	}
-	fmt.Println(mainRepo)
+	fmt.Fprintln(cliStdout(), mainRepo)
 	return nil
 }
 
@@ -1431,7 +1431,7 @@ func runRemove(wrkHome, removeDir string) error {
 		return err
 	}
 	if removed {
-		fmt.Println(mainRepoPath)
+		fmt.Fprintln(cliStdout(), mainRepoPath)
 	}
 	return nil
 }
@@ -1458,7 +1458,7 @@ func runList(workDir string) error {
 	if len(outStr) > 0 && !strings.HasSuffix(outStr, "\n") {
 		outStr += "\n"
 	}
-	fmt.Print(outStr)
+	fmt.Fprint(cliStdout(), outStr)
 	return nil
 }
 
@@ -1535,7 +1535,7 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 	printed := false
 	blankBefore := func() {
 		if printed {
-			fmt.Println()
+			fmt.Fprintln(cliStdout())
 		}
 		printed = true
 	}
@@ -1648,7 +1648,7 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 	}
 	hasCascade := len(cascadeTargets) > 0
 	if hasCascade {
-		fmt.Println("==> cascade")
+		fmt.Fprintln(cliStdout(), "==> cascade")
 		for _, path := range cascadeTargets {
 			if err := mergeBackExternalWorktree(path, confirmFromStdin, cascadeAssumeYes, dryRun); err != nil {
 				return err
@@ -1672,7 +1672,7 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 	}
 
 	if hasCascade {
-		fmt.Println("==> own")
+		fmt.Fprintln(cliStdout(), "==> own")
 	}
 	result, err := worktree.MergeBack(worktree.MergeBackOptions{
 		SourcePath: checkoutRoot,
@@ -1688,9 +1688,9 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 	}
 	// printDryRun already wrote planned commands (no trailing newline).
 	if result.Action == "dry-run" {
-		fmt.Println()
+		fmt.Fprintln(cliStdout())
 	} else {
-		fmt.Println(result.Message)
+		fmt.Fprintln(cliStdout(), result.Message)
 	}
 	if result.Action == "aborted" {
 		return nil
@@ -1743,9 +1743,9 @@ func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync
 	}
 	// printDryRun already wrote planned commands (no trailing newline).
 	if result.Action == "dry-run" {
-		fmt.Println()
+		fmt.Fprintln(cliStdout())
 	} else {
-		fmt.Println(result.Message)
+		fmt.Fprintln(cliStdout(), result.Message)
 	}
 	if result.Action == "aborted" {
 		return nil
@@ -1769,7 +1769,7 @@ func runComposeReinstallLocal(result *worktree.MergeBackResult, withReinstallLoc
 	if mainPath == "" {
 		return fmt.Errorf("wrk: merge-back result missing target path")
 	}
-	fmt.Println() // blank line before reinstall stage
+	fmt.Fprintln(cliStdout()) // blank line before reinstall stage
 	// Scan main tip after merge (useMain equivalent from main path).
 	err := runReinstallLocal(mainPath, dryRun, true, colorFlag)
 	if err == nil {
@@ -1779,9 +1779,9 @@ func runComposeReinstallLocal(result *worktree.MergeBackResult, withReinstallLoc
 	if strings.Contains(err.Error(), "no go.mod modules found") ||
 		strings.Contains(err.Error(), "no go.mod found") {
 		if dryRun {
-			fmt.Fprintf(os.Stderr, "would: skip reinstall-local (%s)\n", err.Error())
+			fmt.Fprintf(cliStderr(), "would: skip reinstall-local (%s)\n", err.Error())
 		} else {
-			fmt.Fprintf(os.Stderr, "skip reinstall-local: %s\n", err.Error())
+			fmt.Fprintf(cliStderr(), "skip reinstall-local: %s\n", err.Error())
 		}
 		return nil
 	}
@@ -1823,7 +1823,7 @@ func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome 
 	var createdTags []string
 	var tagPlan tagscope.ChangePlan
 	if withSync {
-		fmt.Println() // blank line between primary message and sync block
+		fmt.Fprintln(cliStdout()) // blank line between primary message and sync block
 		if err := runSyncOpts(mainPath, syncOpts{
 			DryRun:        dryRun,
 			PretendMainAt: pretendMainAt,
@@ -1832,7 +1832,7 @@ func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome 
 		}
 	}
 	if withTagNext {
-		fmt.Println() // blank line before tag-next block
+		fmt.Fprintln(cliStdout()) // blank line before tag-next block
 		// Create tags locally only; push (if any) is via runPushMain with tag list.
 		// Dry-run plans against would-be tip; real apply uses main HEAD post-merge.
 		// Keep full result so dry-run can thread planned next tags into propagate.
@@ -1844,7 +1844,7 @@ func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome 
 		tagPlan = tagRes.Plan
 	}
 	if withPush {
-		fmt.Println() // blank line before push confirmation
+		fmt.Fprintln(cliStdout()) // blank line before push confirmation
 		var tags []string
 		if withTagNext {
 			tags = createdTags
@@ -1854,7 +1854,7 @@ func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome 
 		}
 	}
 	if withPropagateTags {
-		fmt.Println() // blank line before propagate-tags block
+		fmt.Fprintln(cliStdout()) // blank line before propagate-tags block
 		// Always run from mainPath: after --done the source worktree is gone.
 		var releaseOverride []SourceRelease
 		if dryRun && withTagNext {
@@ -1970,7 +1970,7 @@ func preflightCascadeDirty(cascadeTargets []string, ownPath string) error {
 // and does not mutate (D6). Real success prints result.Message on stdout (D5).
 func mergeBackExternalWorktree(externalPath string, confirmFromStdin, assumeYes, dryRun bool) error {
 	if dryRun {
-		fmt.Printf("would: cascade merge-back %s\n", externalPath)
+		fmt.Fprintf(cliStdout(), "would: cascade merge-back %s\n", externalPath)
 		return nil
 	}
 	result, err := worktree.MergeBack(worktree.MergeBackOptions{
@@ -1989,7 +1989,7 @@ func mergeBackExternalWorktree(externalPath string, confirmFromStdin, assumeYes,
 	}
 	// D5: print MergeBack Message on stdout (same as own path).
 	if result != nil && result.Message != "" {
-		fmt.Println(result.Message)
+		fmt.Fprintln(cliStdout(), result.Message)
 	}
 	if result != nil && result.Action == "aborted" {
 		// Stop cascade + own after user decline; non-zero so callers do not
@@ -2076,7 +2076,7 @@ func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string,
 			return fmt.Errorf("scan dep modules: %w", err)
 		}
 		if len(depModules) == 0 {
-			fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a go module\n", depPath)
+			fmt.Fprintf(cliStderr(), "SKIP local dep replacement: %s is not a go module\n", depPath)
 			return finishDepLike(externalPath, execArgs)
 		}
 
@@ -2085,13 +2085,13 @@ func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string,
 			return fmt.Errorf("scan consumer modules: %w", err)
 		}
 		if len(consumerModules) == 0 {
-			fmt.Fprintf(os.Stderr, "SKIP local dep replacement: consumer has no Go modules\n")
+			fmt.Fprintf(cliStderr(), "SKIP local dep replacement: consumer has no Go modules\n")
 			return finishDepLike(externalPath, execArgs)
 		}
 
 		matchingConsumerDirs, depModDir = matchDepToConsumerModules(consumerTop, consumerModules, depModules)
 		if len(matchingConsumerDirs) == 0 {
-			fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a dependency of any consumer module\n", depPath)
+			fmt.Fprintf(cliStderr(), "SKIP local dep replacement: %s is not a dependency of any consumer module\n", depPath)
 			return finishDepLike(externalPath, execArgs)
 		}
 	}
@@ -2151,7 +2151,7 @@ func finishDepLike(externalPath string, execArgs []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve external worktree path: %w", err)
 	}
-	fmt.Println(absPath)
+	fmt.Fprintln(cliStdout(), absPath)
 	return runExecInDir(absPath, execArgs)
 }
 
@@ -2310,12 +2310,12 @@ func warnReuseExternal(basename string, paths []string) {
 	}
 	primary := paths[0]
 	if len(paths) == 1 {
-		fmt.Fprintf(os.Stderr, "wrk: warning: %s already exists under external/; reusing %s\n", basename, primary)
+		fmt.Fprintf(cliStderr(), "wrk: warning: %s already exists under external/; reusing %s\n", basename, primary)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "wrk: warning: %s already has %d worktrees under external/; reusing %s\n", basename, len(paths), primary)
+	fmt.Fprintf(cliStderr(), "wrk: warning: %s already has %d worktrees under external/; reusing %s\n", basename, len(paths), primary)
 	for _, p := range paths[1:] {
-		fmt.Fprintf(os.Stderr, "wrk: warning: also present: %s\n", p)
+		fmt.Fprintf(cliStderr(), "wrk: warning: also present: %s\n", p)
 	}
 }
 
@@ -2604,9 +2604,9 @@ func runAllDeps(workDir string, dryRun bool) error {
 		if err != nil {
 			return fmt.Errorf("rel external path: %w", err)
 		}
-		fmt.Printf("%swrk %s at ./%s\n", prefix, d.modulePath, rel)
+		fmt.Fprintf(cliStdout(), "%swrk %s at ./%s\n", prefix, d.modulePath, rel)
 	}
-	fmt.Printf("%swrked %d deps\n", prefix, len(linked))
+	fmt.Fprintf(cliStdout(), "%swrked %d deps\n", prefix, len(linked))
 	return nil
 }
 
@@ -2689,8 +2689,8 @@ func blockIfLocalReplace(top string, noInModuleReplace bool) error {
 		}
 
 		// Only intra-repo offenders, default lenient mode: warn and proceed.
-		fmt.Fprintln(os.Stderr, replace.FormatIssueLine(top, issue))
-		fmt.Fprintln(os.Stderr, "local filesystem replace (intra-repo) - tolerated, remove before pushing:")
+		fmt.Fprintln(cliStderr(), replace.FormatIssueLine(top, issue))
+		fmt.Fprintln(cliStderr(), "local filesystem replace (intra-repo) - tolerated, remove before pushing:")
 	}
 	return nil
 }
@@ -2803,7 +2803,7 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 	if err != nil {
 		return err
 	}
-	fmt.Println(result.Path)
+	fmt.Fprintln(cliStdout(), result.Path)
 	// Pipeline: [window] → create (path printed) → terminal-or-agent → exec → follow-up cd.
 	if err := runCreateUX(result.Path, taskDesc, ux); err != nil {
 		return err
@@ -2848,7 +2848,7 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 			if err != nil {
 				return fmt.Errorf("resolve worktree path: %w", err)
 			}
-			fmt.Println(absPath)
+			fmt.Fprintln(cliStdout(), absPath)
 			if err := runExecInDir(absPath, execArgs); err != nil {
 				return err
 			}
@@ -2874,13 +2874,13 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 			return p
 		}
 		if len(existing) > 1 {
-			fmt.Fprintf(os.Stderr, "wrk: %s %s already has %d linked worktrees; reusing candidate %s\n", warnTok, basename, len(existing), pathDisp(primary))
+			fmt.Fprintf(cliStderr(), "wrk: %s %s already has %d linked worktrees; reusing candidate %s\n", warnTok, basename, len(existing), pathDisp(primary))
 			for _, p := range existing[1:] {
-				fmt.Fprintf(os.Stderr, "wrk: %s also present: %s\n", warnTok, pathDisp(p))
+				fmt.Fprintf(cliStderr(), "wrk: %s also present: %s\n", warnTok, pathDisp(p))
 			}
 		}
 		// Prompt on stderr; default is skip (Y/empty). No trailing newline before read.
-		fmt.Fprintf(os.Stderr, "wrk: %s %s already has a linked worktree at %s, skip creating another? [Y/n] ", warnTok, basename, pathDisp(primary))
+		fmt.Fprintf(cliStderr(), "wrk: %s %s already has a linked worktree at %s, skip creating another? [Y/n] ", warnTok, basename, pathDisp(primary))
 		line, err := readStdinLineForPrompt()
 		if err != nil {
 			return fmt.Errorf("wrk: read skip confirmation: %w", err)
@@ -2920,7 +2920,7 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 			if err != nil {
 				return fmt.Errorf("resolve worktree path: %w", err)
 			}
-			fmt.Println(absPath)
+			fmt.Fprintln(cliStdout(), absPath)
 			if err := runCreateUX(absPath, taskDesc, ux); err != nil {
 				return err
 			}
@@ -2975,7 +2975,7 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 		if err != nil {
 			return fmt.Errorf("resolve worktree path: %w", err)
 		}
-		fmt.Println(absPath)
+		fmt.Fprintln(cliStdout(), absPath)
 		if err := runCreateUX(absPath, taskDesc, ux); err != nil {
 			return err
 		}
@@ -3299,7 +3299,7 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 
 	// If nothing changed, just report.
 	if newDirName == curBase && newBranch == branch {
-		fmt.Println("task unchanged")
+		fmt.Fprintln(cliStdout(), "task unchanged")
 		return runExecInDir(cwd, execArgs)
 	}
 
@@ -3343,8 +3343,8 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 		if !term.IsTerminal(int(os.Stdout.Fd())) {
 			return fmt.Errorf("wrk: --set-task --confirm requires a terminal (tty)")
 		}
-		fmt.Printf("Rename worktree:\n  %s → %s\n  branch %s → %s\n", cwd, newPath, branch, newBranch)
-		fmt.Print("Proceed? [Y/n] ")
+		fmt.Fprintf(cliStdout(), "Rename worktree:\n  %s → %s\n  branch %s → %s\n", cwd, newPath, branch, newBranch)
+		fmt.Fprint(cliStdout(), "Proceed? [Y/n] ")
 		reader := bufio.NewReader(os.Stdin)
 		answer, _ := reader.ReadString('\n')
 		answer = strings.TrimSpace(answer)
@@ -3399,7 +3399,7 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 		}
 	}
 
-	fmt.Println(newPath)
+	fmt.Fprintln(cliStdout(), newPath)
 	if err := runExecInDir(newPath, execArgs); err != nil {
 		return err
 	}

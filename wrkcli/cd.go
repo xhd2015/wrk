@@ -36,8 +36,8 @@ func runCd(absDir string, execArgs []string) error {
 	}
 
 	// Branch B — fallback: warn, print abs path, launch interactive shell.
-	fmt.Fprintf(os.Stderr, "warning: bash integration not active; install with: wrk --bash-integration --install\n")
-	fmt.Fprintln(os.Stdout, absDir)
+	fmt.Fprintf(cliStderr(), "warning: bash integration not active; install with: wrk --bash-integration --install\n")
+	fmt.Fprintln(cliStdout(), absDir)
 
 	err = interactive.LoginInteractive(absDir, filepath.Base(absDir), "WRK_SHELL=1")
 	if err != nil {
@@ -61,7 +61,7 @@ func forceLandInDir(dest string) error {
 	}
 
 	// Branch B — fallback: warn and launch interactive shell (no stdout path).
-	fmt.Fprintf(os.Stderr, "warning: bash integration not active; install with: wrk --bash-integration --install\n")
+	fmt.Fprintf(cliStderr(), "warning: bash integration not active; install with: wrk --bash-integration --install\n")
 	err := interactive.LoginInteractive(dest, filepath.Base(dest), "WRK_SHELL=1")
 	if err != nil {
 		var exitErr *exec.ExitError

@@ -412,30 +412,30 @@ func gitCommitShortSubject(repoPath string) (short, subject string, err error) {
 
 func printProjectStatusFromData(data projectStatusData, colorEnabled bool) {
 	if data.mainRepoError != "" {
-		fmt.Printf("Dir:          %s\n", data.mainRepoPath)
+		fmt.Fprintf(cliStdout(), "Dir:          %s\n", data.mainRepoPath)
 		statusVal := "error: " + data.mainRepoError
 		if colorEnabled {
 			statusVal = colorize(statusVal, ansiRed)
 		}
-		fmt.Printf("Status:       %s\n", statusVal)
+		fmt.Fprintf(cliStdout(), "Status:       %s\n", statusVal)
 		return
 	}
 
-	fmt.Printf("Dir:          %s\n", data.mainRepoPath)
-	fmt.Printf("Branch:       %s\n", data.branch)
-	fmt.Printf("Commit:       %s  %s\n", data.short, data.subject)
+	fmt.Fprintf(cliStdout(), "Dir:          %s\n", data.mainRepoPath)
+	fmt.Fprintf(cliStdout(), "Branch:       %s\n", data.branch)
+	fmt.Fprintf(cliStdout(), "Commit:       %s  %s\n", data.short, data.subject)
 	statusLine := formatStatusCounts(data.counts, colorEnabled, false)
-	fmt.Printf("Status:       %s\n", statusLine)
-	fmt.Println(data.remoteLine)
+	fmt.Fprintf(cliStdout(), "Status:       %s\n", statusLine)
+	fmt.Fprintln(cliStdout(), data.remoteLine)
 	if len(data.errorDetails) > 0 {
-		fmt.Printf("Worktrees:    %s\n", data.worktreeSummary)
+		fmt.Fprintf(cliStdout(), "Worktrees:    %s\n", data.worktreeSummary)
 		for _, detail := range data.errorDetails {
 			line := formatWorktreeErrorDetailLine(detail.path, detail.msg, colorEnabled)
-			fmt.Printf("%s\n", line)
+			fmt.Fprintf(cliStdout(), "%s\n", line)
 		}
 		return
 	}
-	fmt.Printf("Worktrees:    %s\n", data.worktreeSummary)
+	fmt.Fprintf(cliStdout(), "Worktrees:    %s\n", data.worktreeSummary)
 }
 
 func formatWorktreeErrorDetailLine(path, msg string, colorEnabled bool) string {

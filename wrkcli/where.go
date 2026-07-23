@@ -18,10 +18,10 @@ func runWhere(wrkHome, basename string) error {
 	case 0:
 		return fmt.Errorf("wrk: no saved project for basename %q", basename)
 	case 1:
-		fmt.Println(matches[0])
+		fmt.Fprintln(cliStdout(), matches[0])
 	default:
 		for _, p := range matches {
-			fmt.Println(p)
+			fmt.Fprintln(cliStdout(), p)
 		}
 	}
 	return nil

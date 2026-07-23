@@ -2,7 +2,6 @@ package wrkcli
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/xhd2015/agent-pro/agent/commit_msg"
@@ -58,10 +57,10 @@ func hasGenCommitComposePartner(args []string) bool {
 // genCommitMsgValueFlags are library flags that take a value (separate arg or =form).
 // --dry-run is intentionally not peeled: it is a shared wrk primary modifier.
 var genCommitMsgValueFlags = map[string]struct{}{
-	"--dir":                  {},
-	"--model":                {},
-	"--agent-runner":         {},
-	"--agent-runner-binary":  {},
+	"--dir":                 {},
+	"--model":               {},
+	"--agent-runner":        {},
+	"--agent-runner-binary": {},
 }
 
 // genCommitMsgBoolFlags are library bool flags peeled when composing with a primary.
@@ -165,7 +164,7 @@ func runGenCommitMsgStage(workDir string, genArgs []string, dryRun bool) error {
 	// library prints would: lines then errors "no staged". Continue so primary
 	// dry-run plan can still run; real (non-dry) runs still fail.
 	if dryRun && strings.Contains(err.Error(), "no staged") {
-		fmt.Fprintf(os.Stderr, "would: skip gen-commit-msg (no staged changes)\n")
+		fmt.Fprintf(cliStderr(), "would: skip gen-commit-msg (no staged changes)\n")
 		return nil
 	}
 	return err

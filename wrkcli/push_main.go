@@ -55,9 +55,9 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 			remote = "origin"
 			remoteBranch = branch
 			if printOutput {
-				fmt.Printf("would: git push %s %s\n", remote, branch)
+				fmt.Fprintf(cliStdout(), "would: git push %s %s\n", remote, branch)
 				for _, tag := range tags {
-					fmt.Printf("would: git push %s %s\n", remote, tag)
+					fmt.Fprintf(cliStdout(), "would: git push %s %s\n", remote, tag)
 				}
 			}
 			return nil
@@ -67,9 +67,9 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 
 	if dryRun {
 		if printOutput {
-			fmt.Printf("would: git push %s %s\n", remote, branch)
+			fmt.Fprintf(cliStdout(), "would: git push %s %s\n", remote, branch)
 			for _, tag := range tags {
-				fmt.Printf("would: git push %s %s\n", remote, tag)
+				fmt.Fprintf(cliStdout(), "would: git push %s %s\n", remote, tag)
 			}
 		}
 		return nil
@@ -94,7 +94,7 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 	}
 
 	if printOutput {
-		fmt.Printf("pushed %s → %s/%s\n", branch, remote, remoteBranch)
+		fmt.Fprintf(cliStdout(), "pushed %s → %s/%s\n", branch, remote, remoteBranch)
 	}
 	return nil
 }

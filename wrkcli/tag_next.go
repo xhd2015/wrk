@@ -2,7 +2,6 @@ package wrkcli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -86,7 +85,7 @@ func runTagNextAtResult(workDir, headRef string, dryRun, push, jsonOut bool) (ta
 		if err != nil {
 			return out, err
 		}
-		fmt.Print(formatted)
+		fmt.Fprint(cliStdout(), formatted)
 		if dryRun {
 			out.Tags = plannedTagNames(plan)
 			return out, nil
@@ -106,7 +105,7 @@ func runTagNextAtResult(workDir, headRef string, dryRun, push, jsonOut bool) (ta
 	}
 	b.WriteString(tagscope.FormatPlanSummary(plan, dryRun))
 	b.WriteByte('\n')
-	fmt.Fprint(os.Stdout, b.String())
+	fmt.Fprint(cliStdout(), b.String())
 	if dryRun {
 		// Return planned names so composition --push --dry-run can list would: tag pushes.
 		out.Tags = plannedTagNames(plan)
@@ -140,13 +139,13 @@ func runTagNextPropagateCompose(workDir, wrkHome string, dryRun, push bool) erro
 	}
 
 	if push {
-		fmt.Println() // blank line before push confirmation
+		fmt.Fprintln(cliStdout()) // blank line before push confirmation
 		if err := runPushMain(tagRes.MainRepo, dryRun, tagRes.Tags); err != nil {
 			return err
 		}
 	}
 
-	fmt.Println() // blank line between major stages
+	fmt.Fprintln(cliStdout()) // blank line between major stages
 
 	var releaseOverride []SourceRelease
 	if dryRun {

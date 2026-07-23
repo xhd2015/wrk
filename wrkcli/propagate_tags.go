@@ -85,7 +85,7 @@ func runPropagateTagsWithReleases(workDir, wrkHome string, dryRun bool, releaseO
 		return err
 	}
 	for _, p := range inv.SkippedPaths {
-		fmt.Fprintf(os.Stderr, "warning: project path does not exist: %s\n", p)
+		fmt.Fprintf(cliStderr(), "warning: project path does not exist: %s\n", p)
 	}
 
 	var updates []plannedConsumerUpdate
@@ -166,7 +166,7 @@ func runPropagateTagsWithReleases(workDir, wrkHome string, dryRun bool, releaseO
 			return err
 		}
 	}
-	fmt.Fprint(os.Stdout, formatPropagateTagsPlan(sourceMain, sourceReleases, updates, dryRun))
+	fmt.Fprint(cliStdout(), formatPropagateTagsPlan(sourceMain, sourceReleases, updates, dryRun))
 	return nil
 }
 
@@ -215,7 +215,7 @@ func applyPropagateTags(updates []plannedConsumerUpdate) error {
 		for _, i := range g.idxs {
 			if err := goBuildAll(updates[i].ModuleDir); err != nil {
 				allOK = false
-				fmt.Fprintf(os.Stderr, "warning: go build ./... failed for project %s (%s): %v\n",
+				fmt.Fprintf(cliStderr(), "warning: go build ./... failed for project %s (%s): %v\n",
 					updates[i].ProjectBase, updates[i].ModuleDir, err)
 				break
 			}

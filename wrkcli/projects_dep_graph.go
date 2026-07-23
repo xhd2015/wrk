@@ -3,7 +3,6 @@ package wrkcli
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -16,8 +15,8 @@ func runProjectsDepGraph(wrkHome string, ctx *invocationContext) error {
 	if err != nil {
 		return err
 	}
-	errw := io.Writer(os.Stderr)
-	out := io.Writer(os.Stdout)
+	errw := cliStderr()
+	out := cliStdout()
 	if ctx != nil {
 		errw = ctx.errw()
 		out = ctx.out()

@@ -2,7 +2,6 @@ package wrkcli
 
 import (
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -35,20 +34,20 @@ func newInvocationContext(origWd string, args []string) *invocationContext {
 	}
 }
 
-// out returns the invocation stdout writer (default os.Stdout).
+// out returns the invocation stdout writer (capture or os.Stdout).
 func (ctx *invocationContext) out() io.Writer {
 	if ctx != nil && ctx.stdout != nil {
 		return ctx.stdout
 	}
-	return os.Stdout
+	return cliStdout()
 }
 
-// errw returns the invocation stderr writer (default os.Stderr).
+// errw returns the invocation stderr writer (capture or os.Stderr).
 func (ctx *invocationContext) errw() io.Writer {
 	if ctx != nil && ctx.stderr != nil {
 		return ctx.stderr
 	}
-	return os.Stderr
+	return cliStderr()
 }
 
 func (ctx *invocationContext) finish(exitCode int) {

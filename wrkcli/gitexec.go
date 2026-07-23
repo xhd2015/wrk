@@ -22,7 +22,7 @@ func logGitCommand(args []string) {
 		return
 	}
 	ts := time.Now().Format("2006-01-02 15:04:05")
-	fmt.Fprintf(os.Stderr, "[%s] $ git %s\n", ts, strings.Join(args, " "))
+	fmt.Fprintf(cliStderr(), "[%s] $ git %s\n", ts, strings.Join(args, " "))
 }
 
 func isMajorGitCommand(args []string) bool {
@@ -144,7 +144,7 @@ func runGitWorktreeAdd(cmd *exec.Cmd) error {
 	if invocationVerbose {
 		// Interactive/streaming: keep os/exec Stdout/Stderr wiring.
 		cmd.Stdout = os.Stderr
-		cmd.Stderr = os.Stderr
+		cmd.Stderr = cliStderr()
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("git worktree add: %w", err)
 		}

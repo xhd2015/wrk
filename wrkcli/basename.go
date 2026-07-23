@@ -206,8 +206,8 @@ func pickAmbiguousBasename(basename string, matches []string) (string, error) {
 	bypass := os.Getenv("WRK_BASENAME_CONFIRM") == "1"
 	if bypass || term.IsTerminal(int(os.Stdin.Fd())) {
 		n := len(matches)
-		fmt.Fprint(os.Stderr, listing)
-		fmt.Fprintf(os.Stderr, "Select [1-%d]: ", n)
+		fmt.Fprint(cliStderr(), listing)
+		fmt.Fprintf(cliStderr(), "Select [1-%d]: ", n)
 		reader := bufio.NewReader(os.Stdin)
 		line, err := reader.ReadString('\n')
 		if err != nil {

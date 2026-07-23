@@ -2,7 +2,6 @@ package wrkcli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -94,7 +93,7 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 		key := syncEntryKey(entry)
 		if worktree.IsDead(entry.Path) {
 			if _, seen := skipOnce[key]; !seen {
-				fmt.Fprintf(os.Stderr, "warning: skip %s: dead worktree\n", entry.Path)
+				fmt.Fprintf(cliStderr(), "warning: skip %s: dead worktree\n", entry.Path)
 				skipOnce[key] = struct{}{}
 				skipped++
 			}
@@ -102,7 +101,7 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 		}
 		if entry.Branch == "" {
 			if _, seen := skipOnce[key]; !seen {
-				fmt.Fprintf(os.Stderr, "warning: skip %s: detached HEAD\n", entry.Path)
+				fmt.Fprintf(cliStderr(), "warning: skip %s: detached HEAD\n", entry.Path)
 				skipOnce[key] = struct{}{}
 				skipped++
 			}
@@ -120,7 +119,7 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 			continue
 		case git.BranchRelationDiverged:
 			if _, seen := skipOnce[key]; !seen {
-				fmt.Fprintf(os.Stderr, "warning: skip %s: diverged from main\n", entry.Branch)
+				fmt.Fprintf(cliStderr(), "warning: skip %s: diverged from main\n", entry.Branch)
 				skipOnce[key] = struct{}{}
 				skipped++
 			}
@@ -133,7 +132,7 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 
 		if err := worktree.IsClean(mainRepo); err != nil {
 			if _, seen := skipOnce[key]; !seen {
-				fmt.Fprintf(os.Stderr, "warning: skip %s: dirty main\n", entry.Branch)
+				fmt.Fprintf(cliStderr(), "warning: skip %s: dirty main\n", entry.Branch)
 				skipOnce[key] = struct{}{}
 				skipped++
 			}
@@ -144,7 +143,7 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 			return err
 		} else if ok {
 			if _, seen := skipOnce[key]; !seen {
-				fmt.Fprintf(os.Stderr, "warning: skip %s: wip commit in range (%s %s)\n", entry.Branch, short, subject)
+				fmt.Fprintf(cliStderr(), "warning: skip %s: wip commit in range (%s %s)\n", entry.Branch, short, subject)
 				skipOnce[key] = struct{}{}
 				skipped++
 			}
@@ -170,13 +169,13 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 			continue
 		}
 		if worktree.IsDead(entry.Path) {
-			fmt.Fprintf(os.Stderr, "warning: skip %s: dead worktree\n", entry.Path)
+			fmt.Fprintf(cliStderr(), "warning: skip %s: dead worktree\n", entry.Path)
 			skipOnce[key] = struct{}{}
 			skipped++
 			continue
 		}
 		if entry.Branch == "" {
-			fmt.Fprintf(os.Stderr, "warning: skip %s: detached HEAD\n", entry.Path)
+			fmt.Fprintf(cliStderr(), "warning: skip %s: detached HEAD\n", entry.Path)
 			skipOnce[key] = struct{}{}
 			skipped++
 			continue
@@ -191,7 +190,7 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 			// Identical or wt still ahead of main: silent no-op for pass 2.
 			continue
 		case git.BranchRelationDiverged:
-			fmt.Fprintf(os.Stderr, "warning: skip %s: diverged from main\n", entry.Branch)
+			fmt.Fprintf(cliStderr(), "warning: skip %s: diverged from main\n", entry.Branch)
 			skipOnce[key] = struct{}{}
 			skipped++
 			continue
@@ -202,7 +201,7 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 		}
 
 		if err := worktree.IsClean(entry.Path); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: skip %s: dirty worktree\n", entry.Branch)
+			fmt.Fprintf(cliStderr(), "warning: skip %s: dirty worktree\n", entry.Branch)
 			skipOnce[key] = struct{}{}
 			skipped++
 			continue
@@ -260,7 +259,7 @@ func writeSyncStdout(details []string, intoMain, intoWT, skipped int, dryRun boo
 	}
 	b.WriteString(prefix)
 	fmt.Fprintf(&b, "synced: %d into main, %d into worktrees, %d skipped\n", intoMain, intoWT, skipped)
-	fmt.Fprint(os.Stdout, b.String())
+	fmt.Fprint(cliStdout(), b.String())
 }
 
 // findFirstWipInRange walks commits in mainBranch..wtBranch oldest-first and

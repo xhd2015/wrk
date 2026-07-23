@@ -1572,25 +1572,20 @@ type Response struct {
 }
 
 func Run(t *testing.T, req *Request) (*Response, error) {
-	bin := getWrkBin(t)
 	args := buildWrkCLIArgs(req)
 
 	if err := prepareFollowupFile(req); err != nil {
 		return nil, err
 	}
 
-	if req.UseScriptTTY {
-		return execScriptTTYWrk(t, req, bin, args)
+	// True process-boundary paths stay binary e2e (TTY script / long-running web).
+	// Helpers live in SETUP.md so this Run body stays L2 in-process by default.
+	if req.UseScriptTTY || req.WebProbe {
+		return runWrkBinaryBoundary(t, req, args)
 	}
 
-	if req.WebProbe {
-		return runWebProbe(t, req, bin, args)
-	}
-
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	cmd.Env = wrkEnv(req)
-	return captureCommandOutput(cmd, req.StdinInput)
+	// L2 in-process CLI (design center): same dispatch as the product binary.
+	return runWrkInProcess(t, req, args)
 }
 
 // prepareFollowupFile truncates FollowupFile so in-place --cd leaves can detect writes.

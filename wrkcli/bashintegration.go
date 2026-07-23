@@ -194,7 +194,7 @@ func runBashIntegration(args []string) error {
 	switch action {
 	case "":
 		// Use Printf so go vet does not treat the script (which contains %s) as a format string.
-		fmt.Printf("%s", bashIntegrationScript)
+		fmt.Fprintf(cliStdout(), "%s", bashIntegrationScript)
 		return nil
 	case "--install":
 		if dryRun {
@@ -367,26 +367,26 @@ func uninstallBashIntegrationDryRun() error {
 	bashrcPath := filepath.Join(home, ".bashrc")
 
 	if fullyUninstalled(home) {
-		fmt.Println("wrk bash integration: already uninstalled")
-		fmt.Printf("bash_profile: %s (marker absent)\n", bashProfilePath)
-		fmt.Printf("bashrc: %s (marker absent)\n", bashrcPath)
-		fmt.Println("no changes needed")
-		fmt.Println()
+		fmt.Fprintln(cliStdout(), "wrk bash integration: already uninstalled")
+		fmt.Fprintf(cliStdout(), "bash_profile: %s (marker absent)\n", bashProfilePath)
+		fmt.Fprintf(cliStdout(), "bashrc: %s (marker absent)\n", bashrcPath)
+		fmt.Fprintln(cliStdout(), "no changes needed")
+		fmt.Fprintln(cliStdout())
 		return nil
 	}
 
-	fmt.Println("dry-run: would remove marker block from ~/.bash_profile")
-	fmt.Println("dry-run: would remove marker block from ~/.bashrc")
-	fmt.Println()
-	fmt.Print(wrkMarkerBlock)
-	fmt.Println()
+	fmt.Fprintln(cliStdout(), "dry-run: would remove marker block from ~/.bash_profile")
+	fmt.Fprintln(cliStdout(), "dry-run: would remove marker block from ~/.bashrc")
+	fmt.Fprintln(cliStdout())
+	fmt.Fprint(cliStdout(), wrkMarkerBlock)
+	fmt.Fprintln(cliStdout())
 	return nil
 }
 
 func statusBashIntegration() (exitCode int) {
 	_, wrkHome, scriptPath, bashProfilePath, bashrcPath, err := bashIntegrationPaths()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(cliStderr(), "error: %v\n", err)
 		return 1
 	}
 
@@ -406,23 +406,23 @@ func statusBashIntegration() (exitCode int) {
 		state = "partial"
 	}
 
-	fmt.Printf("bash integration: %s\n", state)
+	fmt.Fprintf(cliStdout(), "bash integration: %s\n", state)
 	if scriptExists {
-		fmt.Printf("script: %s (present)\n", scriptPath)
+		fmt.Fprintf(cliStdout(), "script: %s (present)\n", scriptPath)
 	} else {
-		fmt.Printf("script: %s (absent)\n", scriptPath)
+		fmt.Fprintf(cliStdout(), "script: %s (absent)\n", scriptPath)
 	}
 	if profileMarker {
-		fmt.Printf("bash_profile: %s (marker present)\n", bashProfilePath)
+		fmt.Fprintf(cliStdout(), "bash_profile: %s (marker present)\n", bashProfilePath)
 	} else {
-		fmt.Printf("bash_profile: %s (marker absent)\n", bashProfilePath)
+		fmt.Fprintf(cliStdout(), "bash_profile: %s (marker absent)\n", bashProfilePath)
 	}
 	if bashrcMarker {
-		fmt.Printf("bashrc: %s (marker present)\n", bashrcPath)
+		fmt.Fprintf(cliStdout(), "bashrc: %s (marker present)\n", bashrcPath)
 	} else {
-		fmt.Printf("bashrc: %s (marker absent)\n", bashrcPath)
+		fmt.Fprintf(cliStdout(), "bashrc: %s (marker absent)\n", bashrcPath)
 	}
-	fmt.Println()
+	fmt.Fprintln(cliStdout())
 	_ = wrkHome
 	return exitCode
 }
@@ -530,11 +530,11 @@ func computeInstallStatuses(scriptPath, bashProfilePath, bashrcPath string, dryR
 }
 
 func printInstallReport(summary, scriptPath, scriptStatus, bashProfilePath, profileStatus, bashrcPath, rcStatus string) {
-	fmt.Printf("bash integration: %s\n", summary)
-	fmt.Printf("script: %s (%s)\n", scriptPath, scriptStatus)
-	fmt.Printf("bash_profile: %s (marker %s)\n", bashProfilePath, profileStatus)
-	fmt.Printf("bashrc: %s (marker %s)\n", bashrcPath, rcStatus)
-	fmt.Println()
+	fmt.Fprintf(cliStdout(), "bash integration: %s\n", summary)
+	fmt.Fprintf(cliStdout(), "script: %s (%s)\n", scriptPath, scriptStatus)
+	fmt.Fprintf(cliStdout(), "bash_profile: %s (marker %s)\n", bashProfilePath, profileStatus)
+	fmt.Fprintf(cliStdout(), "bashrc: %s (marker %s)\n", bashrcPath, rcStatus)
+	fmt.Fprintln(cliStdout())
 }
 
 func appendMarkerToProfile(profilePath string) error {
@@ -622,9 +622,9 @@ func runBashComplete(req *CompletionRequest) error {
 		return nil
 	}
 	for _, c := range candidates {
-		fmt.Println(c)
+		fmt.Fprintln(cliStdout(), c)
 	}
-	fmt.Println()
+	fmt.Fprintln(cliStdout())
 	return nil
 }
 

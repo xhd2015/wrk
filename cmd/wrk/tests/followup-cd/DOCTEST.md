@@ -1,6 +1,8 @@
 # wrk bash-integration follow-up auto-cd
 
 ## Version
+
+**Layer: L2 in-process CLI** via `wrkcli.RunCLI` (runWrkOnce).
 0.0.5
 
 Decision tree covering bash follow-up auto-`cd`: the binary writes
@@ -257,6 +259,7 @@ doctest test ./go-pkgs/cmd/wrk/tests/followup-cd/wrapper/create/auto-cd
 ```go
 
 import (
+	"github.com/xhd2015/wrk/wrkcli"
 	"bytes"
 	"fmt"
 	"os"
@@ -331,7 +334,7 @@ func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
 		return nil, err
 	}
 
-	bin := getWrkBin(t)
+	bin := ""
 	resp := &Response{
 		Home:       req.FakeHome,
 		WrkHome:    req.WrkHome,
@@ -588,55 +591,26 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
-func runWrkOnce(t *testing.T, req *Request, bin string, args []string, followupFile string) (stdout, stderr string, exitCode int, err error) {
+func runWrkOnce(t *testing.T, req *Request, bin string, args []string, followEnv string) (stdout, stderr string, exitCode int, err error) {
 	t.Helper()
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	if cmd.Dir == "" {
-		cmd.Dir = req.WorkRoot
-	}
-	pathEnv := os.Getenv("PATH")
-	if req.FakeShellDir != "" {
-		pathEnv = req.FakeShellDir + string(os.PathListSeparator) + pathEnv
-	}
-	env := []string{
-		"HOME=" + req.FakeHome,
-		"WRK_HOME=" + req.WrkHome,
-		"WRK_DATE=" + wrkDate,
-		"PATH=" + pathEnv,
-	}
-	if followupFile != "" {
-		env = append(env, "WRK_FOLLOWUP_FILE="+followupFile)
-	}
-	if req.SetTaskEnv != "" {
-		env = append(env, req.SetTaskEnv)
-	}
-	if req.AutoCD != "" {
-		env = append(env, "WRK_AUTO_CD="+req.AutoCD)
-	}
-	if req.ShellEnv != "" {
-		env = append(env, "SHELL="+req.ShellEnv)
-	}
-	if req.FakeShellLog != "" {
-		env = append(env, "WRK_FAKE_SHELL_LOG="+req.FakeShellLog)
-	}
-	if req.FakeShellExit != 0 {
-		env = append(env, fmt.Sprintf("WRK_FAKE_SHELL_EXIT=%d", req.FakeShellExit))
-	}
-	cmd.Env = env
+	_ = bin
 	var outBuf, errBuf bytes.Buffer
-	cmd.Stdout = &outBuf
-	cmd.Stderr = &errBuf
-	runErr := cmd.Run()
-	exitCode = 0
-	if runErr != nil {
-		if ee, ok := runErr.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			return "", "", -1, runErr
-		}
+	opts := wrkcli.RunOptions{
+		Stdout:  &outBuf,
+		Stderr:  &errBuf,
+		Dir:     req.RepoDir,
+		WrkHome: req.WrkHome,
 	}
-	return outBuf.String(), errBuf.String(), exitCode, nil
+	var extra []string
+	if req.FakeHome != "" {
+		extra = append(extra, "HOME="+req.FakeHome)
+	}
+	if followEnv != "" {
+		extra = append(extra, "WRK_FOLLOWUP_FILE="+followEnv)
+	}
+	opts.ExtraEnv = extra
+	code := wrkcli.RunCLI(args, opts)
+	return outBuf.String(), errBuf.String(), code, nil
 }
 
 func findModuleRoot(dir string) string {

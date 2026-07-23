@@ -24,6 +24,8 @@ git repo + version tags -> wrk --tag-next [--dry-run] [--push] [--json] -> stdou
 
 ```go
 import (
+	"bytes"
+	"github.com/xhd2015/wrk/wrkcli"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -449,4 +451,36 @@ func tagNextEnsureHelpersUsed() {
 	_ = assertValidJSONObject
 	_ = initNeutralCwd
 }
+
+// runCLIWithEnv maps a full env slice (as historically used with exec.Command)
+// onto wrkcli.RunOptions for L2 in-process CLI.
+func runCLIWithEnv(t *testing.T, dir, wrkHome string, args, env []string) (*Response, error) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	opts := wrkcli.RunOptions{
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Dir:     dir,
+		WrkHome: wrkHome,
+	}
+	for _, e := range env {
+		key, val, ok := strings.Cut(e, "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "WRK_HOME":
+			if strings.TrimSpace(val) != "" {
+				opts.WrkHome = val
+			}
+		case "WRK_DATE":
+			opts.WrkDate = val
+		default:
+			opts.ExtraEnv = append(opts.ExtraEnv, e)
+		}
+	}
+	code := wrkcli.RunCLI(args, opts)
+	return &Response{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: code}, nil
+}
+
 ```

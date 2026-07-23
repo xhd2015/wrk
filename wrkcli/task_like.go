@@ -90,11 +90,11 @@ func confirmTaskLikePromote(kind, arg string, assumeYes bool) (promote bool, err
 
 	switch kind {
 	case "source":
-		fmt.Fprintf(os.Stderr, "wrk: %s %q looks like a task description, not a source directory\n", warnTok, arg)
-		fmt.Fprintf(os.Stderr, "Treat as --task (create from current directory)? [Y/n] ")
+		fmt.Fprintf(cliStderr(), "wrk: %s %q looks like a task description, not a source directory\n", warnTok, arg)
+		fmt.Fprintf(cliStderr(), "Treat as --task (create from current directory)? [Y/n] ")
 	default:
-		fmt.Fprintf(os.Stderr, "wrk: %s %q looks like a task description, not a target directory\n", warnTok, arg)
-		fmt.Fprintf(os.Stderr, "Treat as --task? [Y/n] ")
+		fmt.Fprintf(cliStderr(), "wrk: %s %q looks like a task description, not a target directory\n", warnTok, arg)
+		fmt.Fprintf(cliStderr(), "Treat as --task? [Y/n] ")
 	}
 
 	line, err := readStdinLineForPrompt()

@@ -713,7 +713,7 @@ func printLocalReinstallDryRun(plan *LocalReinstallPlan, colorOn bool) error {
 	if err := printPlanItemsDryRun(plan.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
 		return err
 	}
-	fmt.Printf("would: reinstall %d binaries (%d skipped)\n", nInstall, nSkip)
+	fmt.Fprintf(cliStdout(), "would: reinstall %d binaries (%d skipped)\n", nInstall, nSkip)
 	return nil
 }
 
@@ -741,16 +741,16 @@ func printMultiLocalReinstallDryRun(plan *MultiLocalReinstallPlan, colorOn bool)
 			if relDir == "" {
 				relDir = "."
 			}
-			fmt.Printf("# module %s (%s)\n", modulePath, relDir)
+			fmt.Fprintf(cliStdout(), "# module %s (%s)\n", modulePath, relDir)
 		}
 		if err := printPlanItemsDryRun(mod.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
 			return err
 		}
 	}
 	if k > 1 {
-		fmt.Printf("would: reinstall %d binaries (%d skipped) across %d modules\n", nInstall, nSkip, k)
+		fmt.Fprintf(cliStdout(), "would: reinstall %d binaries (%d skipped) across %d modules\n", nInstall, nSkip, k)
 	} else {
-		fmt.Printf("would: reinstall %d binaries (%d skipped)\n", nInstall, nSkip)
+		fmt.Fprintf(cliStdout(), "would: reinstall %d binaries (%d skipped)\n", nInstall, nSkip)
 	}
 	return nil
 }
@@ -759,7 +759,7 @@ func printMultiLocalReinstallDryRun(plan *MultiLocalReinstallPlan, colorOn bool)
 // Color (when colorOn) applies only to the "notice:" / "warning:" prefix.
 func printReinstallDiagnostics(diags []ReinstallDiagnostic, colorOn bool) {
 	for _, d := range diags {
-		fmt.Fprint(os.Stderr, formatReinstallDiagnosticLine(d, colorOn))
+		fmt.Fprint(cliStderr(), formatReinstallDiagnosticLine(d, colorOn))
 	}
 }
 
@@ -827,15 +827,15 @@ func printPlanItemsDryRun(items []PlanItem, binDir string, nInstall, nSkip *int)
 			*nInstall++
 			switch it.Method {
 			case MethodGoInstall:
-				fmt.Printf("would: go install %s\n", it.RelPath)
+				fmt.Fprintf(cliStdout(), "would: go install %s\n", it.RelPath)
 			case MethodGoRunInstall:
-				fmt.Printf("would: go run %s\n", it.RelPath)
+				fmt.Fprintf(cliStdout(), "would: go run %s\n", it.RelPath)
 			default:
 				return fmt.Errorf("unknown reinstall method %q for %s", it.Method, it.BinName)
 			}
 		case ActionSkip:
 			*nSkip++
-			fmt.Printf("skip: %s (not in %s)\n", it.BinName, binDir)
+			fmt.Fprintf(cliStdout(), "skip: %s (not in %s)\n", it.BinName, binDir)
 		default:
 			return fmt.Errorf("unknown reinstall action %q for %s", it.Action, it.BinName)
 		}
@@ -854,7 +854,7 @@ func executeLocalReinstalls(plan *LocalReinstallPlan, colorOn bool) error {
 	if err := executePlanItems(plan.ModuleRoot, plan.BinDir, plan.Items, &nReinstalled, &nSkip, &nFailed); err != nil {
 		return err
 	}
-	fmt.Printf("reinstalled %d, skipped %d, failed %d\n", nReinstalled, nSkip, nFailed)
+	fmt.Fprintf(cliStdout(), "reinstalled %d, skipped %d, failed %d\n", nReinstalled, nSkip, nFailed)
 	if nFailed > 0 {
 		return ExitCodeError{Code: 1}
 	}
@@ -874,7 +874,7 @@ func executeMultiLocalReinstalls(plan *MultiLocalReinstallPlan, colorOn bool) er
 			return err
 		}
 	}
-	fmt.Printf("reinstalled %d, skipped %d, failed %d\n", nReinstalled, nSkip, nFailed)
+	fmt.Fprintf(cliStdout(), "reinstalled %d, skipped %d, failed %d\n", nReinstalled, nSkip, nFailed)
 	if nFailed > 0 {
 		return ExitCodeError{Code: 1}
 	}
@@ -890,10 +890,10 @@ func executePlanItems(moduleRoot, binDir string, items []PlanItem, nReinstalled,
 			var err error
 			switch it.Method {
 			case MethodGoInstall:
-				fmt.Printf("go install %s\n", it.RelPath)
+				fmt.Fprintf(cliStdout(), "go install %s\n", it.RelPath)
 				err = runGoInModule(moduleRoot, "install", it.RelPath)
 			case MethodGoRunInstall:
-				fmt.Printf("go run %s\n", it.RelPath)
+				fmt.Fprintf(cliStdout(), "go run %s\n", it.RelPath)
 				err = runGoInModule(moduleRoot, "run", it.RelPath)
 			default:
 				return fmt.Errorf("unknown reinstall method %q for %s", it.Method, it.BinName)
@@ -905,7 +905,7 @@ func executePlanItems(moduleRoot, binDir string, items []PlanItem, nReinstalled,
 			}
 		case ActionSkip:
 			*nSkip++
-			fmt.Printf("skip: %s (not in %s)\n", it.BinName, binDir)
+			fmt.Fprintf(cliStdout(), "skip: %s (not in %s)\n", it.BinName, binDir)
 		default:
 			return fmt.Errorf("unknown reinstall action %q for %s", it.Action, it.BinName)
 		}
@@ -918,8 +918,8 @@ func executePlanItems(moduleRoot, binDir string, items []PlanItem, nReinstalled,
 func runGoInModule(moduleRoot, subcmd, relPath string) error {
 	cmd := exec.Command("go", subcmd, relPath)
 	cmd.Dir = moduleRoot
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = cliStdout()
+	cmd.Stderr = cliStderr()
 	// Env is inherited (GOBIN, PATH, etc.) so installs land in the caller's bin dir.
 	return cmd.Run()
 }

@@ -1,6 +1,8 @@
 # wrk --status — main-repo primary linked worktrees + optional external section
 
 ## Version
+
+**Layer: L2 in-process CLI** via `wrkcli.RunCLI`.
 0.0.2
 
 Decision tree for main-repo `wrk --status` when cwd resolves to a **main
@@ -106,6 +108,8 @@ doctest test ./cmd/wrk/tests/status/main-repo-worktrees/from-deep-subdir
 
 ```go
 import (
+	"github.com/xhd2015/wrk/wrkcli"
+	"strings"
 	"bytes"
 	"io"
 	"os"
@@ -134,32 +138,17 @@ type Response struct {
 	ExitCode int
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
-	bin := getWrkBin(t)
 
-	args := append([]string(nil), req.Args...)
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	cmd.Env = wrkEnv(req)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			return nil, err
-		}
-	}
-
-	return &Response{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		ExitCode: exitCode,
-	}, nil
+func wrkDateForReq(req *Request) string {
+	_ = req
+	// Harness default date used by monotree fixtures (YYYY-MM-DD).
+	return "2026-06-30"
 }
+
+func Run(t *testing.T, req *Request) (*Response, error) {
+	args := append([]string(nil), req.Args...)
+	return runCLIWithEnv(t, req.RepoDir, req.WrkHome, args, wrkEnv(req))
+}
+
+
 ```

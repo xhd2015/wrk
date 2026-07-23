@@ -200,7 +200,7 @@ func warnMaxDesktopsFallback() {
 	if term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == "" {
 		warnTok = colorize("warning:", ansiOrange)
 	}
-	fmt.Fprintf(os.Stderr, "%s Mission Control already at maximum Desktops (16); continuing on current Desktop\n", warnTok)
+	fmt.Fprintf(cliStderr(), "%s Mission Control already at maximum Desktops (16); continuing on current Desktop\n", warnTok)
 }
 
 // runCreateUX runs terminal / agent steps after native create printed the path.
@@ -383,7 +383,7 @@ func runAgentInProcess(worktreePath string, plan createUXPlan, task string) erro
 	// Keep create's worktree path as the sole stdout contract; agent diagnostics
 	// go to stderr. Interactive agent UIs typically use stderr/TTY directly.
 	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = cliStderr()
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			code := exitErr.ExitCode()
