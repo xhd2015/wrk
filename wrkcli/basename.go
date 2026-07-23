@@ -201,8 +201,22 @@ func resolveDirArgFrom(base, dir string, allowBasenameFallback bool, wrkHome str
 			if st, statErr := os.Stat(under); statErr == nil && st.IsDir() {
 				return filepath.Abs(under)
 			}
-			// Preserve basename semantics for projects.json lookup.
-			return resolveDirArg(dir, allowBasenameFallback, wrkHome, hint)
+			// Projects.json basename fallback (no process Getwd).
+			resolved, fallbackErr := resolveBasenameFromProjects(wrkHome, dir)
+			if fallbackErr != nil {
+				return "", fallbackErr
+			}
+			if resolved != "" {
+				if _, err := os.Stat(resolved); err != nil {
+					if os.IsNotExist(err) {
+						return "", fmt.Errorf("wrk: %s does not exist", resolved)
+					}
+					return "", fmt.Errorf("stat dir: %w", err)
+				}
+				return resolved, nil
+			}
+			// No match: report missing path under the invocation base (not process cwd).
+			return "", fmt.Errorf("wrk: %s does not exist", under)
 		}
 		absCandidate = filepath.Clean(filepath.Join(base, dir))
 	} else {
