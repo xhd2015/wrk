@@ -259,8 +259,31 @@ func buildBashIntegrationArgs(action string, dryRun bool) []string {
 	return args
 }
 
+// bashNeedsHomeIsolation is true when the action reads/writes profile files under
+// $HOME (install/uninstall/status). Those stay L3 via cmd.Env HOME=FakeHome.
+// print-script, complete, and mutual-exclusion only need WRK_HOME + writers → L2.
+func bashNeedsHomeIsolation(args []string) bool {
+	for _, a := range args {
+		switch a {
+		case "--install", "--uninstall", "--status":
+			return true
+		}
+	}
+	return false
+}
+
 func runWrkOnce(t *testing.T, req *Request, bin string, args []string) (stdout, stderr string, exitCode int, err error) {
 	t.Helper()
+	if !bashNeedsHomeIsolation(args) {
+		var outBuf, errBuf bytes.Buffer
+		code := wrkcli.RunCLI(args, wrkcli.RunOptions{
+			Stdout:  &outBuf,
+			Stderr:  &errBuf,
+			Dir:     req.RepoDir,
+			WrkHome: req.WrkHome,
+		})
+		return outBuf.String(), errBuf.String(), code, nil
+	}
 	if bin == "" {
 		bin = getWrkBin(t)
 	}

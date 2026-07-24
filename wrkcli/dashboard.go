@@ -212,7 +212,7 @@ func runDashboard(workDir string, ctx *invocationContext) error {
 
 	// Non-TTY, no ACTION → static snapshot only.
 	m := buildDashboardModel(workDir)
-	fmt.Fprint(cliStdout(), renderDashboardView(m))
+	fmt.Fprint(ctx.out(), renderDashboardView(m))
 	return nil
 }
 
@@ -221,7 +221,7 @@ func applyDashboardAction(workDir string, ctx *invocationContext, action string)
 	switch action {
 	case "cancel":
 		// Exit 0; no compose; leave argv log empty; keep event command dashboard.
-		fmt.Fprint(cliStdout(), renderDashboardView(buildDashboardModel(workDir)))
+		fmt.Fprint(ctx.out(), renderDashboardView(buildDashboardModel(workDir)))
 		return nil
 	case "run-done":
 		return runDashboardCompose(workDir, ctx, true /* done */)

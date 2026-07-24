@@ -2,6 +2,7 @@ package wrkcli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -181,7 +182,8 @@ type ExitCodeError struct {
 
 func (e ExitCodeError) Error() string { return "" }
 
-func runBashIntegration(args []string) error {
+func runBashIntegration(ctx *invocationContext, args []string) error {
+	out, errw := ctx.out(), ctx.errw()
 	if err := checkBashIntegrationMutualExclusion(args); err != nil {
 		return err
 	}
@@ -194,28 +196,32 @@ func runBashIntegration(args []string) error {
 	switch action {
 	case "":
 		// Use Printf so go vet does not treat the script (which contains %s) as a format string.
-		fmt.Fprintf(cliStdout(), "%s", bashIntegrationScript)
+		fmt.Fprintf(out, "%s", bashIntegrationScript)
 		return nil
 	case "--install":
 		if dryRun {
-			return installBashIntegrationDryRun()
+			return installBashIntegrationDryRun(out, errw)
 		}
-		return installBashIntegration()
+		return installBashIntegration(out, errw)
 	case "--uninstall":
 		if dryRun {
-			return uninstallBashIntegrationDryRun()
+			return uninstallBashIntegrationDryRun(out, errw)
 		}
-		return uninstallBashIntegration()
+		return uninstallBashIntegration(out, errw)
 	case "--status":
 		if dryRun {
 			return fmt.Errorf("wrk: unknown integration action %q", "--dry-run")
 		}
-		if code := statusBashIntegration(); code != 0 {
+		if code := statusBashIntegration(out, errw); code != 0 {
 			return ExitCodeError{Code: code}
 		}
 		return nil
 	case "--complete":
-		return runBashComplete(completeReq)
+		wrkHome, homeErr := ctx.resolveHome()
+		if homeErr != nil {
+			return homeErr
+		}
+		return runBashComplete(out, errw, wrkHome, completeReq)
 	default:
 		return fmt.Errorf("wrk: unknown integration action %q", action)
 	}
@@ -348,17 +354,29 @@ func fullyUninstalled(home string) bool {
 		!markerPresent(filepath.Join(home, ".bashrc"))
 }
 
-func installBashIntegrationDryRun() error {
+func installBashIntegrationDryRun(out, errw io.Writer) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	_, _, scriptPath, bashProfilePath, bashrcPath, err := bashIntegrationPaths()
 	if err != nil {
 		return err
 	}
 	scriptStatus, profileStatus, rcStatus, summary := computeInstallStatuses(scriptPath, bashProfilePath, bashrcPath, true)
-	printInstallReport(summary, scriptPath, scriptStatus, bashProfilePath, profileStatus, bashrcPath, rcStatus)
+	printInstallReport(out, summary, scriptPath, scriptStatus, bashProfilePath, profileStatus, bashrcPath, rcStatus)
 	return nil
 }
 
-func uninstallBashIntegrationDryRun() error {
+func uninstallBashIntegrationDryRun(out, errw io.Writer) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -367,26 +385,32 @@ func uninstallBashIntegrationDryRun() error {
 	bashrcPath := filepath.Join(home, ".bashrc")
 
 	if fullyUninstalled(home) {
-		fmt.Fprintln(cliStdout(), "wrk bash integration: already uninstalled")
-		fmt.Fprintf(cliStdout(), "bash_profile: %s (marker absent)\n", bashProfilePath)
-		fmt.Fprintf(cliStdout(), "bashrc: %s (marker absent)\n", bashrcPath)
-		fmt.Fprintln(cliStdout(), "no changes needed")
-		fmt.Fprintln(cliStdout())
+		fmt.Fprintln(out, "wrk bash integration: already uninstalled")
+		fmt.Fprintf(out, "bash_profile: %s (marker absent)\n", bashProfilePath)
+		fmt.Fprintf(out, "bashrc: %s (marker absent)\n", bashrcPath)
+		fmt.Fprintln(out, "no changes needed")
+		fmt.Fprintln(out)
 		return nil
 	}
 
-	fmt.Fprintln(cliStdout(), "dry-run: would remove marker block from ~/.bash_profile")
-	fmt.Fprintln(cliStdout(), "dry-run: would remove marker block from ~/.bashrc")
-	fmt.Fprintln(cliStdout())
-	fmt.Fprint(cliStdout(), wrkMarkerBlock)
-	fmt.Fprintln(cliStdout())
+	fmt.Fprintln(out, "dry-run: would remove marker block from ~/.bash_profile")
+	fmt.Fprintln(out, "dry-run: would remove marker block from ~/.bashrc")
+	fmt.Fprintln(out)
+	fmt.Fprint(out, wrkMarkerBlock)
+	fmt.Fprintln(out)
 	return nil
 }
 
-func statusBashIntegration() (exitCode int) {
+func statusBashIntegration(out, errw io.Writer) (exitCode int) {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	_, wrkHome, scriptPath, bashProfilePath, bashrcPath, err := bashIntegrationPaths()
 	if err != nil {
-		fmt.Fprintf(cliStderr(), "error: %v\n", err)
+		fmt.Fprintf(errw, "error: %v\n", err)
 		return 1
 	}
 
@@ -406,28 +430,34 @@ func statusBashIntegration() (exitCode int) {
 		state = "partial"
 	}
 
-	fmt.Fprintf(cliStdout(), "bash integration: %s\n", state)
+	fmt.Fprintf(out, "bash integration: %s\n", state)
 	if scriptExists {
-		fmt.Fprintf(cliStdout(), "script: %s (present)\n", scriptPath)
+		fmt.Fprintf(out, "script: %s (present)\n", scriptPath)
 	} else {
-		fmt.Fprintf(cliStdout(), "script: %s (absent)\n", scriptPath)
+		fmt.Fprintf(out, "script: %s (absent)\n", scriptPath)
 	}
 	if profileMarker {
-		fmt.Fprintf(cliStdout(), "bash_profile: %s (marker present)\n", bashProfilePath)
+		fmt.Fprintf(out, "bash_profile: %s (marker present)\n", bashProfilePath)
 	} else {
-		fmt.Fprintf(cliStdout(), "bash_profile: %s (marker absent)\n", bashProfilePath)
+		fmt.Fprintf(out, "bash_profile: %s (marker absent)\n", bashProfilePath)
 	}
 	if bashrcMarker {
-		fmt.Fprintf(cliStdout(), "bashrc: %s (marker present)\n", bashrcPath)
+		fmt.Fprintf(out, "bashrc: %s (marker present)\n", bashrcPath)
 	} else {
-		fmt.Fprintf(cliStdout(), "bashrc: %s (marker absent)\n", bashrcPath)
+		fmt.Fprintf(out, "bashrc: %s (marker absent)\n", bashrcPath)
 	}
-	fmt.Fprintln(cliStdout())
+	fmt.Fprintln(out)
 	_ = wrkHome
 	return exitCode
 }
 
-func installBashIntegration() error {
+func installBashIntegration(out, errw io.Writer) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	_, _, scriptPath, bashProfilePath, bashrcPath, err := bashIntegrationPaths()
 	if err != nil {
 		return err
@@ -456,7 +486,7 @@ func installBashIntegration() error {
 		}
 	}
 
-	printInstallReport(summary, scriptPath, scriptStatus, bashProfilePath, profileStatus, bashrcPath, rcStatus)
+	printInstallReport(out, summary, scriptPath, scriptStatus, bashProfilePath, profileStatus, bashrcPath, rcStatus)
 	return nil
 }
 
@@ -529,12 +559,15 @@ func computeInstallStatuses(scriptPath, bashProfilePath, bashrcPath string, dryR
 	return scriptStatus, profileStatus, rcStatus, summary
 }
 
-func printInstallReport(summary, scriptPath, scriptStatus, bashProfilePath, profileStatus, bashrcPath, rcStatus string) {
-	fmt.Fprintf(cliStdout(), "bash integration: %s\n", summary)
-	fmt.Fprintf(cliStdout(), "script: %s (%s)\n", scriptPath, scriptStatus)
-	fmt.Fprintf(cliStdout(), "bash_profile: %s (marker %s)\n", bashProfilePath, profileStatus)
-	fmt.Fprintf(cliStdout(), "bashrc: %s (marker %s)\n", bashrcPath, rcStatus)
-	fmt.Fprintln(cliStdout())
+func printInstallReport(out io.Writer, summary, scriptPath, scriptStatus, bashProfilePath, profileStatus, bashrcPath, rcStatus string) {
+	if out == nil {
+		out = os.Stdout
+	}
+	fmt.Fprintf(out, "bash integration: %s\n", summary)
+	fmt.Fprintf(out, "script: %s (%s)\n", scriptPath, scriptStatus)
+	fmt.Fprintf(out, "bash_profile: %s (marker %s)\n", bashProfilePath, profileStatus)
+	fmt.Fprintf(out, "bashrc: %s (marker %s)\n", bashrcPath, rcStatus)
+	fmt.Fprintln(out)
 }
 
 func appendMarkerToProfile(profilePath string) error {
@@ -558,7 +591,13 @@ func appendMarkerToProfile(profilePath string) error {
 	return os.WriteFile(profilePath, []byte(builder.String()), 0o644)
 }
 
-func uninstallBashIntegration() error {
+func uninstallBashIntegration(out, errw io.Writer) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -609,22 +648,31 @@ func stripMarkerFromProfile(profilePath string) error {
 	return os.WriteFile(profilePath, []byte(newContent), 0o644)
 }
 
-func runBashComplete(req *CompletionRequest) error {
+func runBashComplete(out, errw io.Writer, wrkHome string, req *CompletionRequest) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	if req == nil {
 		return fmt.Errorf("wrk: --complete requires words and cword after --")
 	}
-	wrkHome, err := resolveWrkHome()
-	if err != nil {
-		return err
+	if strings.TrimSpace(wrkHome) == "" {
+		var err error
+		wrkHome, err = resolveWrkHome()
+		if err != nil {
+			return err
+		}
 	}
 	candidates := Complete(wrkHome, *req)
 	if len(candidates) == 0 {
 		return nil
 	}
 	for _, c := range candidates {
-		fmt.Fprintln(cliStdout(), c)
+		fmt.Fprintln(out, c)
 	}
-	fmt.Fprintln(cliStdout())
+	fmt.Fprintln(out)
 	return nil
 }
 

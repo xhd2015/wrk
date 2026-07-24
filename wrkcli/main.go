@@ -3,6 +3,8 @@ package wrkcli
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 
@@ -33,8 +35,12 @@ func resolveMainRepoForWorkDir(workDir string) (string, error) {
 
 // runMain opens a nested interactive shell at the main repository root for the
 // current checkout. Always nested (ignores WRK_FOLLOWUP_FILE); minimal UX.
-// workDir is the process cwd (no path positional).
-func runMain(workDir string) error {
+// workDir is the process cwd (no path positional). errw receives notices (e.g.
+// already-at-root); nil uses os.Stderr.
+func runMain(workDir string, errw io.Writer) error {
+	if errw == nil {
+		errw = os.Stderr
+	}
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -47,7 +53,7 @@ func runMain(workDir string) error {
 
 	// Already at main repo root: notice on stderr, no shell, exit 0.
 	if sameDirPath(cwd, mainRepo) {
-		fmt.Fprintf(cliStderr(), "wrk: already at main repository root: %s\n", mainRepo)
+		fmt.Fprintf(errw, "wrk: already at main repository root: %s\n", mainRepo)
 		return nil
 	}
 

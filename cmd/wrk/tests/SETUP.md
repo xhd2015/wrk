@@ -723,23 +723,20 @@ func needsProcessIsolation(req *Request) bool {
 // on the binary even if they also pass a capture-safe modifier (e.g. --sync).
 func needsInProcessCaptureOK(req *Request) bool {
 	args := buildWrkCLIArgs(req)
-	// Empty args = dashboard (still process stdout until dashboard is threaded).
+	// Empty args = bare dashboard (static non-TTY snapshot via ctx.out()).
+	// ACTION/TTY leaves still take needsProcessIsolation (ExtraEnv/script TTY).
 	if len(args) == 0 {
-		return false
+		return true
 	}
-	// --main rewrites workDir via ResolveMainRepo + more Getwd-adjacent edges;
-	// keep on binary until that path is fully origWd-based.
-	for _, a := range args {
-		if a == "--main" {
-			return false
-		}
-	}
+	// --main resolves via Dir (origWd); error/already-at-root use ctx.errw().
+	// Launch leaves still need FakeShell → needsProcessIsolation → binary.
 	// Isolation-heavy or still-process-stream primaries → binary (L3).
 	// Presence of any of these wins over capture-safe modifiers below.
 	for _, a := range args {
 		switch a {
-		case "--bash-integration",
-			"--new", "--dashboard":
+		case "--new", "--dashboard":
+			// --dashboard flag / --new create still binary until threaded fully.
+			// (Bare dashboard is empty args above.)
 			return false
 		}
 	}
@@ -784,10 +781,13 @@ func needsInProcessCaptureOK(req *Request) bool {
 			return true
 		case "--version", "-h", "--help":
 			return true
+		case "--bash-integration", "--main":
+			// bash: writers threaded; FakeHome install/status stay binary via isolation.
+			// main: error paths L2; FakeShell launch stays binary via isolation.
+			return true
 		}
 	}
 	// Create mode: positionals / --task without exclusive modes above.
-	// Empty args remain dashboard (binary until dashboard is threaded).
 	if len(args) > 0 {
 		onlyCreateMods := true
 		for _, a := range args {

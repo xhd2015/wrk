@@ -64,7 +64,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	}
 	if hasArg(args, "--bash-integration") {
 		ctx.skipEvent = true
-		return runBashIntegration(args)
+		return runBashIntegration(ctx, args)
 	}
 	if hasArg(args, "--set-config") {
 		if hasArg(args, "--no-config") {
@@ -802,7 +802,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if mainFlag {
 		mainPipelinePartner := tagNext || propagateTags || syncFlag || pushFlag || reinstallLocal || hasExec
 		if !mainPipelinePartner {
-			return runMain(workDir)
+			return runMain(workDir, ctx.errw())
 		}
 		mainRepo, err := resolveMainRepoForWorkDir(workDir)
 		if err != nil {
