@@ -6,7 +6,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/xhd2015/agent-pro v0.0.82-0.20260723035045-3ae16f5b014f
-	github.com/xhd2015/dot-pkgs/go-pkgs v0.0.89
+	github.com/xhd2015/dot-pkgs/go-pkgs v0.0.92-0.20260724012629-b7530d32c4f9
 	github.com/xhd2015/gitops v0.0.27
 	github.com/xhd2015/less-flags v1.0.2
 	github.com/xhd2015/skills v0.0.23
@@ -25,7 +25,6 @@ require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.5.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
-	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect

@@ -568,7 +568,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	}
 	if setTaskFlagSet {
 		// Default auto-yes for rename prompt; --confirm restores Y/n; -y still auto-yes.
-		return runSetTask(workDir, *setTaskDesc, planAssumeYes(assumeYes, forceConfirm), noCd, forceCd, execArgs)
+		return runSetTask(ctx.out(), ctx.errw(), workDir, *setTaskDesc, planAssumeYes(assumeYes, forceConfirm), noCd, forceCd, execArgs, ctx.followupFileOverride, ctx.origWd)
 	}
 
 	if taskFlagSet && strings.TrimSpace(*taskDesc) == "" {
@@ -826,13 +826,13 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runRepos(ctx.out(), workDir)
 	}
 	if depPath != "" {
-		return runDep(workDir, depPath, wrkHome, args, execArgs)
+		return runDep(ctx.out(), ctx.errw(), workDir, origWd, depPath, wrkHome, args, execArgs, ctx.wrkDateOverride)
 	}
 	if bringPath != "" {
-		return runBring(workDir, bringPath, wrkHome, args, execArgs)
+		return runBring(ctx.out(), ctx.errw(), workDir, origWd, bringPath, wrkHome, args, execArgs, ctx.wrkDateOverride)
 	}
 	if allDeps {
-		return runAllDeps(workDir, dryRun)
+		return runAllDeps(ctx.out(), ctx.errw(), workDir, wrkHome, dryRun, ctx.wrkDateOverride)
 	}
 	if list {
 		return runList(ctx.out(), workDir)
@@ -974,7 +974,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if err != nil {
 		return err
 	}
-	return runCreate(workDir, origWd, spawnTarget, task, noCd, forceCd, execArgs, uxPlan)
+	return runCreate(ctx.out(), ctx.errw(), workDir, origWd, spawnTarget, task, noCd, forceCd, execArgs, uxPlan, ctx.followupFileOverride, wrkHome, ctx.wrkDateOverride)
 }
 
 // isDashboardBareEntry is true when the invocation is pure bare no-args dashboard
@@ -1739,6 +1739,7 @@ func runDone(out, errw io.Writer, workDir, wrkHome string, confirmFromStdin, yes
 		TargetPath: "",
 		Remove:     true,
 		DryRun:     dryRun,
+		Stdout:     out,
 		Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
 			return worktree.PromptConfirmPlan(plan, confirmFromStdin, ownAssumeYes)
 		},
@@ -1800,6 +1801,7 @@ func runMergeBack(out, errw io.Writer, workDir, wrkHome string, confirmFromStdin
 		TargetPath: "",
 		Remove:     false,
 		DryRun:     dryRun,
+		Stdout:     out,
 		Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
 			return worktree.PromptConfirmPlan(plan, confirmFromStdin, assumeYes)
 		},
@@ -2058,6 +2060,7 @@ func mergeBackExternalWorktree(out io.Writer, externalPath string, confirmFromSt
 		SourcePath: externalPath,
 		TargetPath: "",
 		Remove:     true,
+		Stdout:     out,
 		Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
 			return worktree.PromptConfirmPlan(plan, confirmFromStdin, assumeYes)
 		},
@@ -2080,21 +2083,29 @@ func mergeBackExternalWorktree(out io.Writer, externalPath string, confirmFromSt
 	return nil
 }
 
-func runDep(workDir string, depArg string, wrkHome string, rawArgs []string, execArgs []string) error {
-	return runDepLike(workDir, depArg, wrkHome, rawArgs, execArgs, false)
+func runDep(out, errw io.Writer, workDir, origWd string, depArg string, wrkHome string, rawArgs []string, execArgs []string, wrkDate string) error {
+	return runDepLike(out, errw, workDir, origWd, depArg, wrkHome, rawArgs, execArgs, false, wrkDate)
 }
 
 // runBring is like runDep but always materializes the external worktree and
 // best-effort applies go.mod replace (soft SKIP notices on stderr, exit 0).
-func runBring(workDir string, bringArg string, wrkHome string, rawArgs []string, execArgs []string) error {
-	return runDepLike(workDir, bringArg, wrkHome, rawArgs, execArgs, true)
+func runBring(out, errw io.Writer, workDir, origWd string, bringArg string, wrkHome string, rawArgs []string, execArgs []string, wrkDate string) error {
+	return runDepLike(out, errw, workDir, origWd, bringArg, wrkHome, rawArgs, execArgs, true, wrkDate)
 }
 
 // runDepLike implements --dep (strict) and --bring (best-effort).
 // When bestEffort is false: hard-error if dep is not a go module or not a dependency,
 // then create worktree + replace. When true: always create worktree + gitignore first,
 // then soft-skip replace with stderr notices when analyse fails.
-func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string, execArgs []string, bestEffort bool) error {
+// origWd is the invocation Dir (shell cwd) for resolving depArg without Chdir.
+func runDepLike(out, errw io.Writer, workDir, origWd string, depArg string, wrkHome string, rawArgs []string, execArgs []string, bestEffort bool, wrkDate string) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
+	date := resolveWrkDateWith(wrkDate)
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -2108,7 +2119,12 @@ func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string,
 	if err != nil {
 		return err
 	}
-	depPath, err := resolveDirArg(depArg, true, wrkHome, &DirHintOptions{
+	// Resolve dep path relative to invocation Dir (not process Getwd).
+	base := strings.TrimSpace(origWd)
+	if base == "" {
+		base = cwd
+	}
+	depPath, err := resolveDirArgFrom(base, depArg, true, wrkHome, &DirHintOptions{
 		RawArgs: rawArgs,
 		DepMode: true,
 	})
@@ -2145,7 +2161,7 @@ func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string,
 
 	// Create external worktree + /external gitignore (always for both modes once
 	// analyse passed for --dep; always for --bring after path/git resolve).
-	externalPath, err := createExternalWorktreeForRepo(consumerTop, depPath)
+	externalPath, err := createExternalWorktreeForRepo(errw, consumerTop, depPath, date)
 	if err != nil {
 		return err
 	}
@@ -2157,8 +2173,8 @@ func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string,
 			return fmt.Errorf("scan dep modules: %w", err)
 		}
 		if len(depModules) == 0 {
-			fmt.Fprintf(cliStderr(), "SKIP local dep replacement: %s is not a go module\n", depPath)
-			return finishDepLike(externalPath, execArgs)
+			fmt.Fprintf(errw, "SKIP local dep replacement: %s is not a go module\n", depPath)
+			return finishDepLike(out, errw, externalPath, execArgs)
 		}
 
 		consumerModules, err := scan.Scan(consumerTop, scan.Options{})
@@ -2166,14 +2182,14 @@ func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string,
 			return fmt.Errorf("scan consumer modules: %w", err)
 		}
 		if len(consumerModules) == 0 {
-			fmt.Fprintf(cliStderr(), "SKIP local dep replacement: consumer has no Go modules\n")
-			return finishDepLike(externalPath, execArgs)
+			fmt.Fprintf(errw, "SKIP local dep replacement: consumer has no Go modules\n")
+			return finishDepLike(out, errw, externalPath, execArgs)
 		}
 
 		matchingConsumerDirs, depModDir = matchDepToConsumerModules(consumerTop, consumerModules, depModules)
 		if len(matchingConsumerDirs) == 0 {
-			fmt.Fprintf(cliStderr(), "SKIP local dep replacement: %s is not a dependency of any consumer module\n", depPath)
-			return finishDepLike(externalPath, execArgs)
+			fmt.Fprintf(errw, "SKIP local dep replacement: %s is not a dependency of any consumer module\n", depPath)
+			return finishDepLike(out, errw, externalPath, execArgs)
 		}
 	}
 
@@ -2192,7 +2208,7 @@ func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string,
 		}
 	}
 
-	return finishDepLike(externalPath, execArgs)
+	return finishDepLike(out, errw, externalPath, execArgs)
 }
 
 type consumerMatch struct{ dir string }
@@ -2227,13 +2243,19 @@ func matchDepToConsumerModules(consumerTop string, consumerModules []scan.Module
 	return matchingConsumerDirs, depModDir
 }
 
-func finishDepLike(externalPath string, execArgs []string) error {
+func finishDepLike(out, errw io.Writer, externalPath string, execArgs []string) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	absPath, err := filepath.Abs(externalPath)
 	if err != nil {
 		return fmt.Errorf("resolve external worktree path: %w", err)
 	}
-	fmt.Fprintln(cliStdout(), absPath)
-	return runExecInDir(absPath, execArgs)
+	fmt.Fprintln(out, absPath)
+	return runExecInDirTo(out, errw, absPath, execArgs)
 }
 
 // resolveDepModule scans the dep repo at depPath for Go modules and returns the
@@ -2385,18 +2407,21 @@ func findExistingExternalForDep(consumerTop, depMain string) ([]string, error) {
 
 // warnReuseExternal prints Policy A reuse warnings on stderr for the existing
 // external worktree paths (paths must be non-empty and sorted).
-func warnReuseExternal(basename string, paths []string) {
+func warnReuseExternal(errw io.Writer, basename string, paths []string) {
+	if errw == nil {
+		errw = os.Stderr
+	}
 	if len(paths) == 0 {
 		return
 	}
 	primary := paths[0]
 	if len(paths) == 1 {
-		fmt.Fprintf(cliStderr(), "wrk: warning: %s already exists under external/; reusing %s\n", basename, primary)
+		fmt.Fprintf(errw, "wrk: warning: %s already exists under external/; reusing %s\n", basename, primary)
 		return
 	}
-	fmt.Fprintf(cliStderr(), "wrk: warning: %s already has %d worktrees under external/; reusing %s\n", basename, len(paths), primary)
+	fmt.Fprintf(errw, "wrk: warning: %s already has %d worktrees under external/; reusing %s\n", basename, len(paths), primary)
 	for _, p := range paths[1:] {
-		fmt.Fprintf(cliStderr(), "wrk: warning: also present: %s\n", p)
+		fmt.Fprintf(errw, "wrk: warning: also present: %s\n", p)
 	}
 }
 
@@ -2412,7 +2437,13 @@ func warnReuseExternal(basename string, paths []string) {
 // Policy A: if any live linked worktree of depMain already exists under
 // {consumerTop}/external/, returns the lex-smallest path and emits reuse
 // warnings on stderr (shared by --bring/--dep/--all-deps and --dry-run).
-func planExternalWorktreePath(consumerTop, depPath string) (externalPath string, err error) {
+func planExternalWorktreePath(errw io.Writer, consumerTop, depPath, date string) (externalPath string, err error) {
+	if errw == nil {
+		errw = os.Stderr
+	}
+	if strings.TrimSpace(date) == "" {
+		date = resolveWrkDate()
+	}
 	depSource, err := worktree.ShowToplevel(depPath)
 	if err != nil {
 		return "", err
@@ -2425,7 +2456,7 @@ func planExternalWorktreePath(consumerTop, depPath string) (externalPath string,
 	if existing, err := findExistingExternalForDep(consumerTop, depMain); err != nil {
 		return "", err
 	} else if len(existing) > 0 {
-		warnReuseExternal(filepath.Base(depMain), existing)
+		warnReuseExternal(errw, filepath.Base(depMain), existing)
 		return existing[0], nil
 	}
 
@@ -2438,7 +2469,6 @@ func planExternalWorktreePath(consumerTop, depPath string) (externalPath string,
 	if err != nil {
 		return "", err
 	}
-	date := resolveWrkDate()
 
 	for suffix := 0; suffix < 100; suffix++ {
 		candidatePath, branch := externalCandidateNames(consumerTop, basename, pathToken, date, suffix)
@@ -2461,8 +2491,11 @@ func planExternalWorktreePath(consumerTop, depPath string) (externalPath string,
 //
 // Policy A: when planExternalWorktreePath reuses an existing external path, this
 // still ensures /external gitignore but does not create a new worktree/branch.
-func createExternalWorktreeForRepo(consumerTop, depPath string) (externalPath string, err error) {
-	externalPath, err = planExternalWorktreePath(consumerTop, depPath)
+func createExternalWorktreeForRepo(errw io.Writer, consumerTop, depPath, date string) (externalPath string, err error) {
+	if errw == nil {
+		errw = os.Stderr
+	}
+	externalPath, err = planExternalWorktreePath(errw, consumerTop, depPath, date)
 	if err != nil {
 		return "", err
 	}
@@ -2498,7 +2531,6 @@ func createExternalWorktreeForRepo(consumerTop, depPath string) (externalPath st
 	if err != nil {
 		return "", err
 	}
-	date := resolveWrkDate()
 
 	for suffix := 0; suffix < 100; suffix++ {
 		candidatePath, branch := externalCandidateNames(consumerTop, basename, pathToken, date, suffix)
@@ -2515,7 +2547,13 @@ func createExternalWorktreeForRepo(consumerTop, depPath string) (externalPath st
 	return externalPath, nil
 }
 
-func runAllDeps(workDir string, dryRun bool) error {
+func runAllDeps(out, errw io.Writer, workDir, wrkHome string, dryRun bool, wrkDate string) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -2570,10 +2608,14 @@ func runAllDeps(workDir string, dryRun bool) error {
 		consumerMods = append(consumerMods, info)
 	}
 
-	wrkHome, err := resolveWrkHome()
-	if err != nil {
-		return err
+	if strings.TrimSpace(wrkHome) == "" {
+		var err error
+		wrkHome, err = resolveWrkHome()
+		if err != nil {
+			return err
+		}
 	}
+	date := resolveWrkDateWith(wrkDate)
 
 	projectPaths, err := storage.ListProjects(wrkHome)
 	if err != nil {
@@ -2625,7 +2667,7 @@ func runAllDeps(workDir string, dryRun bool) error {
 			// module replace targets, but write nothing (no
 			// createExternalWorktree, no GoModEditReplace, no tidy, no
 			// gitignore).
-			externalPath, err := planExternalWorktreePath(consumerTop, projectPath)
+			externalPath, err := planExternalWorktreePath(errw, consumerTop, projectPath, date)
 			if err != nil {
 				return err
 			}
@@ -2640,7 +2682,7 @@ func runAllDeps(workDir string, dryRun bool) error {
 			continue
 		}
 		// Real run: materialize the planned external worktree.
-		externalPath, err := createExternalWorktreeForRepo(consumerTop, projectPath)
+		externalPath, err := createExternalWorktreeForRepo(errw, consumerTop, projectPath, date)
 		if err != nil {
 			return err
 		}
@@ -2685,9 +2727,9 @@ func runAllDeps(workDir string, dryRun bool) error {
 		if err != nil {
 			return fmt.Errorf("rel external path: %w", err)
 		}
-		fmt.Fprintf(cliStdout(), "%swrk %s at ./%s\n", prefix, d.modulePath, rel)
+		fmt.Fprintf(out, "%swrk %s at ./%s\n", prefix, d.modulePath, rel)
 	}
-	fmt.Fprintf(cliStdout(), "%swrked %d deps\n", prefix, len(linked))
+	fmt.Fprintf(out, "%swrked %d deps\n", prefix, len(linked))
 	return nil
 }
 
@@ -2815,7 +2857,13 @@ func externalCandidateBlocked(mainRepo, wtPath, branch string) bool {
 	return branchExists(mainRepo, branch)
 }
 
-func runCreate(workDir string, origWd string, targetDir string, taskDesc string, noCd, forceCd bool, execArgs []string, ux createUXPlan) error {
+func runCreate(out, errw io.Writer, workDir string, origWd string, targetDir string, taskDesc string, noCd, forceCd bool, execArgs []string, ux createUXPlan, followupFile, wrkHome, wrkDate string) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -2840,7 +2888,7 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 		return err
 	}
 
-	date := resolveWrkDate()
+	date := resolveWrkDateWith(wrkDate)
 	branchBase, pathToken, err := resolveNamingInputs(cwd, baseBranch)
 	if err != nil {
 		return err
@@ -2867,12 +2915,15 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 	slug = fitted
 
 	if targetDir != "" {
-		return runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, branchBase, pathToken, date, slug, noCd, forceCd, execArgs, taskDesc, ux)
+		return runCreateTargetDir(out, errw, origWd, targetDir, checkoutRoot, mainRepo, basename, branchBase, pathToken, date, slug, noCd, forceCd, execArgs, taskDesc, ux, followupFile, wrkHome)
 	}
 
-	wrkHome, err := resolveWrkHome()
-	if err != nil {
-		return err
+	if strings.TrimSpace(wrkHome) == "" {
+		var err error
+		wrkHome, err = resolveWrkHome()
+		if err != nil {
+			return err
+		}
 	}
 
 	// Window (space) before worktree so a space failure leaves no orphan path.
@@ -2880,27 +2931,27 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 		return err
 	}
 
-	result, err := CreateDefaultWorktree(cwd, wrkHome, slug)
+	result, err := CreateDefaultWorktreeAt(cwd, wrkHome, slug, date)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(cliStdout(), result.Path)
+	fmt.Fprintln(out, result.Path)
 	// Pipeline: [window] → create (path printed) → terminal-or-agent → exec → follow-up cd.
 	if err := runCreateUX(result.Path, taskDesc, ux); err != nil {
 		return err
 	}
-	if err := runExecInDir(result.Path, execArgs); err != nil {
+	if err := runExecInDirTo(out, errw, result.Path, execArgs); err != nil {
 		return err
 	}
 	// --force-cd always lands parent; otherwise skip home-gated auto-cd when
 	// create already opens agent and/or terminal (parent need not cd).
 	if forceCd {
-		return forceLandInDir(os.Stderr, result.Path, "")
+		return forceLandInDir(errw, result.Path, followupFile)
 	}
 	if ux.agent || ux.terminalMode != "" {
 		return nil
 	}
-	return writeFollowupCDIfCwdIsHome(noCd, origWd, result.Path, "")
+	return writeFollowupCDIfCwdIsHome(noCd, origWd, result.Path, followupFile)
 }
 
 // runCreateTargetDir handles wrk <dir> <target-dir>. A relative <target-dir> is
@@ -2911,7 +2962,13 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 // worktree (anywhere, not only under target/external), default is skip (print
 // existing path on stdout, no create). Non-TTY always auto-skips; TTY prompts
 // with default Y (skip). Answering n proceeds with create as today.
-func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, branchBase, pathToken, date, slug string, noCd, forceCd bool, execArgs []string, taskDesc string, ux createUXPlan) error {
+func runCreateTargetDir(out, errw io.Writer, origWd, targetDir, checkoutRoot, mainRepo, basename, branchBase, pathToken, date, slug string, noCd, forceCd bool, execArgs []string, taskDesc string, ux createUXPlan, followupFile, wrkHome string) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	// Resolve <target-dir> against the shell cwd (origWd), not the repo dir.
 	absTarget := targetDir
 	if !filepath.IsAbs(absTarget) {
@@ -2929,12 +2986,12 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 			if err != nil {
 				return fmt.Errorf("resolve worktree path: %w", err)
 			}
-			fmt.Fprintln(cliStdout(), absPath)
-			if err := runExecInDir(absPath, execArgs); err != nil {
+			fmt.Fprintln(out, absPath)
+			if err := runExecInDirTo(out, errw, absPath, execArgs); err != nil {
 				return err
 			}
 			if forceCd {
-				return forceLandInDir(os.Stderr, absPath, "")
+				return forceLandInDir(errw, absPath, followupFile)
 			}
 			return nil
 		}
@@ -2955,13 +3012,13 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 			return p
 		}
 		if len(existing) > 1 {
-			fmt.Fprintf(cliStderr(), "wrk: %s %s already has %d linked worktrees; reusing candidate %s\n", warnTok, basename, len(existing), pathDisp(primary))
+			fmt.Fprintf(errw, "wrk: %s %s already has %d linked worktrees; reusing candidate %s\n", warnTok, basename, len(existing), pathDisp(primary))
 			for _, p := range existing[1:] {
-				fmt.Fprintf(cliStderr(), "wrk: %s also present: %s\n", warnTok, pathDisp(p))
+				fmt.Fprintf(errw, "wrk: %s also present: %s\n", warnTok, pathDisp(p))
 			}
 		}
 		// Prompt on stderr; default is skip (Y/empty). No trailing newline before read.
-		fmt.Fprintf(cliStderr(), "wrk: %s %s already has a linked worktree at %s, skip creating another? [Y/n] ", warnTok, basename, pathDisp(primary))
+		fmt.Fprintf(errw, "wrk: %s %s already has a linked worktree at %s, skip creating another? [Y/n] ", warnTok, basename, pathDisp(primary))
 		line, err := readStdinLineForPrompt()
 		if err != nil {
 			return fmt.Errorf("wrk: read skip confirmation: %w", err)
@@ -3001,16 +3058,16 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 			if err != nil {
 				return fmt.Errorf("resolve worktree path: %w", err)
 			}
-			fmt.Fprintln(cliStdout(), absPath)
+			fmt.Fprintln(out, absPath)
 			if err := runCreateUX(absPath, taskDesc, ux); err != nil {
 				return err
 			}
 			// Target-dir create skips home-gated auto-cd; --force-cd still lands.
-			if err := runExecInDir(absPath, execArgs); err != nil {
+			if err := runExecInDirTo(out, errw, absPath, execArgs); err != nil {
 				return err
 			}
 			if forceCd {
-				return forceLandInDir(os.Stderr, absPath, "")
+				return forceLandInDir(errw, absPath, followupFile)
 			}
 			return nil
 		}
@@ -3056,16 +3113,16 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 		if err != nil {
 			return fmt.Errorf("resolve worktree path: %w", err)
 		}
-		fmt.Fprintln(cliStdout(), absPath)
+		fmt.Fprintln(out, absPath)
 		if err := runCreateUX(absPath, taskDesc, ux); err != nil {
 			return err
 		}
 		// Target-dir create skips home-gated auto-cd; --force-cd still lands.
-		if err := runExecInDir(absPath, execArgs); err != nil {
+		if err := runExecInDirTo(out, errw, absPath, execArgs); err != nil {
 			return err
 		}
 		if forceCd {
-			return forceLandInDir(os.Stderr, absPath, "")
+			return forceLandInDir(errw, absPath, followupFile)
 		}
 		return nil
 	}
@@ -3257,7 +3314,13 @@ func parseBranchNaming(branch string) (branchBase, date, slug string, suffix int
 // runSetTask renames a linked worktree via git worktree move to include a new
 // task slug in the directory and branch names. Requires TTY confirmation (or
 // WRK_SET_TASK_CONFIRM=1 env var) before executing the move.
-func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, execArgs []string) error {
+func runSetTask(out, errw io.Writer, workDir string, taskDesc string, assumeYes, noCd, forceCd bool, execArgs []string, followupFile, shellCwd string) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errw == nil {
+		errw = os.Stderr
+	}
 	if strings.TrimSpace(taskDesc) == "" {
 		return fmt.Errorf("wrk: task description must not be empty")
 	}
@@ -3266,9 +3329,10 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 		return fmt.Errorf("wrk: task description %q produces an empty slug", taskDesc)
 	}
 
-	// Shell process cwd (inherited from interactive shell), not merely workDir.
-	// Used after move to decide whether auto-cd is needed.
-	shellCwd, _ := os.Getwd()
+	// Shell process cwd: prefer invocation origWd for L2; Getwd fallback.
+	if strings.TrimSpace(shellCwd) == "" {
+		shellCwd, _ = os.Getwd()
+	}
 
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
@@ -3380,8 +3444,8 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 
 	// If nothing changed, just report.
 	if newDirName == curBase && newBranch == branch {
-		fmt.Fprintln(cliStdout(), "task unchanged")
-		return runExecInDir(cwd, execArgs)
+		fmt.Fprintln(out, "task unchanged")
+		return runExecInDirTo(out, errw, cwd, execArgs)
 	}
 
 	pathChanges := filepath.Clean(newPath) != cleanCwdForName
@@ -3424,8 +3488,8 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 		if !term.IsTerminal(int(os.Stdout.Fd())) {
 			return fmt.Errorf("wrk: --set-task --confirm requires a terminal (tty)")
 		}
-		fmt.Fprintf(cliStdout(), "Rename worktree:\n  %s → %s\n  branch %s → %s\n", cwd, newPath, branch, newBranch)
-		fmt.Fprint(cliStdout(), "Proceed? [Y/n] ")
+		fmt.Fprintf(out, "Rename worktree:\n  %s → %s\n  branch %s → %s\n", cwd, newPath, branch, newBranch)
+		fmt.Fprint(out, "Proceed? [Y/n] ")
 		reader := bufio.NewReader(os.Stdin)
 		answer, _ := reader.ReadString('\n')
 		answer = strings.TrimSpace(answer)
@@ -3480,18 +3544,18 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 		}
 	}
 
-	fmt.Fprintln(cliStdout(), newPath)
-	if err := runExecInDir(newPath, execArgs); err != nil {
+	fmt.Fprintln(out, newPath)
+	if err := runExecInDirTo(out, errw, newPath, execArgs); err != nil {
 		return err
 	}
 	// --force-cd bypasses cwd-missing gate; otherwise write follow-up cd only if
 	// shell cwd is gone (user was inside the moved worktree). Surviving
 	// sibling/main stays put without --force-cd.
 	if forceCd {
-		return forceLandInDir(os.Stderr, newPath, "")
+		return forceLandInDir(errw, newPath, followupFile)
 	}
 	if pathChanges {
-		return writeFollowupCDIfCwdMissing(noCd, shellCwd, newPath, "")
+		return writeFollowupCDIfCwdMissing(noCd, shellCwd, newPath, followupFile)
 	}
 	return nil
 }

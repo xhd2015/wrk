@@ -23,7 +23,15 @@ type CreateWorktreeResult struct {
 // wrkHome must be non-empty (callers inject Options.WrkHome or ResolveWrkHome).
 // taskSlug is an already-slugified task segment; empty means no task in names.
 // Callers that accept free-text tasks should use NormalizeTaskSlug first.
+// Date comes from process WRK_DATE / clock; prefer CreateDefaultWorktreeAt when
+// the caller has a per-invocation date override (in-process tests).
 func CreateDefaultWorktree(projectPath, wrkHome, taskSlug string) (*CreateWorktreeResult, error) {
+	return CreateDefaultWorktreeAt(projectPath, wrkHome, taskSlug, "")
+}
+
+// CreateDefaultWorktreeAt is like CreateDefaultWorktree but uses date when
+// non-empty instead of resolveWrkDate() (parallel-safe L2 date isolation).
+func CreateDefaultWorktreeAt(projectPath, wrkHome, taskSlug, date string) (*CreateWorktreeResult, error) {
 	if strings.TrimSpace(projectPath) == "" {
 		return nil, fmt.Errorf("project path is required")
 	}
@@ -55,7 +63,9 @@ func CreateDefaultWorktree(projectPath, wrkHome, taskSlug string) (*CreateWorktr
 		return nil, err
 	}
 
-	date := resolveWrkDate()
+	if strings.TrimSpace(date) == "" {
+		date = resolveWrkDate()
+	}
 	_, pathToken, err := resolveNamingInputs(cwd, baseBranch)
 	if err != nil {
 		return nil, err

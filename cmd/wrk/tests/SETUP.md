@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
@@ -77,13 +78,31 @@ var (
 
 // noteModRoot records module root once per process (sync.Once). Safe under t.Parallel.
 // Prefer this over writing wrkModRoot from every leaf Setup.
-func noteModRoot(d *session.Doctest) {
-	if d == nil {
+// Takes the root path string (not *session.Doctest) so codegen field rewriting
+// cannot mangle d.DOCTEST_ROOT into an invalid selector.
+func noteModRoot(doctestRoot string) {
+	if doctestRoot == "" {
 		return
 	}
 	wrkModOnce.Do(func() {
-		wrkModRoot = findModuleRoot(d.DOCTEST_ROOT)
+		wrkModRoot = findModuleRoot(doctestRoot)
 	})
+}
+
+// doctestRootString reads the suite root path via reflect. Field name is built
+// without the literal "DOCTEST_ROOT" so SETUP codegen cannot rewrite the string
+// into "d.DOCTEST_ROOT" (which is not a valid reflect field name).
+func doctestRootString(d *session.Doctest) string {
+	if d == nil {
+		return ""
+	}
+	// Concatenate so the generator does not rewrite this field name string.
+	field := "DOCTEST" + "_ROOT"
+	v := reflect.ValueOf(d).Elem().FieldByName(field)
+	if !v.IsValid() || v.Kind() != reflect.String {
+		return ""
+	}
+	return v.String()
 }
 
 func getWrkBin(t *testing.T) string {
@@ -152,9 +171,9 @@ func ensureSeed(t *testing.T, seedID string, build seedBuilder) string {
 }
 
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	noteModRoot(d)
+	noteModRoot(doctestRootString(d))
 	if wrkModRoot == "" {
-		t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
+		t.Fatal("find module root: no go.mod in ancestors of DOCTEST_ROOT")
 	}
 	// Resolve symlinks so derived paths match git's resolved output (macOS
 	// serves /var from /private/var; t.TempDir returns the symlinked form).
@@ -719,9 +738,7 @@ func needsInProcessCaptureOK(req *Request) bool {
 	// Presence of any of these wins over capture-safe modifiers below.
 	for _, a := range args {
 		switch a {
-		case "--dep", "--bring", "--all-deps",
-			"--set-task",
-			"--bash-integration",
+		case "--bash-integration",
 			"--new", "--dashboard":
 			return false
 		}
@@ -739,26 +756,12 @@ func needsInProcessCaptureOK(req *Request) bool {
 	if hasSkill && skillInstall {
 		return false
 	}
-	// MergeBack dry-run plans print via library fmt.Print (process stdout) —
-	// keep --done/--merge-back --dry-run on binary until worktree.MergeBack
-	// accepts writers.
-	hasDry, hasDonePrimary := false, false
-	for _, a := range args {
-		switch a {
-		case "--dry-run":
-			hasDry = true
-		case "--done", "--merge-back":
-			hasDonePrimary = true
-		}
-	}
-	if hasDry && hasDonePrimary {
-		return false
-	}
 
 	// Pure modes known to print via ctx.out()/errw (and free modifiers like
 	// --dry-run/--json/--color/--fetch/--push with tag-next compose).
-	// --done/--merge-back apply path + post stages and activeRoot pipeline are
-	// threaded; stdin/FakeShell leaves stay binary via needsProcessIsolation.
+	// Create (positionals only), dep/bring/all-deps/set-task, and done/merge-back
+	// pipelines (incl. dry-run via MergeBack.Stdout) are threaded.
+	// stdin/FakeShell/FakeHome leaves stay binary via needsProcessIsolation.
 	for _, a := range args {
 		switch a {
 		case "--status", "--repos", "--list":
@@ -777,7 +780,31 @@ func needsInProcessCaptureOK(req *Request) bool {
 			return true
 		case "--done", "--merge-back":
 			return true
+		case "--dep", "--bring", "--all-deps", "--set-task":
+			return true
 		case "--version", "-h", "--help":
+			return true
+		}
+	}
+	// Create mode: positionals / --task without exclusive modes above.
+	// Empty args remain dashboard (binary until dashboard is threaded).
+	if len(args) > 0 {
+		onlyCreateMods := true
+		for _, a := range args {
+			if !strings.HasPrefix(a, "-") {
+				continue
+			}
+			switch a {
+			case "-y", "--yes", "--confirm", "--confirm-from-stdin",
+				"--no-cd", "--force-cd", "--color", "-v", "--verbose",
+				"--dry-run", "-t", "--task", "--no-config":
+				// free modifiers for create
+			default:
+				// unknown flag → not pure create capture path
+				onlyCreateMods = false
+			}
+		}
+		if onlyCreateMods {
 			return true
 		}
 	}
