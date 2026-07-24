@@ -198,8 +198,16 @@ func resolveDirArgFrom(base, dir string, allowBasenameFallback bool, wrkHome str
 		// Basename-only + fallback: try base/dir, then projects by token.
 		if allowBasenameFallback && isBasename(dir) {
 			under := filepath.Join(base, dir)
-			if st, statErr := os.Stat(under); statErr == nil && st.IsDir() {
-				return filepath.Abs(under)
+			if st, statErr := os.Stat(under); statErr == nil {
+				if st.IsDir() {
+					return filepath.Abs(under)
+				}
+				// Regular file (or non-dir) blocks basename resolution — guided error.
+				absUnder, absErr := filepath.Abs(under)
+				if absErr != nil {
+					absUnder = under
+				}
+				return "", fileCollisionGuidedError(wrkHome, dir, absUnder, hint)
 			}
 			// Projects.json basename fallback (no process Getwd).
 			resolved, fallbackErr := resolveBasenameFromProjects(wrkHome, dir)
@@ -282,6 +290,11 @@ func pickAmbiguousBasename(basename string, matches []string) (string, error) {
 	}
 	listing := b.String()
 
+	// Process env only here (call chain lacks invocationContext). Dual-mode L2
+	// tests pass WRK_BASENAME_CONFIRM via RunOptions.Env → still requires
+	// getenv overlay; pickAmbiguousBasename is only used from resolve paths
+	// that process-binary tests drive with cmd.Env. For in-process, harness
+	// should prefer unique basenames or --confirm-from-stdin isolation.
 	bypass := os.Getenv("WRK_BASENAME_CONFIRM") == "1"
 	if bypass || term.IsTerminal(int(os.Stdin.Fd())) {
 		n := len(matches)

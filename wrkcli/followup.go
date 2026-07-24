@@ -56,13 +56,22 @@ func writeFollowupCDTo(disabled bool, absPath, followupFile string) error {
 // Empty/unresolvable home or empty shell cwd → false (fail closed).
 // Does not use os.Getenv("HOME") directly.
 func shouldWriteHomeGatedFollowup(shellCwd string) bool {
+	return shouldWriteHomeGatedFollowupHome(shellCwd, "")
+}
+
+// shouldWriteHomeGatedFollowupHome is like shouldWriteHomeGatedFollowup but uses
+// home when non-empty instead of os.UserHomeDir (L2 FakeHome / Home override).
+func shouldWriteHomeGatedFollowupHome(shellCwd, home string) bool {
 	shellCwd = strings.TrimSpace(shellCwd)
 	if shellCwd == "" {
 		return false
 	}
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return false
+	if strings.TrimSpace(home) == "" {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil || strings.TrimSpace(home) == "" {
+			return false
+		}
 	}
 	return sameDirPath(shellCwd, home)
 }
@@ -95,7 +104,13 @@ func normalizeDirPath(p string) string {
 // yanked by auto-cd. Still respects --no-cd and unset WRK_FOLLOWUP_FILE.
 // followupFile is an optional invocation override (same as writeFollowupCDTo).
 func writeFollowupCDIfCwdIsHome(disabled bool, shellCwd, dest, followupFile string) error {
-	if !shouldWriteHomeGatedFollowup(shellCwd) {
+	return writeFollowupCDIfCwdIsHomeWithHome(disabled, shellCwd, dest, followupFile, "")
+}
+
+// writeFollowupCDIfCwdIsHomeWithHome is like writeFollowupCDIfCwdIsHome but uses
+// home for the gate when non-empty (L2 Home override).
+func writeFollowupCDIfCwdIsHomeWithHome(disabled bool, shellCwd, dest, followupFile, home string) error {
+	if !shouldWriteHomeGatedFollowupHome(shellCwd, home) {
 		return nil
 	}
 	return writeFollowupCDTo(disabled, dest, followupFile)

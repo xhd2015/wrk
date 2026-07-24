@@ -197,7 +197,7 @@ func renderDashboardView(m dashboardModel) string {
 
 // runDashboard is the bare `wrk` entry: static snapshot, hermetic ACTION, or TTY TUI.
 func runDashboard(workDir string, ctx *invocationContext) error {
-	action := strings.TrimSpace(os.Getenv(envDashboardAction))
+	action := strings.TrimSpace(ctx.getenv(envDashboardAction))
 	stdinTTY := term.IsTerminal(int(os.Stdin.Fd()))
 
 	// Hermetic ACTION forces the interactive path even without a TTY.
@@ -261,15 +261,20 @@ func defaultDashboardRecipe(workDir string, primaryDone bool) dashboardRecipe {
 		tagNext:        true,
 		push:           true,
 		reinstallLocal: true,
-		dryRun:         os.Getenv(envDashboardDryRun) == "1",
+		dryRun:         false, // set by caller from ctx.getenv when available
 	}
 	return r
 }
 
 // applyDashboardToggles mutates recipe from WRK_DASHBOARD_TOGGLES.
 // Disabled gates (e.g. Add changes when clean) cannot be forced on.
+// Prefer applyDashboardTogglesFrom when an invocation ctx is available.
 func applyDashboardToggles(r *dashboardRecipe, workDir string) {
-	raw := strings.TrimSpace(os.Getenv(envDashboardToggles))
+	applyDashboardTogglesFrom(r, workDir, os.Getenv(envDashboardToggles))
+}
+
+func applyDashboardTogglesFrom(r *dashboardRecipe, workDir, raw string) {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return
 	}
@@ -380,7 +385,11 @@ func composeArgvFromRecipe(r dashboardRecipe) []string {
 
 // writeComposeArgvLog writes one token per line when WRK_DASHBOARD_COMPOSE_ARGV_LOG is set.
 func writeComposeArgvLog(args []string) error {
-	path := strings.TrimSpace(os.Getenv(envDashboardComposeArgvLog))
+	return writeComposeArgvLogTo(args, os.Getenv(envDashboardComposeArgvLog))
+}
+
+func writeComposeArgvLogTo(args []string, path string) error {
+	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil
 	}
@@ -395,7 +404,13 @@ func writeComposeArgvLog(args []string) error {
 // runDashboardCompose builds the recipe from defaults + env toggles, logs argv, re-enters Run.
 func runDashboardCompose(workDir string, ctx *invocationContext, primaryDone bool) error {
 	r := defaultDashboardRecipe(workDir, primaryDone)
-	applyDashboardToggles(&r, workDir)
+	if ctx != nil {
+		r.dryRun = ctx.getenv(envDashboardDryRun) == "1"
+		applyDashboardTogglesFrom(&r, workDir, ctx.getenv(envDashboardToggles))
+	} else {
+		r.dryRun = os.Getenv(envDashboardDryRun) == "1"
+		applyDashboardToggles(&r, workDir)
+	}
 
 	// Ensure primary is set after toggles.
 	if primaryDone {
@@ -424,7 +439,13 @@ func runDashboardComposeWithRecipeOpts(workDir string, ctx *invocationContext, r
 
 	args := composeArgvFromRecipe(r)
 	if writeArgv {
-		if err := writeComposeArgvLog(args); err != nil {
+		logPath := ""
+		if ctx != nil {
+			logPath = ctx.getenv(envDashboardComposeArgvLog)
+		} else {
+			logPath = os.Getenv(envDashboardComposeArgvLog)
+		}
+		if err := writeComposeArgvLogTo(args, logPath); err != nil {
 			return fmt.Errorf("wrk: write %s: %w", envDashboardComposeArgvLog, err)
 		}
 	}
@@ -447,8 +468,36 @@ func runDashboardComposeWithRecipeOpts(workDir string, ctx *invocationContext, r
 	}
 
 	// Re-enter CLI compose with the same process (new invocation context).
-	// workDir is already the process cwd for bare wrk; Run uses Getwd.
-	return Run(args)
+	// Preserve Dir / Home / WrkHome / writers so L2 dual-mode leaves stay hermetic.
+	// Drop dashboard ACTION so nested run does not loop on hermetic action.
+	opts := RunOptions{
+		Dir: workDir,
+	}
+	if ctx != nil {
+		opts.Stdout = ctx.stdout
+		opts.Stderr = ctx.stderr
+		opts.WrkHome = ctx.wrkHomeOverride
+		if opts.WrkHome == "" {
+			opts.WrkHome = ctx.wrkHome
+		}
+		opts.WrkDate = ctx.wrkDateOverride
+		opts.Home = ctx.homeOverride
+		opts.FollowupFile = ctx.followupFileOverride
+		opts.Gobin = ctx.gobinOverride
+		if len(ctx.envOverride) > 0 {
+			nested := make(map[string]string, len(ctx.envOverride))
+			for k, v := range ctx.envOverride {
+				if k == envDashboardAction {
+					continue // prevent recursive hermetic ACTION
+				}
+				nested[k] = v
+			}
+			if len(nested) > 0 {
+				opts.Env = nested
+			}
+		}
+	}
+	return RunWithOptions(args, opts)
 }
 
 // dashboardHasAddableDirt is true when there is unstaged or untracked dirt

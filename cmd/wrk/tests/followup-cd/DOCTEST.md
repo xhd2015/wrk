@@ -593,33 +593,85 @@ func shellQuote(s string) string {
 
 func runWrkOnce(t *testing.T, req *Request, bin string, args []string, followEnv string) (stdout, stderr string, exitCode int, err error) {
 	t.Helper()
-	if bin == "" {
-		bin = getWrkBin(t)
+	// Dual-mode: pure follow-up leaves → L2 RunCLI (Home + WrkDate + FollowupFile).
+	// FakeShell / PATH / SHELL isolation → product binary (force-cd Branch B).
+	if req.FakeShellDir != "" || req.ShellEnv != "" || req.UseFakeWrk {
+		if bin == "" {
+			bin = getWrkBin(t)
+		}
+		cmd := exec.Command(bin, args...)
+		cmd.Dir = req.RepoDir
+		path := os.Getenv("PATH")
+		if req.FakeShellDir != "" {
+			path = req.FakeShellDir + string(os.PathListSeparator) + path
+		}
+		env := []string{
+			"HOME=" + req.FakeHome,
+			"WRK_HOME=" + req.WrkHome,
+			"WRK_DATE=" + wrkDate,
+			"PATH=" + path,
+		}
+		if followEnv != "" {
+			env = append(env, "WRK_FOLLOWUP_FILE="+followEnv)
+		}
+		if req.ShellEnv != "" {
+			env = append(env, "SHELL="+req.ShellEnv)
+		}
+		if req.FakeShellLog != "" {
+			env = append(env, "WRK_FAKE_SHELL_LOG="+req.FakeShellLog)
+		}
+		if req.FakeShellExit != 0 {
+			env = append(env, fmt.Sprintf("WRK_FAKE_SHELL_EXIT=%d", req.FakeShellExit))
+		}
+		if req.AutoCD != "" {
+			env = append(env, "WRK_AUTO_CD="+req.AutoCD)
+		}
+		if req.SetTaskEnv != "" {
+			env = append(env, req.SetTaskEnv)
+		}
+		cmd.Env = env
+		var outBuf, errBuf bytes.Buffer
+		cmd.Stdout = &outBuf
+		cmd.Stderr = &errBuf
+		runErr := cmd.Run()
+		exitCode = 0
+		if runErr != nil {
+			if ee, ok := runErr.(*exec.ExitError); ok {
+				exitCode = ee.ExitCode()
+			} else {
+				return "", "", 0, runErr
+			}
+		}
+		return outBuf.String(), errBuf.String(), exitCode, nil
 	}
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	env := []string{
-		"HOME=" + req.FakeHome,
-		"WRK_HOME=" + req.WrkHome,
-		"PATH=" + os.Getenv("PATH"),
-	}
-	if followEnv != "" {
-		env = append(env, "WRK_FOLLOWUP_FILE="+followEnv)
-	}
-	cmd.Env = env
+
 	var outBuf, errBuf bytes.Buffer
-	cmd.Stdout = &outBuf
-	cmd.Stderr = &errBuf
-	runErr := cmd.Run()
-	exitCode = 0
-	if runErr != nil {
-		if ee, ok := runErr.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			return "", "", 0, runErr
+	opts := wrkcli.RunOptions{
+		Stdout:       &outBuf,
+		Stderr:       &errBuf,
+		Dir:          req.RepoDir,
+		WrkHome:      req.WrkHome,
+		WrkDate:      wrkDate,
+		Home:         req.FakeHome,
+		FollowupFile: followEnv,
+	}
+	env := map[string]string{}
+	if followEnv != "" {
+		env["WRK_FOLLOWUP_FILE"] = followEnv
+	}
+	if req.AutoCD != "" {
+		env["WRK_AUTO_CD"] = req.AutoCD
+	}
+	if req.SetTaskEnv != "" {
+		if i := strings.IndexByte(req.SetTaskEnv, '='); i >= 0 {
+			env[req.SetTaskEnv[:i]] = req.SetTaskEnv[i+1:]
 		}
 	}
-	return outBuf.String(), errBuf.String(), exitCode, nil
+	if len(env) > 0 {
+		opts.Env = env
+	}
+	code := wrkcli.RunCLI(args, opts)
+	return outBuf.String(), errBuf.String(), code, nil
 }
 
 

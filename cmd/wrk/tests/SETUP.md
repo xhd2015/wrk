@@ -687,29 +687,67 @@ func buildWrkCLIArgs(req *Request) []string {
 	return args
 }
 
+// l2EnvKeys are ExtraEnv keys that dual-mode can map into RunOptions.Env
+// (ctx.getenv) without process isolation.
+var l2EnvKeys = map[string]bool{
+	"WRK_DASHBOARD_ACTION":           true,
+	"WRK_DASHBOARD_DRY_RUN":          true,
+	"WRK_DASHBOARD_TOGGLES":          true,
+	"WRK_DASHBOARD_COMPOSE_ARGV_LOG": true,
+	"WRK_SCAN_DEBUG":                true,
+	"WRK_SET_TASK_CONFIRM":          true,
+	"WRK_TASK_LIKE_CONFIRM":         true,
+	"WRK_PROJECTS_PERF_LOG":         true,
+	"WRK_FOLLOWUP_FILE":             true,
+	// Basename confirm still reads os.Getenv in product; keep forcing binary
+	// for WRK_BASENAME_CONFIRM until basename is threaded through ctx.
+}
+
+// extraEnvAllL2OK reports whether every ExtraEnv entry is a known L2 overlay key.
+func extraEnvAllL2OK(extra []string) bool {
+	if len(extra) == 0 {
+		return true
+	}
+	for _, e := range extra {
+		key := e
+		if i := strings.IndexByte(e, '='); i >= 0 {
+			key = e[:i]
+		}
+		if !l2EnvKeys[key] {
+			return false
+		}
+	}
+	return true
+}
+
 // needsProcessIsolation is true when the leaf requires child-process isolation
 // (cmd.Env / cmd.Dir). Parallel-safe; matches DOCTEST_LINT.md §1.
 // In-process RunCLI must not Setenv/Chdir/stdin-hijack for these.
+// FakeHome / known ExtraEnv / SetTaskConfirm / ProjectsPerfLog map to RunOptions
+// (Home + Env) and do not force binary.
 func needsProcessIsolation(req *Request) bool {
 	if req.StdinInput != "" {
 		return true
 	}
-	if len(req.ExtraEnv) > 0 {
+	if len(req.ExtraEnv) > 0 && !extraEnvAllL2OK(req.ExtraEnv) {
 		return true
 	}
 	if req.PathPrepend != "" || req.FakeShellDir != "" {
 		return true
 	}
-	if req.FakeHome != "" || req.UseMinimalPath {
+	// FakeHome → RunOptions.Home (L2). MinimalPath still needs a stripped PATH → binary.
+	if req.UseMinimalPath {
 		return true
 	}
-	// FollowupFile is passed via RunOptions.FollowupFile (L2); do not force binary.
-	// UseFollowupEnv alone without FakeShell still uses option when dual-mode.
-	if req.SetTaskEnv != "" || req.BasenameEnv != "" {
+	// BasenameEnv still process-env only in product → binary.
+	if req.BasenameEnv != "" {
 		return true
 	}
-	if req.ProjectsPerfLog != "" {
-		return true
+	// SetTaskEnv / ProjectsPerfLog → RunOptions.Env (L2) when KEY=VAL is known.
+	if req.SetTaskEnv != "" {
+		if !extraEnvAllL2OK([]string{req.SetTaskEnv}) {
+			return true
+		}
 	}
 	if req.ShellEnv != "" || req.FakeShellLog != "" || req.FakeShellExit != 0 {
 		return true
@@ -734,9 +772,9 @@ func needsInProcessCaptureOK(req *Request) bool {
 	// Presence of any of these wins over capture-safe modifiers below.
 	for _, a := range args {
 		switch a {
-		case "--new", "--dashboard":
-			// --dashboard flag / --new create still binary until threaded fully.
-			// (Bare dashboard is empty args above.)
+		case "--dashboard":
+			// Explicit --dashboard flag path still binary until fully threaded.
+			// Bare dashboard is empty args; --new create is capture-safe (create writers).
 			return false
 		}
 	}
@@ -782,8 +820,10 @@ func needsInProcessCaptureOK(req *Request) bool {
 		case "--version", "-h", "--help":
 			return true
 		case "--bash-integration", "--main":
-			// bash: writers threaded; FakeHome install/status stay binary via isolation.
-			// main: error paths L2; FakeShell launch stays binary via isolation.
+			// bash: writers + Home/WrkHome; main: FakeShell launch stays isolation.
+			return true
+		case "--new":
+			// Explicit create entry (same writers as positional create).
 			return true
 		}
 	}
@@ -797,8 +837,11 @@ func needsInProcessCaptureOK(req *Request) bool {
 			switch a {
 			case "-y", "--yes", "--confirm", "--confirm-from-stdin",
 				"--no-cd", "--force-cd", "--color", "-v", "--verbose",
-				"--dry-run", "-t", "--task", "--no-config":
-				// free modifiers for create
+				"--dry-run", "-t", "--task", "--no-config", "--new",
+				"--new-window", "--no-new-window", "--new-terminal",
+				"--reuse-terminal", "--smart-terminal", "--no-new-terminal",
+				"--open-in-agent", "--no-open-in-agent":
+				// free modifiers for create (UX flags need PathPrepend → isolation)
 			default:
 				// unknown flag → not pure create capture path
 				onlyCreateMods = false
@@ -830,8 +873,8 @@ func runWrkBinary(t *testing.T, req *Request, args []string) (*Response, error) 
 	return captureCommandOutput(cmd, req.StdinInput)
 }
 
-// runWrkInProcess runs wrk via wrkcli.RunCLI (L2). Parallel-safe: only
-// Stdout/Stderr/Dir/WrkHome/WrkDate — no ExtraEnv/PathPrepend/Stdin.
+// runWrkInProcess runs wrk via wrkcli.RunCLI (L2). Parallel-safe: Stdout/Stderr/
+// Dir/WrkHome/WrkDate/Home/Env/FollowupFile — no PathPrepend/Stdin/unknown ExtraEnv.
 // Product output is captured only on paths that write via ctx.out()/ctx.errw().
 func runWrkInProcess(t *testing.T, req *Request, args []string) (*Response, error) {
 	t.Helper()
@@ -845,7 +888,9 @@ func runWrkInProcess(t *testing.T, req *Request, args []string) (*Response, erro
 		Dir:          req.RepoDir,
 		WrkHome:      req.WrkHome,
 		WrkDate:      wrkDate,
+		Home:         req.FakeHome,
 		FollowupFile: req.FollowupFile,
+		Env:          buildL2EnvOverlay(req),
 	}
 	code := wrkcli.RunCLI(args, opts)
 	return &Response{
@@ -853,6 +898,39 @@ func runWrkInProcess(t *testing.T, req *Request, args []string) (*Response, erro
 		Stderr:   stderr.String(),
 		ExitCode: code,
 	}, nil
+}
+
+// buildL2EnvOverlay maps harness ExtraEnv / SetTaskEnv / ProjectsPerfLog into
+// RunOptions.Env for dual-mode leaves (no os.Setenv).
+func buildL2EnvOverlay(req *Request) map[string]string {
+	env := map[string]string{}
+	add := func(kv string) {
+		if kv == "" {
+			return
+		}
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			env[kv[:i]] = kv[i+1:]
+		} else {
+			env[kv] = ""
+		}
+	}
+	for _, e := range req.ExtraEnv {
+		add(e)
+	}
+	if req.SetTaskEnv != "" {
+		add(req.SetTaskEnv)
+	}
+	if req.ProjectsPerfLog != "" {
+		env["WRK_PROJECTS_PERF_LOG"] = req.ProjectsPerfLog
+	}
+	if req.UseFollowupEnv && req.FollowupFile != "" {
+		// FollowupFile option is primary; also expose via Env for getenv readers.
+		env["WRK_FOLLOWUP_FILE"] = req.FollowupFile
+	}
+	if len(env) == 0 {
+		return nil
+	}
+	return env
 }
 
 func execScriptTTYWrk(t *testing.T, req *Request, bin string, args []string) (*Response, error) {
@@ -1300,6 +1378,12 @@ func ensureHelpersUsed() {
 	_ = prepareAheadExternalDepConsumerForDone
 	_ = runGoModInDir
 	_ = buildWrkCLIArgs
+	_ = needsProcessIsolation
+	_ = needsInProcessCaptureOK
+	_ = runWrkInProcess
+	_ = runWrkBinary
+	_ = buildL2EnvOverlay
+	_ = extraEnvAllL2OK
 	_ = execScriptTTYWrk
 	_ = captureCommandOutput
 	_ = slugify

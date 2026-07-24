@@ -30,7 +30,12 @@ type projectsPerf struct {
 var currentProjectsPerf *projectsPerf
 
 func beginProjectsPerfRun() func() {
-	path := os.Getenv(envProjectsPerfLog)
+	return beginProjectsPerfRunAt(os.Getenv(envProjectsPerfLog))
+}
+
+// beginProjectsPerfRunAt starts perf logging at path (empty → no-op). Prefer this
+// with RunOptions.Env / invocation override for parallel-safe L2.
+func beginProjectsPerfRunAt(path string) func() {
 	if path == "" {
 		return func() {}
 	}

@@ -200,19 +200,19 @@ func runBashIntegration(ctx *invocationContext, args []string) error {
 		return nil
 	case "--install":
 		if dryRun {
-			return installBashIntegrationDryRun(out, errw)
+			return installBashIntegrationDryRun(ctx, out, errw)
 		}
-		return installBashIntegration(out, errw)
+		return installBashIntegration(ctx, out, errw)
 	case "--uninstall":
 		if dryRun {
-			return uninstallBashIntegrationDryRun(out, errw)
+			return uninstallBashIntegrationDryRun(ctx, out, errw)
 		}
-		return uninstallBashIntegration(out, errw)
+		return uninstallBashIntegration(ctx, out, errw)
 	case "--status":
 		if dryRun {
 			return fmt.Errorf("wrk: unknown integration action %q", "--dry-run")
 		}
-		if code := statusBashIntegration(out, errw); code != 0 {
+		if code := statusBashIntegration(ctx, out, errw); code != 0 {
 			return ExitCodeError{Code: code}
 		}
 		return nil
@@ -316,12 +316,20 @@ func parseBashIntegrationArgs(args []string) (action string, dryRun bool, comple
 	return action, dryRun, completeReq, nil
 }
 
-func bashIntegrationPaths() (home, wrkHome, scriptPath, bashProfilePath, bashrcPath string, err error) {
-	home, err = os.UserHomeDir()
+func bashIntegrationPaths(ctx *invocationContext) (home, wrkHome, scriptPath, bashProfilePath, bashrcPath string, err error) {
+	if ctx != nil {
+		home, err = ctx.userHomeDir()
+	} else {
+		home, err = os.UserHomeDir()
+	}
 	if err != nil {
 		return "", "", "", "", "", err
 	}
-	wrkHome, err = resolveWrkHome()
+	if ctx != nil {
+		wrkHome, err = ctx.resolveHome()
+	} else {
+		wrkHome, err = resolveWrkHome()
+	}
 	if err != nil {
 		return "", "", "", "", "", err
 	}
@@ -354,14 +362,14 @@ func fullyUninstalled(home string) bool {
 		!markerPresent(filepath.Join(home, ".bashrc"))
 }
 
-func installBashIntegrationDryRun(out, errw io.Writer) error {
+func installBashIntegrationDryRun(ctx *invocationContext, out, errw io.Writer) error {
 	if out == nil {
 		out = os.Stdout
 	}
 	if errw == nil {
 		errw = os.Stderr
 	}
-	_, _, scriptPath, bashProfilePath, bashrcPath, err := bashIntegrationPaths()
+	_, _, scriptPath, bashProfilePath, bashrcPath, err := bashIntegrationPaths(ctx)
 	if err != nil {
 		return err
 	}
@@ -370,14 +378,19 @@ func installBashIntegrationDryRun(out, errw io.Writer) error {
 	return nil
 }
 
-func uninstallBashIntegrationDryRun(out, errw io.Writer) error {
+func uninstallBashIntegrationDryRun(ctx *invocationContext, out, errw io.Writer) error {
 	if out == nil {
 		out = os.Stdout
 	}
 	if errw == nil {
 		errw = os.Stderr
 	}
-	home, err := os.UserHomeDir()
+	home, err := func() (string, error) {
+		if ctx != nil {
+			return ctx.userHomeDir()
+		}
+		return os.UserHomeDir()
+	}()
 	if err != nil {
 		return err
 	}
@@ -401,14 +414,14 @@ func uninstallBashIntegrationDryRun(out, errw io.Writer) error {
 	return nil
 }
 
-func statusBashIntegration(out, errw io.Writer) (exitCode int) {
+func statusBashIntegration(ctx *invocationContext, out, errw io.Writer) (exitCode int) {
 	if out == nil {
 		out = os.Stdout
 	}
 	if errw == nil {
 		errw = os.Stderr
 	}
-	_, wrkHome, scriptPath, bashProfilePath, bashrcPath, err := bashIntegrationPaths()
+	_, wrkHome, scriptPath, bashProfilePath, bashrcPath, err := bashIntegrationPaths(ctx)
 	if err != nil {
 		fmt.Fprintf(errw, "error: %v\n", err)
 		return 1
@@ -451,14 +464,14 @@ func statusBashIntegration(out, errw io.Writer) (exitCode int) {
 	return exitCode
 }
 
-func installBashIntegration(out, errw io.Writer) error {
+func installBashIntegration(ctx *invocationContext, out, errw io.Writer) error {
 	if out == nil {
 		out = os.Stdout
 	}
 	if errw == nil {
 		errw = os.Stderr
 	}
-	_, _, scriptPath, bashProfilePath, bashrcPath, err := bashIntegrationPaths()
+	_, _, scriptPath, bashProfilePath, bashrcPath, err := bashIntegrationPaths(ctx)
 	if err != nil {
 		return err
 	}
@@ -591,14 +604,20 @@ func appendMarkerToProfile(profilePath string) error {
 	return os.WriteFile(profilePath, []byte(builder.String()), 0o644)
 }
 
-func uninstallBashIntegration(out, errw io.Writer) error {
+func uninstallBashIntegration(ctx *invocationContext, out, errw io.Writer) error {
 	if out == nil {
 		out = os.Stdout
 	}
 	if errw == nil {
 		errw = os.Stderr
 	}
-	home, err := os.UserHomeDir()
+	var home string
+	var err error
+	if ctx != nil {
+		home, err = ctx.userHomeDir()
+	} else {
+		home, err = os.UserHomeDir()
+	}
 	if err != nil {
 		return err
 	}

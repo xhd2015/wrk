@@ -366,7 +366,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if err := ctx.autoRecord(); err != nil {
 			return err
 		}
-		return runScanGitRepos(ctx.out(), ctx.errw(), wrkHome, remaining, noCache, includeWorktrees, verbose, origWd)
+		return runScanGitRepos(ctx.out(), ctx.errw(), wrkHome, remaining, noCache, includeWorktrees, verbose, origWd, ctx)
 	}
 
 	// --cd requires exactly one path positional before defaulting workDir to cwd.
@@ -568,7 +568,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	}
 	if setTaskFlagSet {
 		// Default auto-yes for rename prompt; --confirm restores Y/n; -y still auto-yes.
-		return runSetTask(ctx.out(), ctx.errw(), workDir, *setTaskDesc, planAssumeYes(assumeYes, forceConfirm), noCd, forceCd, execArgs, ctx.followupFileOverride, ctx.origWd)
+		setTaskAuto := planAssumeYes(assumeYes, forceConfirm) || ctx.getenv("WRK_SET_TASK_CONFIRM") == "1"
+		return runSetTask(ctx.out(), ctx.errw(), workDir, *setTaskDesc, setTaskAuto, noCd, forceCd, execArgs, ctx.followupFileOverride, ctx.origWd)
 	}
 
 	if taskFlagSet && strings.TrimSpace(*taskDesc) == "" {
@@ -764,7 +765,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	if projects {
 		colorEnabled := term.IsTerminal(int(os.Stdout.Fd())) || colorFlag
-		return runProjects(ctx.out(), wrkHome, colorEnabled, fetchFlag, githubFlag)
+		return runProjects(ctx.out(), wrkHome, colorEnabled, fetchFlag, githubFlag, ctx)
 	}
 	if projectsDepGraph {
 		return runProjectsDepGraph(wrkHome, ctx)
@@ -974,7 +975,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if err != nil {
 		return err
 	}
-	return runCreate(ctx.out(), ctx.errw(), workDir, origWd, spawnTarget, task, noCd, forceCd, execArgs, uxPlan, ctx.followupFileOverride, wrkHome, ctx.wrkDateOverride)
+	return runCreate(ctx.out(), ctx.errw(), workDir, origWd, spawnTarget, task, noCd, forceCd, execArgs, uxPlan, ctx.followupFileOverride, wrkHome, ctx.wrkDateOverride, ctx.homeOverride)
 }
 
 // isDashboardBareEntry is true when the invocation is pure bare no-args dashboard
@@ -1103,11 +1104,17 @@ Environment:
 `
 }
 
-func runProjects(out io.Writer, wrkHome string, colorEnabled bool, fetchEnabled bool, githubOnly bool) error {
+func runProjects(out io.Writer, wrkHome string, colorEnabled bool, fetchEnabled bool, githubOnly bool, ctx *invocationContext) error {
 	if out == nil {
 		out = os.Stdout
 	}
-	endPerf := beginProjectsPerfRun()
+	perfPath := ""
+	if ctx != nil {
+		perfPath = ctx.getenv(envProjectsPerfLog)
+	} else {
+		perfPath = os.Getenv(envProjectsPerfLog)
+	}
+	endPerf := beginProjectsPerfRunAt(perfPath)
 	defer endPerf()
 
 	paths, err := storage.ListProjects(wrkHome)
@@ -1194,7 +1201,7 @@ func envTruthy(s string) bool {
 // Empty CacheRoot uses the scan_repo product default (HOME/.cache/git-repo-scan).
 // verbose (from -v/--verbose) and truthy WRK_SCAN_DEBUG enable scan_repo Debug
 // plus greppable cache_base + filter lines on stderr.
-func runScanGitRepos(out, errw io.Writer, wrkHome string, roots []string, noCache bool, includeWorktrees bool, verbose bool, baseDir string) error {
+func runScanGitRepos(out, errw io.Writer, wrkHome string, roots []string, noCache bool, includeWorktrees bool, verbose bool, baseDir string, ctx *invocationContext) error {
 	if out == nil {
 		out = os.Stdout
 	}
@@ -1203,7 +1210,13 @@ func runScanGitRepos(out, errw io.Writer, wrkHome string, roots []string, noCach
 	}
 	// Resolve home for default root and two-base mapping. Default root requires
 	// home to exist as a directory; mapping uses home only when available.
-	home, homeErr := os.UserHomeDir()
+	var home string
+	var homeErr error
+	if ctx != nil {
+		home, homeErr = ctx.userHomeDir()
+	} else {
+		home, homeErr = os.UserHomeDir()
+	}
 	if len(roots) == 0 {
 		if homeErr != nil || home == "" {
 			return fmt.Errorf("wrk: --scan-git-repos requires a home directory to use as default root")
@@ -1241,7 +1254,13 @@ func runScanGitRepos(out, errw io.Writer, wrkHome string, roots []string, noCach
 	}
 	knownAtStart := len(known)
 
-	debug := verbose || envTruthy(os.Getenv("WRK_SCAN_DEBUG"))
+	scanDebug := ""
+	if ctx != nil {
+		scanDebug = ctx.getenv("WRK_SCAN_DEBUG")
+	} else {
+		scanDebug = os.Getenv("WRK_SCAN_DEBUG")
+	}
+	debug := verbose || envTruthy(scanDebug)
 
 	// P5: greppable two-base mapping debug (cache_base + emit filter per root).
 	if debug {
@@ -1257,7 +1276,7 @@ func runScanGitRepos(out, errw io.Writer, wrkHome string, roots []string, noCach
 
 	// Cancelable scan so Ctrl-C / SIGTERM stops the walk, keeps partial
 	// progress (already-recorded projects), and exits 130 with a warning.
-	ctx, cancel := context.WithCancel(context.Background())
+	scanCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
@@ -1267,17 +1286,24 @@ func runScanGitRepos(out, errw io.Writer, wrkHome string, roots []string, noCach
 		select {
 		case <-sigCh:
 			cancel()
-		case <-ctx.Done():
+		case <-scanCtx.Done():
 		}
 	}()
 
 	// scan_repo absorbs OnRepo errors into repo.Error and continues; capture
 	// RecordProject failures so the run still fails after Scan returns.
 	// CacheRoot left empty → product default under $HOME when cache enabled.
+	// When Home override is set, pin CacheRoot under that home so L2 FakeHome
+	// isolation does not write into the real user cache.
+	cacheRoot := ""
+	if homeErr == nil && home != "" && ctx != nil && strings.TrimSpace(ctx.homeOverride) != "" {
+		cacheRoot = filepath.Join(home, ".cache", "git-repo-scan")
+	}
 	var recordErr error
 	var newly int
 	printed := make(map[string]bool)
-	result, err := scan_repo.Scan(ctx, scan_repo.Options{
+	result, err := scan_repo.Scan(scanCtx, scan_repo.Options{
+		CacheRoot: cacheRoot,
 		Roots:   filterRoots,
 		NoCache: noCache,
 		Debug:   debug,
@@ -1727,7 +1753,7 @@ func runDone(out, errw io.Writer, workDir, wrkHome string, confirmFromStdin, yes
 	// go.mod) also catches sub-module replaces a single upward lookup would
 	// miss. A checkout with no go.mod yields zero modules → guard is a no-op →
 	// MergeBack proceeds (it is pure git).
-	if err := blockIfLocalReplace(consumerTop, noInModuleReplace); err != nil {
+	if err := blockIfLocalReplaceTo(errw, consumerTop, noInModuleReplace); err != nil {
 		return err
 	}
 
@@ -2794,7 +2820,15 @@ func ensureGitignoreExternal(top string) error {
 // Under the default lenient guard, intra-repo replaces only warn (printed to
 // stderr) and --done proceeds; extra-repo replaces block. When noInModuleReplace
 // is set, every local replace blocks (fully strict).
+// Prefer blockIfLocalReplaceTo when an invocation errw is available (L2 capture).
 func blockIfLocalReplace(top string, noInModuleReplace bool) error {
+	return blockIfLocalReplaceTo(cliStderr(), top, noInModuleReplace)
+}
+
+func blockIfLocalReplaceTo(errw io.Writer, top string, noInModuleReplace bool) error {
+	if errw == nil {
+		errw = cliStderr()
+	}
 	issues, err := replace.CheckLocalReplaces(top)
 	if err != nil {
 		return fmt.Errorf("check local replaces under %s: %w", top, err)
@@ -2812,8 +2846,8 @@ func blockIfLocalReplace(top string, noInModuleReplace bool) error {
 		}
 
 		// Only intra-repo offenders, default lenient mode: warn and proceed.
-		fmt.Fprintln(cliStderr(), replace.FormatIssueLine(top, issue))
-		fmt.Fprintln(cliStderr(), "local filesystem replace (intra-repo) - tolerated, remove before pushing:")
+		fmt.Fprintln(errw, replace.FormatIssueLine(top, issue))
+		fmt.Fprintln(errw, "local filesystem replace (intra-repo) - tolerated, remove before pushing:")
 	}
 	return nil
 }
@@ -2857,7 +2891,7 @@ func externalCandidateBlocked(mainRepo, wtPath, branch string) bool {
 	return branchExists(mainRepo, branch)
 }
 
-func runCreate(out, errw io.Writer, workDir string, origWd string, targetDir string, taskDesc string, noCd, forceCd bool, execArgs []string, ux createUXPlan, followupFile, wrkHome, wrkDate string) error {
+func runCreate(out, errw io.Writer, workDir string, origWd string, targetDir string, taskDesc string, noCd, forceCd bool, execArgs []string, ux createUXPlan, followupFile, wrkHome, wrkDate, home string) error {
 	if out == nil {
 		out = os.Stdout
 	}
@@ -2951,7 +2985,7 @@ func runCreate(out, errw io.Writer, workDir string, origWd string, targetDir str
 	if ux.agent || ux.terminalMode != "" {
 		return nil
 	}
-	return writeFollowupCDIfCwdIsHome(noCd, origWd, result.Path, followupFile)
+	return writeFollowupCDIfCwdIsHomeWithHome(noCd, origWd, result.Path, followupFile, home)
 }
 
 // runCreateTargetDir handles wrk <dir> <target-dir>. A relative <target-dir> is
@@ -3153,7 +3187,17 @@ func (ctx *invocationContext) resolveHome() (string, error) {
 	if ctx == nil {
 		return resolveWrkHome()
 	}
-	return resolveWrkHomeWith(ctx.wrkHomeOverride)
+	if v := strings.TrimSpace(ctx.wrkHomeOverride); v != "" {
+		return filepath.Abs(pathfmt.Expand(v))
+	}
+	if v := strings.TrimSpace(ctx.getenv("WRK_HOME")); v != "" {
+		return filepath.Abs(pathfmt.Expand(v))
+	}
+	home, err := ctx.userHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	return filepath.Join(home, ".wrk"), nil
 }
 
 func resolveWrkDate() string {
@@ -3484,6 +3528,7 @@ func runSetTask(out, errw io.Writer, workDir string, taskDesc string, assumeYes,
 	// Default auto-yes (assumeYes) skips rename prompt. --confirm clears assumeYes so we
 	// prompt. WRK_SET_TASK_CONFIRM=1 is a test escape hatch that auto-confirms (no prompt).
 	// TTY detection sticks to stdout (same fd used for the rename plan print).
+	// Note: confirm-env is read at the call site via ctx.getenv when available.
 	if !assumeYes && os.Getenv("WRK_SET_TASK_CONFIRM") != "1" {
 		if !term.IsTerminal(int(os.Stdout.Fd())) {
 			return fmt.Errorf("wrk: --set-task --confirm requires a terminal (tty)")

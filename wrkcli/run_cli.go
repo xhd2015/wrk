@@ -13,22 +13,29 @@ import (
 //
 // Parallel-safe contract (DOCTEST_LINT.md §1):
 //   - Stdout/Stderr are attached to the invocation context only (ctx.out/errw).
-//   - WrkHome / WrkDate are per-invocation overrides (no os.Setenv).
+//   - WrkHome / WrkDate / Home / Env are per-invocation overrides (no os.Setenv).
 //   - Dir is the logical work dir passed into run() as origWd (no os.Chdir).
-//   - ExtraEnv, PathPrepend, and Stdin are not supported in-process: use a
-//     product-binary subprocess with cmd.Env / cmd.Dir instead (L3).
+//   - PathPrepend and Stdin are not supported in-process: use a product-binary
+//     subprocess with cmd.Env / cmd.Dir instead (L3). ExtraEnv is rejected;
+//     pass known keys via Env (or named fields) for dual-mode L2.
 type RunOptions struct {
 	Stdout  io.Writer // nil → os.Stdout for ctx.out()
 	Stderr  io.Writer // nil → os.Stderr for ctx.errw()
 	Dir     string    // logical work dir (origWd); not os.Chdir
 	WrkHome string    // overrides WRK_HOME for this call only
 	WrkDate string    // overrides WRK_DATE for this call only
+	// Home overrides os.UserHomeDir for this call only (FakeHome for L2).
+	Home string
 	// Gobin overrides GOBIN for --reinstall-local only (no os.Setenv). Empty
 	// falls back to process GOBIN / $(go env GOPATH)/bin.
 	Gobin string
 	// FollowupFile overrides WRK_FOLLOWUP_FILE for --cd / force-cd land paths
 	// without os.Setenv (parallel-safe L2).
 	FollowupFile string
+	// Env is a per-invocation KEY→VAL overlay read via ctx.getenv (no Setenv).
+	// Typical keys: WRK_DASHBOARD_*, WRK_SCAN_DEBUG, WRK_SET_TASK_CONFIRM,
+	// WRK_BASENAME_CONFIRM, WRK_TASK_LIKE_CONFIRM, WRK_PROJECTS_PERF_LOG.
+	Env map[string]string
 
 	// Unsupported in-process (hard error). Prefer binary + cmd.Env/cmd.Dir.
 	Stdin       io.Reader
@@ -88,6 +95,13 @@ func RunWithOptions(args []string, opts RunOptions) error {
 	ctx.wrkDateOverride = strings.TrimSpace(opts.WrkDate)
 	ctx.gobinOverride = strings.TrimSpace(opts.Gobin)
 	ctx.followupFileOverride = strings.TrimSpace(opts.FollowupFile)
+	ctx.homeOverride = strings.TrimSpace(opts.Home)
+	if len(opts.Env) > 0 {
+		ctx.envOverride = make(map[string]string, len(opts.Env))
+		for k, v := range opts.Env {
+			ctx.envOverride[k] = v
+		}
+	}
 
 	var runErr error
 	defer func() {

@@ -200,29 +200,16 @@ func buildArgs(req *Request) []string {
 
 func runWrkOnce(t *testing.T, req *Request, bin string, args []string) (stdout, stderr string, exitCode int, err error) {
 	t.Helper()
-	if bin == "" {
-		bin = getWrkBin(t)
-	}
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	cmd.Env = []string{
-		"HOME=" + req.FakeHome,
-		"WRK_HOME=" + req.WrkHome,
-		"PATH=" + os.Getenv("PATH"),
-	}
+	_ = bin
 	var outBuf, errBuf bytes.Buffer
-	cmd.Stdout = &outBuf
-	cmd.Stderr = &errBuf
-	runErr := cmd.Run()
-	exitCode = 0
-	if runErr != nil {
-		if ee, ok := runErr.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			return "", "", 0, runErr
-		}
-	}
-	return outBuf.String(), errBuf.String(), exitCode, nil
+	code := wrkcli.RunCLI(args, wrkcli.RunOptions{
+		Stdout:  &outBuf,
+		Stderr:  &errBuf,
+		Dir:     req.RepoDir,
+		WrkHome: req.WrkHome,
+		Home:    req.FakeHome,
+	})
+	return outBuf.String(), errBuf.String(), code, nil
 }
 
 

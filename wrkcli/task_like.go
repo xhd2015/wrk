@@ -76,6 +76,10 @@ func confirmTaskLikePromote(kind, arg string, assumeYes bool) (promote bool, err
 	if assumeYes {
 		return true, nil
 	}
+	// WRK_TASK_LIKE_CONFIRM=1 is a test escape hatch (also via RunOptions.Env).
+	// Process env is read here; dual-mode leaves pass it through Env overlay
+	// only when this call site is wired to ctx.getenv — currently ExtraEnv /
+	// isolation still covers the few leaves that need it.
 	interactive := term.IsTerminal(int(os.Stdin.Fd())) || os.Getenv("WRK_TASK_LIKE_CONFIRM") == "1"
 	if !interactive {
 		// Non-TTY default auto-yes (same as empty/Y on TTY).

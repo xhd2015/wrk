@@ -2,9 +2,12 @@ package wrkcli
 
 import (
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/xhd2015/dot-pkgs/go-pkgs/pathfmt"
 	"github.com/xhd2015/wrk/wrkcli/storage"
 )
 
@@ -30,6 +33,12 @@ type invocationContext struct {
 	// followupFileOverride, when set, is the bash-integration follow-up path
 	// (WRK_FOLLOWUP_FILE) without os.Setenv.
 	followupFileOverride string
+	// homeOverride, when set, replaces os.UserHomeDir for this invocation only
+	// (parallel-safe FakeHome for L2; no os.Setenv).
+	homeOverride string
+	// envOverride is a per-invocation KEY→VAL overlay read via getenv (no Setenv).
+	// Used for hermetic dashboard/scan/confirm knobs in dual-mode tests.
+	envOverride map[string]string
 }
 
 func newInvocationContext(origWd string, args []string) *invocationContext {
@@ -54,6 +63,31 @@ func (ctx *invocationContext) errw() io.Writer {
 		return ctx.stderr
 	}
 	return cliStderr()
+}
+
+// getenv returns a per-invocation env override when set, else os.Getenv.
+// Parallel-safe: never calls os.Setenv.
+func (ctx *invocationContext) getenv(key string) string {
+	if ctx != nil && ctx.envOverride != nil {
+		if v, ok := ctx.envOverride[key]; ok {
+			return v
+		}
+	}
+	// Follow-up file is also a named override (WRK_FOLLOWUP_FILE).
+	if key == "WRK_FOLLOWUP_FILE" && ctx != nil && strings.TrimSpace(ctx.followupFileOverride) != "" {
+		return ctx.followupFileOverride
+	}
+	return os.Getenv(key)
+}
+
+// userHomeDir returns the per-invocation home override or os.UserHomeDir.
+func (ctx *invocationContext) userHomeDir() (string, error) {
+	if ctx != nil {
+		if v := strings.TrimSpace(ctx.homeOverride); v != "" {
+			return filepath.Abs(pathfmt.Expand(v))
+		}
+	}
+	return os.UserHomeDir()
 }
 
 func (ctx *invocationContext) finish(exitCode int) {
