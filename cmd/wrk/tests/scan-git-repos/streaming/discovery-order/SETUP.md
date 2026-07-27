@@ -7,7 +7,7 @@ root-b/main-b + root-a/main-a
   -> wrk --scan-git-repos root-b root-a
   -> discovery order: main-b then main-a (always-print as found)
   -> NOT lexicographic: main-a then main-b
-  -> projects.json records both source=scan
+  -> projects.json empty; both paths on stdout
 ```
 
 ## Steps

@@ -7,7 +7,7 @@
 HOME=WorkRoot
   -> wrk --scan-git-repos   (no ROOT args)
   -> discovers abs(repo-a)
-  -> projects.json source=scan
+  -> projects.json unchanged
   -> stdout absolute main path
 ```
 

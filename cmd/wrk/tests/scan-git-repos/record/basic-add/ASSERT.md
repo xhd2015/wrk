@@ -2,11 +2,11 @@
 
 - Exit code 0.
 - Stdout is exactly the resolved main repo absolute path (single line + trailing `\n`).
-- `projects.json` contains exactly one entry for that main path with `source: "scan"`.
+- `projects.json` is empty / has zero entries after cold scan (print-only).
 
 ## Side Effects
 
-- `{WRK_HOME}/projects.json` is created/updated with the scanned main.
+- `{WRK_HOME}/projects.json` is not created/updated by scan.
 
 ## Exit Code
 
@@ -20,7 +20,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 	want := resolveScanPath(t, req.MainRepo)
 	assertStdoutExactPath(t, resp.Stdout, want)
-	assertScanProjectsCount(t, req.WrkHome, 1)
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
+	// Print-only: scan never mutates projects.json.
+	assertScanProjectsCount(t, req.WrkHome, 0)
 }
 ```

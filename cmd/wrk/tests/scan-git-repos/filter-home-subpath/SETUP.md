@@ -17,7 +17,7 @@ wrk --scan-git-repos                  # default root ~
 wrk --scan-git-repos ~/Projects
   -> same home universe cache files (not a separate Projects universe)
   -> filter emit to paths under Projects only
-  -> stdout only newly recorded mains under Projects
+  -> stdout only mains under Projects
 
 wrk --scan-git-repos ~/Projects -v
   -> stderr greppable cache_base + filter (with scan: phase lines)
@@ -49,7 +49,7 @@ wrk --scan-git-repos ~/Projects -v
 - Sharing home cache: scanning `~/Projects` must keep using universe **home** files
   under the same product CacheRoot — not invent a separate universe keyed only by
   the Projects path.
-- Emit filter: stdout and new `source=scan` records for a Projects root cover only
+- Emit filter: stdout for a Projects root covers only
   mains under Projects; `home-main` must not appear on that run's stdout.
 - Debug (P5): when `-v` / Debug is on, stderr should expose greppable **`cache_base`**
   and **`filter`** tokens (alongside existing `scan:` / `mode=` lines).

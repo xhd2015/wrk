@@ -6,7 +6,7 @@
 scan-root/myrepo (one main, cold)
   -> wrk --scan-git-repos scan-root
   -> stdout path-line count for main == 1
-  -> projects records source=scan once
+  -> projects.json remains empty (print-only)
 ```
 
 ## Steps

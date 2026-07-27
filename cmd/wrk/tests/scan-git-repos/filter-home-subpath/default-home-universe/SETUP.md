@@ -9,7 +9,7 @@ HOME=FakeHome
   -> wrk --scan-git-repos   # default root ~
   -> CacheRoot = $HOME/.cache/git-repo-scan
   -> universe home: home/repos.json present
-  -> both mains recorded source=scan; stdout includes both
+  -> projects.json empty; stdout includes both
 ```
 
 ## Preconditions

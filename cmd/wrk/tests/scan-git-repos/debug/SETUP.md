@@ -21,9 +21,9 @@ HOME=FakeHome
 - **FakeHome = WorkRoot** so product default `CacheRoot` (`$HOME/.cache/git-repo-scan`) lands only under the isolated sandbox home — never the real user cache.
 - Explicit small scan root `{WorkRoot}/scan-root` with one main `myrepo` (not bare `$HOME` default root).
 - Shared **cold seed** run (no `-v`, `WRK_SCAN_DEBUG` forced empty) populates:
-  - `{WRK_HOME}/projects.json` with the main (`source=scan`)
   - product mirror under `{FakeHome}/.cache/git-repo-scan` so the Run scan is warm-eligible
-- Seed uses the same FakeHome/WRK_HOME as Run so cache and projects match.
+  - (`projects.json` is never written by scan — print-only)
+- Seed uses the same FakeHome/WRK_HOME as Run so cache matches.
 - Leaves only differ on how debug is enabled for the **second** `wrk --scan-git-repos` (the Run under test).
 - Cwd remains non-git `{WorkRoot}` (parent Setup).
 
@@ -38,7 +38,7 @@ HOME=FakeHome
 
 - Library contract (P2): `Options.Debug` emits phase-level `scan:` lines; warm/cold include `mode=…`.
 - Wrk contract (P3): wire Debug from `-v` OR `WRK_SCAN_DEBUG`; pass `os.Stderr` as Stderr.
-- Optional wrk-side log (not required by Assert): `scan: record known=N newly=M`.
+- Optional wrk-side log (not required by Assert): `scan: printed=N`.
 - Ambient `WRK_SCAN_DEBUG` from the host must not leak into seed or `off/` (seed and off force empty).
 
 ```go
@@ -47,10 +47,10 @@ import (
 	"path/filepath"
 )
 
-// seedScanGitReposNoDebug runs a quiet first scan so projects.json and the
-// product default mirror under FakeHome ($HOME/.cache/git-repo-scan) are
-// populated. Does not enable -v or WRK_SCAN_DEBUG (forces env empty so ambient
-// host env cannot pollute seed).
+// seedScanGitReposNoDebug runs a quiet first scan so the product default mirror
+// under FakeHome ($HOME/.cache/git-repo-scan) is populated (warm-eligible).
+// Scan never writes projects.json. Does not enable -v or WRK_SCAN_DEBUG
+// (forces env empty so ambient host env cannot pollute seed).
 func seedScanGitReposNoDebug(t *testing.T, req *Request, scanRoot string) {
 	t.Helper()
 	if req.FakeHome == "" {
@@ -70,9 +70,8 @@ func seedScanGitReposNoDebug(t *testing.T, req *Request, scanRoot string) {
 		}
 		t.Fatalf("seed wrk --scan-git-repos: %v output=%q", err, string(out))
 	}
-	// Seed should have recorded the main at least once.
-	assertScanProjectsCount(t, req.WrkHome, 1)
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
+	// Print-only: registry stays empty after seed.
+	assertScanProjectsCount(t, req.WrkHome, 0)
 }
 
 // forceScanDebugEnvOff appends WRK_SCAN_DEBUG= so Run sees non-truthy env
@@ -89,7 +88,7 @@ func Setup(t *testing.T, req *Request) error {
 	mainRepo := initScanMainRepo(t, scanRoot, "myrepo")
 	req.MainRepo = mainRepo
 
-	// Quiet cold seed: populate projects + default cache (no debug flags).
+	// Quiet cold seed: populate default cache only (no debug flags; no projects.json).
 	seedScanGitReposNoDebug(t, req, scanRoot)
 
 	// Default leaf Args: second scan of the same explicit root (leaves override flags/env).

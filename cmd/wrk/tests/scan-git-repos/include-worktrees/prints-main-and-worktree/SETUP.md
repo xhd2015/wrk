@@ -7,7 +7,7 @@ scan-root/main (RepoTypeMain) + scan-root/main-wt (linked worktree)
   -> wrk --scan-git-repos --include-worktrees scan-root
   -> stdout contains main abs path
   -> stdout contains worktree abs path
-  -> projects.json: one entry (main, source=scan); worktree not recorded
+  -> projects.json unchanged; print main (+ worktree with flag)
 ```
 
 ## Steps

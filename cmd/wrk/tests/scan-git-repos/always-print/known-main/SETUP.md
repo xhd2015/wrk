@@ -3,10 +3,10 @@
 **Feature**: pre-seeded known main is still listed on stdout; projects stay single entry
 
 ```
-seed projects.json with main (source=scan)
+seed projects.json with main (legacy source=scan)
   -> wrk --scan-git-repos scan-root
   -> stdout contains main abs path once
-  -> projects.json still exactly one entry source=scan
+  -> projects.json still exactly one entry (scan did not mutate)
 ```
 
 ## Steps

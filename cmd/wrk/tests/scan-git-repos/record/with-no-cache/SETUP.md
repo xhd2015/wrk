@@ -5,7 +5,7 @@
 ```
 wrk --scan-git-repos --no-cache <scan-root>
   -> scan_repo with NoCache=true
-  -> still records main with source=scan
+  -> still prints main; projects.json empty
   -> stdout main path
 ```
 

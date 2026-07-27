@@ -7,7 +7,7 @@
 scan-root/main + scan-root/main-wt
   -> wrk --scan-git-repos --include-worktrees scan-root
   -> stdout contains main and worktree abs paths
-  -> projects.json: main only source=scan
+  -> projects.json unchanged; main printed; worktree only with flag
 
 # without scan: invalid
 wrk --include-worktrees

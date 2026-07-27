@@ -364,7 +364,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runWeb(WebServeOptions{WrkHome: wrkHome, Port: port, Dev: webDev})
 	}
 
-	// --scan-git-repos discovers main repos under roots and records them.
+	// --scan-git-repos discovers main repos under roots (print-only; never records).
 	if scanGitRepos {
 		otherMode := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || depPath != "" || bringPath != "" ||
@@ -1038,9 +1038,9 @@ Flags:
   --repos                         list git repos under this checkout
   --projects                      list recorded main repository paths
   --projects-dep-graph            module-level dep graph across registered projects
-  --scan-git-repos [ROOT...]      list valid git repos under roots (always print; record new mains; default: ~)
+  --scan-git-repos [ROOT...]      list valid git repos under roots (print-only; never mutates projects.json; default: ~)
   --no-cache                      with --scan-git-repos: disable scan cache read/write
-  --include-worktrees             with --scan-git-repos: also list linked worktrees (list-only; not recorded)
+  --include-worktrees             with --scan-git-repos: also list linked worktrees
   --github                        with --projects: only show projects whose origin is github.com
   --fetch                         with --projects or --status: fetch upstream before Remote: compare
   -v, --verbose                   log major git commands to stderr
@@ -1190,21 +1190,24 @@ func envTruthy(s string) bool {
 	}
 }
 
-// runScanGitRepos discovers git repositories under roots, always prints each
-// valid path once (discovery order via OnRepo), and records newly seen main
-// paths in projects.json with source "scan". Known mains are still printed;
-// known[] only gates RecordProject. By default only RepoTypeMain is emitted;
-// includeWorktrees also lists linked worktrees (print-only, never recorded).
+// runScanGitRepos discovers git repositories under roots and always prints each
+// valid path once (discovery order via OnRepo). It never reads or writes
+// projects.json — print-only forever. By default only RepoTypeMain is emitted;
+// includeWorktrees also lists linked worktrees.
 //
-// Two-base mapping (P5): each CLI root under $HOME maps to universe "home"
-// (shared product cache under $HOME/.cache/git-repo-scan/home/); roots outside
-// home map to universe "root". Scan passes the user-provided Roots so the
-// library only discovers under those paths while still loading/merging the
-// home universe index. Emit/record is filtered to paths under the CLI roots.
-// Empty CacheRoot uses the scan_repo product default (HOME/.cache/git-repo-scan).
-// verbose (from -v/--verbose) and truthy WRK_SCAN_DEBUG enable scan_repo Debug
-// plus greppable cache_base + filter lines on stderr.
+// wrkHome is unused for registry mutation (kept for call-site symmetry with
+// other modes). Two-base mapping (P5): each CLI root under $HOME maps to
+// universe "home" (shared product cache under $HOME/.cache/git-repo-scan/home/);
+// roots outside home map to universe "root". Scan passes the user-provided
+// Roots so the library only discovers under those paths while still
+// loading/merging the home universe index. Emit is filtered to paths under the
+// CLI roots. Empty CacheRoot uses the scan_repo product default
+// (HOME/.cache/git-repo-scan). verbose (from -v/--verbose) and truthy
+// WRK_SCAN_DEBUG enable scan_repo Debug plus greppable cache_base + filter
+// lines on stderr.
 func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktrees bool, verbose bool) error {
+	_ = wrkHome // scan never mutates projects.json under WRK_HOME
+
 	// Resolve home for default root and two-base mapping. Default root requires
 	// home to exist as a directory; mapping uses home only when available.
 	home, homeErr := os.UserHomeDir()
@@ -1235,16 +1238,6 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 		filterRoots = append(filterRoots, filepath.Clean(abs))
 	}
 
-	pf, err := storage.LoadProjects(wrkHome)
-	if err != nil {
-		return err
-	}
-	known := make(map[string]bool, len(pf.Projects))
-	for _, p := range pf.Projects {
-		known[storage.NormalizePath(p.Path)] = true
-	}
-	knownAtStart := len(known)
-
 	debug := verbose || envTruthy(os.Getenv("WRK_SCAN_DEBUG"))
 
 	// P5: greppable two-base mapping debug (cache_base + emit filter per root).
@@ -1259,8 +1252,9 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 		}
 	}
 
-	// Cancelable scan so Ctrl-C / SIGTERM stops the walk, keeps partial
-	// progress (already-recorded projects), and exits 130 with a warning.
+	// Cancelable scan so Ctrl-C / SIGTERM stops the walk, keeps scan disk
+	// cache progress when applicable, and exits 130 with a warning. Does not
+	// touch projects.json.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -1284,16 +1278,9 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 		mode = scan_repo.WarmRefreshAsync
 	}
 
-	// scan_repo absorbs OnRepo errors into repo.Error and continues; capture
-	// RecordProject failures so the run still fails after Scan returns.
 	// CacheRoot left empty → product default under $HOME when cache enabled.
-	var recordErr error
-	var newly int
 	printed := make(map[string]bool)
 	onRepo := func(repo scan_repo.Repo) error {
-		if recordErr != nil {
-			return recordErr
-		}
 		isMain := repo.RepoType == scan_repo.RepoTypeMain
 		isWorktree := repo.RepoType == scan_repo.RepoTypeWorktree
 		if !isMain && !(includeWorktrees && isWorktree) {
@@ -1303,25 +1290,15 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 			return nil
 		}
 		path := storage.NormalizePath(repo.Path)
-		// Emit filter: only record/print paths under CLI-provided roots.
+		// Emit filter: only print paths under CLI-provided roots.
 		if !pathUnderAnyRoot(path, filterRoots) {
 			return nil
 		}
-		// Always print each valid path at most once per run (known or new).
+		// Always print each valid path at most once per run.
 		if !printed[path] {
 			fmt.Println(path)
 			printed[path] = true
 		}
-		// Record only new main repos; worktrees are list-only.
-		if !isMain || known[path] {
-			return nil
-		}
-		if err := storage.RecordProject(wrkHome, path, storage.SourceScan); err != nil {
-			recordErr = err
-			return err
-		}
-		known[path] = true
-		newly++
 		return nil
 	}
 
@@ -1355,21 +1332,18 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 	}
 	if scanErr != nil {
 		if errors.Is(scanErr, context.Canceled) {
-			fmt.Fprintln(os.Stderr, "warning: scan interrupted; progress saved (cache and newly recorded projects)")
+			fmt.Fprintln(os.Stderr, "warning: scan interrupted; cache progress may be saved (projects.json unchanged)")
 			return ExitCodeError{Code: 130}
 		}
 		return scanErr
 	}
 	// Interrupt during async Join (min-budget wait) after successful serve.
 	if errors.Is(ctx.Err(), context.Canceled) {
-		fmt.Fprintln(os.Stderr, "warning: scan interrupted; progress saved (cache and newly recorded projects)")
+		fmt.Fprintln(os.Stderr, "warning: scan interrupted; cache progress may be saved (projects.json unchanged)")
 		return ExitCodeError{Code: 130}
 	}
-	if recordErr != nil {
-		return recordErr
-	}
 	if debug {
-		fmt.Fprintf(os.Stderr, "scan: record known=%d newly=%d\n", knownAtStart, newly)
+		fmt.Fprintf(os.Stderr, "scan: printed=%d\n", len(printed))
 		if asyncRefresh {
 			fmt.Fprintf(os.Stderr, "scan: refresh_mode=async\n")
 		}

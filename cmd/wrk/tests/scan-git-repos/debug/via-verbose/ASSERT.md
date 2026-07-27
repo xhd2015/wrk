@@ -2,10 +2,10 @@
 
 - Exit code **0**.
 - Stdout prints the already-known main path exactly once (always-print; not a new record).
-- `projects.json` still exactly one `source=scan` entry for `myrepo`.
+- projects.json remains empty after seed+scan (print-only).
 - **Stderr contains greppable `scan:`** (library Debug wired through wrk).
 - **Stderr contains `mode=`** with warm or cold (`mode=warm` preferred after seed; `mode=cold` acceptable if product still cold-walks).
-- Optional (do not fail if absent): `record` / `known=` / `newly=` wrk-side summary lines.
+- Optional (do not fail if absent): `printed=` wrk-side summary lines.
 - Phase-level volume: count of lines containing `scan:` stays modest (not per-directory spam).
 
 ## Side Effects
@@ -38,8 +38,8 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if n != 1 {
 		t.Fatalf("second scan must always-print known main once; count=%d stdout=%q want=%q", n, resp.Stdout, want)
 	}
-	assertScanProjectsCount(t, req.WrkHome, 1)
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
+	// Print-only: scan never mutates projects.json.
+	assertScanProjectsCount(t, req.WrkHome, 0)
 
 	stderr := resp.Stderr
 	if !strings.Contains(stderr, "scan:") {

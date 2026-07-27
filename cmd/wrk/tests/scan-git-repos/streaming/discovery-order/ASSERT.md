@@ -5,11 +5,11 @@
   1. `main-b` (first CLI root / discovery order)
   2. `main-a` (second CLI root)
 - Order is **not** lexicographic (`main-a` then `main-b`).
-- `projects.json` has exactly two entries, both `source: "scan"`.
+- `projects.json` is empty (print-only).
 
 ## Side Effects
 
-- Both mains recorded via scan; no extra entries.
+- No projects.json mutation.
 
 ## Exit Code
 
@@ -31,8 +31,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	wantSecond := resolveScanPath(t, req.SecondRepo)
 	assert.Output(t, resp.Stdout, v2StdoutTemplate(wantFirst+"\n"+wantSecond))
 
-	assertScanProjectsCount(t, req.WrkHome, 2)
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
-	assertScanProjectRecorded(t, req.WrkHome, req.SecondRepo, "scan")
+	// Print-only: scan never mutates projects.json.
+	assertScanProjectsCount(t, req.WrkHome, 0)
 }
 ```

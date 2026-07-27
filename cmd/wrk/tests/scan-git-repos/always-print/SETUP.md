@@ -4,7 +4,7 @@
 
 ```
 # warm / pre-seeded projects does not gate stdout
-scan-root/myrepo in projects.json (source=scan)
+optional: scan-root/myrepo pre-seeded in projects.json (legacy source=scan)
   -> wrk --scan-git-repos scan-root
   -> stdout includes main abs path exactly once
   -> projects count stays 1

@@ -8,8 +8,8 @@ root-first/main-first + root-later/[pads…]/zzz-main
   -> stdout first line: abs(main-first)
   -> harness SIGINT
   -> exit 130
-  -> stderr warning: interrupted + progress saved
-  -> projects.json: main-first source=scan; zzz-main not required if unvisited
+  -> stderr warning: interrupted; cache may keep progress
+  -> projects.json unchanged (empty); zzz-main may be unvisited on stdout
 ```
 
 ## Preconditions

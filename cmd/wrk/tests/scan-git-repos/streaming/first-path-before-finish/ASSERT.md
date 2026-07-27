@@ -11,12 +11,12 @@ explanation: two scan roots; root-later has 2000 pad dirs + late main; cold stre
 - **Streaming UX**: first stdout bytes arrive at least **40ms** before process exit
   (`total_ms - first_byte_ms >= 40`, with `total_ms >= 80`), proving the first
   path is not held until the entire multi-root scan finishes.
-- After probe: `projects.json` records both mains with `source: "scan"`.
+- After probe: `projects.json` does not write projects.json (print-only).
 
 ## Side Effects
 
-- Both mains recorded via scan; pad dirs are empty and not recorded.
-- Probe removes and rewrites `projects.json` (fresh for newly-recorded stdout).
+- Pad dirs are empty and not printed as repos.
+- Probe may clear projects.json for isolation; scan still leaves it empty.
 
 ## Errors
 
@@ -60,9 +60,8 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	// Full completion: both mains eventually on stdout (order preserved).
 	assert.Output(t, probe.FullStdout, v2StdoutTemplate(wantFirst+"\n"+wantSecond))
 
-	assertScanProjectsCount(t, req.WrkHome, 2)
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
-	assertScanProjectRecorded(t, req.WrkHome, req.SecondRepo, "scan")
+	// Print-only: scan never mutates projects.json.
+	assertScanProjectsCount(t, req.WrkHome, 0)
 
 	t.Logf("scan stream probe: first_byte_ms=%d total_ms=%d gap_ms=%d",
 		probe.FirstByteMS, probe.TotalMS, probe.TotalMS-probe.FirstByteMS)

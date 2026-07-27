@@ -2,12 +2,12 @@
 
 - Exit code 0.
 - Stdout is exactly the main repo absolute path (not the worktree path).
-- `projects.json` has exactly one entry: the main path with `source: "scan"`.
-- Linked worktree path is not recorded.
+- `projects.json` is empty / has zero entries (print-only).
+- Linked worktree is not printed by default (main-only leaf).
 
 ## Side Effects
 
-- Only `RepoTypeMain` paths become project records.
+- Only `RepoTypeMain` paths are printed by default.
 
 ## Exit Code
 
@@ -22,8 +22,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	wantMain := resolveScanPath(t, req.MainRepo)
 	assertStdoutExactPath(t, resp.Stdout, wantMain)
 	assertNotContains(t, resp.Stdout, resolveScanPath(t, req.WtDir))
-	assertScanProjectsCount(t, req.WrkHome, 1)
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
-	assertScanProjectNotRecorded(t, req.WrkHome, req.WtDir)
+	// Print-only: scan never mutates projects.json (main or worktree).
+	assertScanProjectsCount(t, req.WrkHome, 0)
 }
 ```

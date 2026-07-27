@@ -3,7 +3,7 @@
 - Exit code **0**.
 - Stdout is exactly the **Projects** main absolute path (single line + trailing
   `\n`) — **not** `home-main`.
-- `projects.json` records **only** `Projects/proj-main` with `source=scan`
+- `projects.json` prints only under Projects; projects.json unchanged
   (count 1 after clear + filtered scan).
 - Product **home** universe index still exists at
   `{FakeHome}/.cache/git-repo-scan/home/repos.json` after the Projects scan
@@ -51,9 +51,8 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 			resp.Stdout)
 	}
 
-	assertScanProjectsCount(t, req.WrkHome, 1)
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
-	assertScanProjectNotRecorded(t, req.WrkHome, req.SecondRepo)
+	// Print-only: scan never mutates projects.json.
+	assertScanProjectsCount(t, req.WrkHome, 0)
 
 	// Same home universe cache files still present after subpath scan.
 	indexPath := productHomeUniverseReposJSON(req.FakeHome)

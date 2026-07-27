@@ -3,7 +3,7 @@
 **Feature**: second --scan-git-repos does not duplicate projects.json; still prints the valid main
 
 ```
-wrk --scan-git-repos ROOT (1st / seeded) -> projects has source=scan
+seed projects.json source=scan; wrk --scan-git-repos ROOT -> registry unchanged
 wrk --scan-git-repos ROOT (2nd under test)
   -> exit 0
   -> still one projects entry

@@ -2,7 +2,7 @@
 
 - Exit code 0.
 - Stdout is the resolved main repo absolute path.
-- `projects.json` has one entry with `source: "scan"`.
+- `projects.json` is empty / has zero entries (print-only).
 - Functional discovery works with `--no-cache` (does not require asserting cache files absent).
 
 ## Exit Code
@@ -16,7 +16,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
 	assertStdoutExactPath(t, resp.Stdout, resolveScanPath(t, req.MainRepo))
-	assertScanProjectsCount(t, req.WrkHome, 1)
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
+	// Print-only: scan never mutates projects.json.
+	assertScanProjectsCount(t, req.WrkHome, 0)
 }
 ```

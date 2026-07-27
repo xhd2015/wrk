@@ -1,6 +1,6 @@
 # Scenario
 
-**Feature**: first newly recorded main path appears on stdout before --scan-git-repos finishes (later root still scanning)
+**Feature**: first main path appears on stdout before --scan-git-repos finishes (later root still scanning)
 
 ```
 root-first/main-first + root-later/[pads…]/zzz-main

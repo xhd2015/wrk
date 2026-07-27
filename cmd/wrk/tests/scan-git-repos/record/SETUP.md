@@ -1,13 +1,13 @@
 # Scenario
 
-**Feature**: successful wrk --scan-git-repos discovers mains, always prints them, records new ones
+**Feature**: successful wrk --scan-git-repos discovers mains and always prints them (no registry write)
 
 ```
 # explicit root under WorkRoot
 wrk --scan-git-repos <scan-root>
   -> scan_repo finds mains under root
   -> stdout always prints valid main abs paths (known or new)
-  -> RecordProject(..., source="scan") only when not already in projects.json
+  -> projects.json is never written
 ```
 
 ## Preconditions

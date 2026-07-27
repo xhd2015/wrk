@@ -1,12 +1,12 @@
 # Scenario
 
-**Feature**: cold first scan always prints main path and records source=scan
+**Feature**: cold first scan always prints main path; does not write projects.json
 
 ```
 scan-root/myrepo (main, not in projects yet)
   -> wrk --scan-git-repos scan-root
   -> stdout absolute main path (always-print on cold find)
-  -> projects.json entry source=scan
+  -> projects.json unchanged (no write)
 ```
 
 ## Steps

@@ -5,12 +5,12 @@
 ```
 # mid-scan interrupt (SIGINT after first newly printed main)
 wrk --scan-git-repos [--no-cache] ROOT_FIRST ROOT_LATER
-  -> OnRepo records + prints first main (source=scan)
+  -> OnRepo prints first main (no record)
   -> harness sends SIGINT after first stdout path line
   -> cancel scan context (stop further walk)  # product P2
-  -> stderr warning: interrupted + progress saved
+  -> stderr warning: interrupted; cache may keep progress
   -> exit 130 (ExitCodeError silent body; warning already on stderr)
-  -> projects.json keeps mains already recorded; later unvisited mains absent
+  -> projects.json unchanged (still empty / pre-seeded only)
 
 # contrast: full scan without signal
 wrk --scan-git-repos ROOT...  -> exit 0; no interrupt warning
@@ -24,7 +24,7 @@ wrk --scan-git-repos ROOT...  -> exit 0; no interrupt warning
   leaves use a subtree helper that spawns `wrk` with stdout pipe, signals
   `SIGINT` after the first newly printed path line, then waits for exit.
 - Product contract (implemented): SIGINT/SIGTERM cancel scan context → exit 130
-  via `ExitCodeError{130}`, stderr `warning:` progress saved, partial projects kept.
+  via `ExitCodeError{130}`, stderr `warning:` progress saved, projects.json untouched.
   Raw signal death without handler would yield `ExitCode() == -1` (not expected).
 
 ## Context

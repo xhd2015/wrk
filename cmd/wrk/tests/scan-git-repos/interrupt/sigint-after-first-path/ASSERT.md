@@ -2,20 +2,18 @@
 
 - Probe exit code **130** (clean exit via product signal handling / `ExitCodeError{130}`,
   not raw signal death with `ExitCode() == -1`).
-- Stderr includes a `warning:` line about scan interrupted and progress saved
+- Stderr includes a `warning:` line about scan interrupted
   (wording flexible; must include `warning:`, interrupt/interrupted, and
-  progress and/or saved).
+  progress and/or saved and/or cache).
 - Stdout contains at least the first discovered main path (`main-first`).
-- `projects.json` records `main-first` with `source: "scan"` (progress kept).
-- Second main (`zzz-main`) is absent from `projects.json` when the harness
-  interrupted before it was printed; if it appears on probe stdout it may also
-  be recorded (consistency). Prefer absent under the pad layout.
+- `projects.json` has zero entries (scan never records).
+- Interrupt must not write any projects.json entries.
 - No requirement that root `Run` resp match interrupt semantics (root Run
   completes without mid-flight signal).
 
 ## Side Effects
 
-- Partial `projects.json` retained (already-recorded mains kept).
+- `projects.json` remains empty (print-only).
 - Mirror cache entries already written by scan_repo remain (not asserted wiped).
 
 ## Errors
@@ -50,20 +48,14 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	assertInterruptWarning(t, probe.Stderr)
 
 	wantFirst := resolveScanPath(t, req.MainRepo)
-	wantSecond := resolveScanPath(t, req.SecondRepo)
 
-	// First newly recorded path must have been streamed before SIGINT.
+	// First discovered path must have been streamed before SIGINT.
 	if !strings.Contains(probe.Stdout, wantFirst) {
 		t.Fatalf("stdout must include first main %q; got %q", wantFirst, probe.Stdout)
 	}
 
-	// Progress saved: first main stays in projects.json with source=scan.
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
-
-	// Partial: if second was never printed, it must not be recorded yet.
-	if !strings.Contains(probe.Stdout, wantSecond) {
-		assertScanProjectNotRecorded(t, req.WrkHome, req.SecondRepo)
-	}
+	// Print-only: interrupt must not write projects.json.
+	assertScanProjectsCount(t, req.WrkHome, 0)
 
 	// Soft readability: stderr should look like a warning, not a panic stack.
 	if strings.Contains(probe.Stderr, "panic:") {

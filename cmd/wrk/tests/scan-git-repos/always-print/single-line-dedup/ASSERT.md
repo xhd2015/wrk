@@ -2,7 +2,7 @@
 
 - Exit code 0.
 - The main absolute path appears on stdout exactly once (no double-print from serve+refresh).
-- `projects.json` has exactly one entry with `source: "scan"`.
+- `projects.json` is empty / has zero entries (print-only).
 
 ## Side Effects
 
@@ -23,7 +23,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if n != 1 {
 		t.Fatalf("main path must appear exactly once; count=%d stdout=%q want=%q", n, resp.Stdout, want)
 	}
-	assertScanProjectsCount(t, req.WrkHome, 1)
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
+	// Print-only: scan never mutates projects.json.
+	assertScanProjectsCount(t, req.WrkHome, 0)
 }
 ```

@@ -2,12 +2,12 @@
 
 - Exit code 0.
 - Stdout includes the resolved main absolute path exactly once (always-print; not silent for known).
-- `projects.json` still has exactly one entry with `source: "scan"`.
+- Pre-seeded `projects.json` still has exactly one entry with `source: "scan"` (scan did not mutate it).
 
 ## Side Effects
 
-- Known path does not re-record or duplicate in projects.json.
-- Listing is independent of the record gate.
+- Scan does not re-write or duplicate projects.json entries.
+- Listing is independent of the registry.
 
 ## Exit Code
 

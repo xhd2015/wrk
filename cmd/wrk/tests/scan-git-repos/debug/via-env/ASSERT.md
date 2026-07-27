@@ -2,10 +2,10 @@
 
 - Exit code **0**.
 - Stdout prints the already-known main path exactly once (always-print).
-- One `source=scan` projects.json entry for `myrepo`.
+- projects.json has zero entries (scan is print-only).
 - **Stderr contains `scan:`** and **`mode=`** (`mode=warm` preferred after seed; `mode=cold` OK).
 - No `-v` was passed: any major-git `[timestamp] $ git …` lines are not required; `scan:` must still appear from env-driven Debug alone.
-- Optional (do not fail if absent): `record known=N newly=M`.
+- Optional (do not fail if absent): `printed=N`.
 - Phase-level `scan:` line volume (not per-dir spam).
 
 ## Side Effects
@@ -37,8 +37,8 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if n != 1 {
 		t.Fatalf("second scan must always-print known main once; count=%d stdout=%q want=%q", n, resp.Stdout, want)
 	}
-	assertScanProjectsCount(t, req.WrkHome, 1)
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
+	// Print-only: scan never mutates projects.json.
+	assertScanProjectsCount(t, req.WrkHome, 0)
 
 	// Sanity: Args must not include -v/--verbose for this leaf.
 	for _, a := range req.Args {

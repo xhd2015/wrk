@@ -1,34 +1,34 @@
 # Scenario
 
-**Feature**: wrk --scan-git-repos always streams every valid git repo found; projects.json is a side effect
+**Feature**: wrk --scan-git-repos always streams every valid git repo found; never mutates projects.json
 
 ```
-# standalone mode: scan roots; always print valid finds; record new mains only
+# standalone mode: scan roots; always print valid finds; print-only (no registry)
 wrk --scan-git-repos [ROOT...] [--no-cache] [--include-worktrees]
   -> scan_repo.Scan(Roots, NoCache, OnRepo)
   -> default: print RepoTypeMain only; with --include-worktrees also print worktrees
-  -> stdout: every valid abs path as discovered (known or not; not post-scan sort)
-  -> RecordProject(..., source="scan") only for new mains (not worktrees; not duplicates)
+  -> stdout: every valid abs path as discovered (not post-scan sort)
+  -> projects.json is never read or written by this mode
 
 # default root when no ROOT... (see defaults/)
 wrk --scan-git-repos  -> roots = [$HOME] if home is a directory (not ~/Projects)
 wrk --scan-git-repos  (HOME missing/not a dir)  -> non-zero; error about home/~
 
-# already recorded (always-print / record/idempotent)
+# pre-seeded projects (always-print / record/idempotent)
 wrk --scan-git-repos ROOT (2nd run / pre-seeded projects)
-  -> exit 0; still prints valid main path once; no duplicate projects.json entries
+  -> exit 0; still prints valid main path once; projects.json unchanged
 
 # streaming / interrupt (see streaming/ and interrupt/ leaves)
 wrk --scan-git-repos ROOT_B ROOT_A  -> discovery-order stdout (CLI root order)
 wrk --scan-git-repos --no-cache ROOT_FIRST ROOT_LATER  -> first path before finish
-SIGINT mid-scan  -> exit 130; stderr warning: interrupted + progress saved; partial projects kept
+SIGINT mid-scan  -> exit 130; stderr warning: interrupted; cache may keep progress; projects.json untouched
 
 # cache flag
-wrk --scan-git-repos --no-cache ROOT  -> still discovers + prints + records new (NoCache)
+wrk --scan-git-repos --no-cache ROOT  -> still discovers + prints (NoCache); no projects.json write
 wrk --no-cache (no --scan-git-repos)  -> non-zero; only valid with --scan-git-repos
 
 # include-worktrees (see include-worktrees/)
-wrk --scan-git-repos --include-worktrees ROOT  -> print main + valid worktrees; record main only
+wrk --scan-git-repos --include-worktrees ROOT  -> print main + valid worktrees; no registry write
 wrk --include-worktrees (no --scan-git-repos)  -> non-zero; only valid with --scan-git-repos
 
 # debug wiring (see debug/ leaves) — implemented P3
@@ -39,7 +39,7 @@ wrk --scan-git-repos ROOT (no -v, no env)  -> zero scan: markers
 
 # mutual exclusion / help
 wrk --scan-git-repos --projects  -> non-zero; mutually exclusive
-wrk -h  -> documents --scan-git-repos, --no-cache, --include-worktrees, default root ~
+wrk -h  -> documents --scan-git-repos, --no-cache, --include-worktrees, default root ~, print-only
 
 # P5 two-base + filter (see filter-home-subpath/) — FakeHome isolation
 wrk --scan-git-repos  -> universe home; product $HOME/.cache/git-repo-scan/home/
@@ -64,11 +64,11 @@ wrk --scan-git-repos ~/Projects -v  -> stderr cache_base + filter
 
 ## Context
 
-- `projects.json` entries use `source: "scan"` for paths first seen via `--scan-git-repos`.
-- Re-recording is idempotent (first `source` wins; no duplicate paths). Recording does **not** gate stdout.
-- Linked worktrees may appear under the scan root; default omits them from stdout and never records them; `--include-worktrees` prints valid worktrees (list-only).
+- **`--scan-git-repos` never mutates `projects.json`** (print-only forever). Registry writes remain `auto` / `manual` only.
+- Historical `source: "scan"` entries may still exist in older files; scan no longer creates them.
+- Linked worktrees may appear under the scan root; default omits them from stdout; `--include-worktrees` prints valid worktrees.
 - Stdout always lists every **valid** discovery (live `.git`, under root filter, type allowed by flags) **as found** in discovery order (one absolute path per line, trailing `\n`); same path at most once per run. Not batch-sorted after the full scan.
-- Mid-scan SIGINT/SIGTERM → exit 130, stderr progress-saved warning, partial projects/cache retained.
+- Mid-scan SIGINT/SIGTERM → exit 130, stderr interrupt warning; scan disk cache may keep progress; `projects.json` unchanged.
 
 ```go
 import (
@@ -198,9 +198,9 @@ func makeScanRoot(t *testing.T, workRoot string) string {
 	return root
 }
 
-// seedScanProject writes a projects.json entry as if a prior --scan-git-repos
-// had recorded path with source "scan". Used for idempotent leaves so Setup
-// does not depend on the feature under test.
+// seedScanProject writes a projects.json entry with source "scan" for tests that
+// need a pre-existing registry row (idempotent / known-main). Scan itself no
+// longer writes projects.json; this helper only simulates legacy data.
 func seedScanProject(t *testing.T, wrkHome, path string) {
 	t.Helper()
 	if err := os.MkdirAll(wrkHome, 0o755); err != nil {

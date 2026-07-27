@@ -14,7 +14,9 @@ import (
 const (
 	SourceAuto   = "auto"
 	SourceManual = "manual"
-	SourceScan   = "scan"
+	// SourceScan is historical only. --scan-git-repos no longer writes
+	// projects.json; entries with source "scan" may still exist from older wrk.
+	SourceScan = "scan"
 )
 
 // Project is one recorded main repository entry.

@@ -3,7 +3,7 @@
 - Exit code **0**.
 - Stdout lists both mains (absolute paths, one per line): `home-main` and
   `Projects/proj-main` (order free; each path appears once).
-- `projects.json` has exactly **2** entries, both `source=scan`.
+- `projects.json` has **0** entries (print-only).
 - Product cache under FakeHome has durable **home universe** index at
   `{FakeHome}/.cache/git-repo-scan/home/repos.json`.
 - Index envelope: `universe` is `home` (when present as JSON field).
@@ -13,7 +13,7 @@
 
 ## Side Effects
 
-- `{WRK_HOME}/projects.json` records both mains.
+- `{WRK_HOME}/projects.json` stays empty.
 - Product cache files under `{FakeHome}/.cache/git-repo-scan/home/`.
 
 ## Errors
@@ -67,9 +67,8 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 			len(seen), seen, resp.Stdout)
 	}
 
-	assertScanProjectsCount(t, req.WrkHome, 2)
-	assertScanProjectRecorded(t, req.WrkHome, req.SecondRepo, "scan")
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
+	// Print-only: scan never mutates projects.json.
+	assertScanProjectsCount(t, req.WrkHome, 0)
 
 	indexPath := productHomeUniverseReposJSON(req.FakeHome)
 	data, err := os.ReadFile(indexPath)
