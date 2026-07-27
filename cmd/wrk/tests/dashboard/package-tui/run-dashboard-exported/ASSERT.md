@@ -32,10 +32,10 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if err != nil {
 		t.Fatalf("unexpected Run error for wrk -h: %v", err)
 	}
-	assertPackageListed(t, wrkcliTuiImportPath)
+	assertPackageListed(t, d, wrkcliTuiImportPath)
 
 	// RunDashboard must be an exported function.
-	doc, docErr := goDocInModule(t, wrkcliTuiImportPath+".RunDashboard")
+	doc, docErr := goDocInModule(t, d, wrkcliTuiImportPath+".RunDashboard")
 	if docErr != nil {
 		t.Fatalf("tui must export RunDashboard (go doc): %v\n%s", docErr, doc)
 	}
@@ -47,7 +47,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	}
 
 	// Recipe type.
-	doc, docErr = goDocInModule(t, wrkcliTuiImportPath+".Recipe")
+	doc, docErr = goDocInModule(t, d, wrkcliTuiImportPath+".Recipe")
 	if docErr != nil {
 		t.Fatalf("tui must export type Recipe (go doc): %v\n%s", docErr, doc)
 	}
@@ -56,7 +56,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	}
 
 	// RunDashboardOpts type.
-	doc, docErr = goDocInModule(t, wrkcliTuiImportPath+".RunDashboardOpts")
+	doc, docErr = goDocInModule(t, d, wrkcliTuiImportPath+".RunDashboardOpts")
 	if docErr != nil {
 		t.Fatalf("tui must export type RunDashboardOpts (go doc): %v\n%s", docErr, doc)
 	}

@@ -30,16 +30,16 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if err != nil {
 		t.Fatalf("unexpected Run error for wrk -h: %v", err)
 	}
-	assertPackageListed(t, wrkcliTuiImportPath)
+	assertPackageListed(t, d, wrkcliTuiImportPath)
 
 	// Parent package must still resolve independently.
-	parentOut, parentErr := goListInModule(t, wrkcliParentImportPath)
+	parentOut, parentErr := goListInModule(t, d, wrkcliParentImportPath)
 	if parentErr != nil {
 		t.Fatalf("parent package %s must remain listable: %v\n%s",
 			wrkcliParentImportPath, parentErr, parentOut)
 	}
 
-	importsOut, listErr := goListInModule(t, "-f", "{{join .Imports \"\\n\"}}", wrkcliTuiImportPath)
+	importsOut, listErr := goListInModule(t, d, "-f", "{{join .Imports \"\\n\"}}", wrkcliTuiImportPath)
 	if listErr != nil {
 		t.Fatalf("go list imports for %s: %v\n%s", wrkcliTuiImportPath, listErr, importsOut)
 	}

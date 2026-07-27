@@ -55,20 +55,27 @@ const wrkcliTuiImportPath = "github.com/xhd2015/wrk/wrkcli/tui"
 // wrkcliParentImportPath is the parent package tui must not import (cycle).
 const wrkcliParentImportPath = "github.com/xhd2015/wrk/wrkcli"
 
-func moduleRootFromDoctest(t *testing.T) string {
+func moduleRootFromDoctest(t *testing.T, d *session.Doctest) string {
 	t.Helper()
-	root := findModuleRoot(d.DOCTEST_ROOT)
+	start := ""
+	if d != nil && d.DOCTEST_ROOT != "" {
+		start = d.DOCTEST_ROOT
+	}
+	if start == "" {
+		start = doctestRootPath()
+	}
+	root := findModuleRoot(start)
 	if root == "" {
-		t.Fatal("find module root: no go.mod in ancestors of DOCTEST_ROOT")
+		t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
 	}
 	return root
 }
 
 // goListInModule runs `go list` with extra args in the wrk module root.
 // Returns combined stdout+stderr and the process error (non-nil when exit != 0).
-func goListInModule(t *testing.T, args ...string) (string, error) {
+func goListInModule(t *testing.T, d *session.Doctest, args ...string) (string, error) {
 	t.Helper()
-	modRoot := moduleRootFromDoctest(t)
+	modRoot := moduleRootFromDoctest(t, d)
 	cmdArgs := append([]string{"list"}, args...)
 	cmd := exec.Command("go", cmdArgs...)
 	cmd.Dir = modRoot
@@ -79,9 +86,9 @@ func goListInModule(t *testing.T, args ...string) (string, error) {
 }
 
 // goDocInModule runs `go doc` for a package or package.Symbol in the module.
-func goDocInModule(t *testing.T, target string) (string, error) {
+func goDocInModule(t *testing.T, d *session.Doctest, target string) (string, error) {
 	t.Helper()
-	modRoot := moduleRootFromDoctest(t)
+	modRoot := moduleRootFromDoctest(t, d)
 	cmd := exec.Command("go", "doc", target)
 	cmd.Dir = modRoot
 	cmd.Env = append(os.Environ(), "GO111MODULE=on")
@@ -89,9 +96,9 @@ func goDocInModule(t *testing.T, target string) (string, error) {
 	return string(out), err
 }
 
-func assertPackageListed(t *testing.T, importPath string) {
+func assertPackageListed(t *testing.T, d *session.Doctest, importPath string) {
 	t.Helper()
-	out, err := goListInModule(t, importPath)
+	out, err := goListInModule(t, d, importPath)
 	if err != nil {
 		t.Fatalf("package %s must be listable in module (go list): %v\n%s",
 			importPath, err, out)

@@ -233,6 +233,13 @@ func applyCaptureOverrides(opts CaptureOpts) (restore func()) {
 	captureWrkDate = wrkDate
 	captureUserHome = userHome
 
+	// HOME is also Setenv under the capture mutex so product code that still
+	// uses os.Getenv("HOME") / expand~ (not only userHomeDir) sees FakeHome.
+	// Other keys stay in rest as before.
+	if userHome != "" {
+		rest = append([]string{"HOME=" + userHome}, rest...)
+	}
+
 	restoreEnv := applyEnvPairs(rest)
 
 	return func() {
@@ -275,7 +282,10 @@ func applyEnvPairs(pairs []string) (restore func()) {
 }
 
 // applyCaptureDir installs a virtual cwd for processCwd() without os.Chdir.
-// Real process cwd stays untouched so parallel leaves can still os.Getwd/git.
+// Real process cwd stays untouched so parallel leaves can still os.Getwd/git
+// and TempDir cleanup cannot leave Capture holding a deleted getcwd.
+// Callers that need third-party os.Getwd/filepath.Abs behavior must pass
+// absolute paths or pin --dir (see runGenCommitMsg).
 func applyCaptureDir(dir string) (restore func()) {
 	prev := captureDir
 	captureDir = dir

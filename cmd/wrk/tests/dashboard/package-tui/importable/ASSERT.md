@@ -23,6 +23,6 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if err != nil {
 		t.Fatalf("unexpected Run error for wrk -h: %v", err)
 	}
-	assertPackageListed(t, wrkcliTuiImportPath)
+	assertPackageListed(t, d, wrkcliTuiImportPath)
 }
 ```

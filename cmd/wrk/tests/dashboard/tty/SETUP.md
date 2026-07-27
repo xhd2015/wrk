@@ -32,9 +32,9 @@ non-TTY harness path still one-shot snapshot (regression)
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = d
-	// Grouping only; leaves set fixtures.
-	_ = lookPathTTYWatch
-	_ = runDashboardTTYWatch
+	// Grouping only; leaves call parent helpers (runDashboardTTYWatch) by name.
+	// Do not bare-ref parent helpers here — dual-mode child packages cannot
+	// resolve free names like lookPathTTYWatch as values.
 	return nil
 }
 ```

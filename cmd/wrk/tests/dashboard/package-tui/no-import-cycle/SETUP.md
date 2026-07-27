@@ -31,7 +31,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	_ = moduleRootFromDoctest(t)
+	_ = moduleRootFromDoctest(t, d)
 	req.RepoDir = req.WorkRoot
 	req.Args = []string{"-h"}
 	return nil

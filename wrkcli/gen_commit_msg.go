@@ -270,5 +270,23 @@ func runGenCommitMsg(args []string, ctx *invocationContext) error {
 		}
 	}
 
+	// Library defaults to os.Getwd() when --dir is absent. Under Capture, pin
+	// --dir to processCwd() (virtual Capture Dir) so InProcess leaves hit the
+	// fixture repo rather than the suite package directory.
+	hasDir := false
+	for _, arg := range forwarded {
+		if arg == "--dir" || strings.HasPrefix(arg, "--dir=") {
+			hasDir = true
+			break
+		}
+	}
+	if !hasDir {
+		wd, err := processCwd()
+		if err != nil {
+			return err
+		}
+		forwarded = append(forwarded, "--dir", wd)
+	}
+
 	return commit_msg.RunGenCommitMsg(forwarded)
 }

@@ -3,6 +3,7 @@ package wrkcli
 import (
 	_ "embed"
 	"fmt"
+	"os"
 	"strings"
 
 	lessflags "github.com/xhd2015/less-flags"
@@ -260,6 +261,18 @@ func parseSkillShowArgs(args []string) (headerOnly bool, err error) {
 }
 
 func runSkillInstall(args []string) error {
+	// skillcmd resolves relative install roots via filepath.Abs / os.Getwd.
+	// Under Capture, pin real cwd to captureDir for the install call only so
+	// dry-run/install paths match subprocess Dir=RepoDir without holding a
+	// virtual-only cwd for third-party Abs.
+	if captureDir != "" {
+		old, err := os.Getwd()
+		if err == nil {
+			if err := os.Chdir(captureDir); err == nil {
+				defer func() { _ = os.Chdir(old) }()
+			}
+		}
+	}
 	return install.HandleInstall(install.InstallOptions{
 		SkillDirName: skillSubcommandName,
 		SkillContent: skillContent,
