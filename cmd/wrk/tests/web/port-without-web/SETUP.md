@@ -14,7 +14,9 @@ wrk --port 18080 (no --web)
 1. Run `wrk --port 18080` from isolated WorkRoot.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	// Fixed high port is fine: process must reject before bind.
 	req.Args = []string{"--port", "18080"}
 	return nil

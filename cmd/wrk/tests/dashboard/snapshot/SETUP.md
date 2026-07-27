@@ -25,7 +25,8 @@ cwd (git) -> wrk
 - Assertions use shared `assertDashboardSnapshotCore` / `assertAddChangesGlyph` / `assertMergeBackDefaultSelected`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	// Snapshot leaves are bare no-args only.
 	req.Args = nil

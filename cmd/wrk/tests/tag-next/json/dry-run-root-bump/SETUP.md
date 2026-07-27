@@ -13,7 +13,9 @@ git repo + tags -> wrk --tag-next --dry-run --json -> machine-readable plan
 2. Run `wrk --tag-next --dry-run --json`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupRootBumpRepo(t, req)
 	req.Args = []string{"--tag-next", "--dry-run", "--json"}
 	return nil

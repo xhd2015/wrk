@@ -13,7 +13,9 @@ git repo + tags -> wrk --tag-next --dry-run -> stdout plan only
 2. Run `wrk --tag-next --dry-run` from the repo.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupRootBumpRepo(t, req)
 	req.Args = []string{"--tag-next", "--dry-run"}
 	return nil

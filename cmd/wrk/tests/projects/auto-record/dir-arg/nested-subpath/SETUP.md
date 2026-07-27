@@ -13,9 +13,14 @@ WorkRoot -> wrk myrepo/pkg/nested --list -> projects.json records myrepo main pa
 3. Run `wrk <nestedSubpath> --list` from `{WorkRoot}`.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := initProjectsRepo(t, req.WorkRoot, "myrepo")
 	subpath := filepath.Join(mainRepo, "pkg", "nested")
 	mkdirAll(t, subpath)

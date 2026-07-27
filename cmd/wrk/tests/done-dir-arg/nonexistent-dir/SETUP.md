@@ -12,7 +12,9 @@ wrk --done /nonexistent/path -> non-zero, "does not exist" or "not a git reposit
 1. Run `wrk --done /nonexistent/path` from WorkRoot.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.RepoDir = req.WorkRoot
 	req.Args = []string{"--done", "/nonexistent/path"}
 	return nil

@@ -12,7 +12,8 @@ create.interceptor enabled leftover -> wrk --new -> native wt path; UX mocks sil
 2. Run `wrk --new`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	writeInterceptorOnlyConfig(t, req.WrkHome)
 	req.Args = []string{"--new"}
 	return nil

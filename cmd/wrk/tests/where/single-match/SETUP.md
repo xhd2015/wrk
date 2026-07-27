@@ -13,7 +13,8 @@ neutral cwd -> wrk --where spl -> stdout = saved absolute path
 - Run `wrk --where <basename>` from a cwd without a local `./<basename>` entry.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureWhereHelpersUsed()
 	return nil
 }```

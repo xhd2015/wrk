@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 
 	"github.com/xhd2015/gitops/git"
 	"time"
@@ -41,7 +42,8 @@ type projectsStreamProbe struct {
 	ExitCode     int
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	req.Args = []string{"--projects"}
 	req.RepoDir = req.WorkRoot

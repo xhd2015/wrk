@@ -29,9 +29,13 @@ absY = localY of that chip  (origin 0)
 - This branch seals the gen-commit-msg vs tag-next regression first.
 
 ```go
-import "testing"
+import (
+	"testing"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Plenty of blank below the UI so bottom-only mapping is wrong.
 	req.ExtraBlank = 40
 	req.OriginOffset = 0

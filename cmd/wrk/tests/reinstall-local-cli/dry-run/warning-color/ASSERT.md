@@ -1,3 +1,4 @@
+
 ## Expected Output
 
 stdout (plain):
@@ -28,9 +29,13 @@ warning: bin foo: ambiguous under cmd (./cmd/foo, ./cmd/nested/foo); skipping
 - 0
 
 ```go
-import "github.com/xhd2015/doctest/assert"
+import (
+	"github.com/xhd2015/doctest/assert"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
 	wantOut := "would: reinstall 0 binaries (0 skipped)\n"

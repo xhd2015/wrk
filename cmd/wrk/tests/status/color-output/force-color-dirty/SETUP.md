@@ -13,7 +13,9 @@ dirty main repo (1 added, 1 changed) -> wrk --status --color -> red dirty + non-
 3. Run `wrk --status --color` from the main repo root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureColorStatusHelpersUsed()
 	withStatusColor(req)
 	mainRepo := setupColorStatusMainRepo(t, req.WorkRoot, "myrepo", "dirty status base")

@@ -16,13 +16,17 @@ wrk --main --status --list -> non-zero; mutually exclusive
 
 ## Context
 
-- Pure `wrk --main --list` is already covered under `main/errors/mutual-exclusion/with-list`
+- Pure `wrk --main --list` is already covered under `main-mode/errors/mutual-exclusion/with-list`
   and is not re-tested here.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	repo := filepath.Join(req.WorkRoot, "myrepo")
 	statusInitRepoWithSubject(t, repo, "main status exclusive")
 	req.MainRepo = repo

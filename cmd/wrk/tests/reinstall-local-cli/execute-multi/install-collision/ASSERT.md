@@ -1,3 +1,4 @@
+
 ## Expected
 
 - Non-zero exit code (cross-module install×install hard plan error before execute).
@@ -21,7 +22,8 @@
 - Non-zero
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	assertExitNonZero(t, resp)
 	assertContains(t, resp.Stderr, "samebin")

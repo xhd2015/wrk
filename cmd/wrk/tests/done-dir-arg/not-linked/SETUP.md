@@ -13,7 +13,9 @@ wrk --done <mainRepo> -> non-zero, "not a linked worktree"
 2. Run `wrk --done <mainRepo>` from WorkRoot.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, _, _ := setupWrkWorktreeFromMain(t, req)
 	// Undo the worktree: we only want the main repo for this test.
 	// But setupWrkWorktreeFromMain already created one — that's fine,

@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
+	"github.com/xhd2015/doctest/session"
 )
 
 const (
@@ -42,7 +43,8 @@ const (
 	nameSuffixReserve     = 3
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	ensureNameBudgetHelpersUsed()
 	return nil

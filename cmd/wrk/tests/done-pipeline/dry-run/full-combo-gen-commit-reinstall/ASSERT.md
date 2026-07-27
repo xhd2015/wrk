@@ -21,9 +21,10 @@
 import (
 	"path/filepath"
 	"strings"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if strings.Contains(resp.Stderr, "mutually exclusive") {
 		t.Fatalf("flag layer still rejects full pre+posts+reinstall dry-run; stderr=%q", resp.Stderr)

@@ -16,7 +16,9 @@ myrepo (main)
 2. Run multi-stage + exec dry-run.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupAPMainOnOrigin(t, req)
 	recordAPDryRunBaseline(t, req)
 	req.Args = []string{"--sync", "--tag-next", "--dry-run", "--exec", "true"}

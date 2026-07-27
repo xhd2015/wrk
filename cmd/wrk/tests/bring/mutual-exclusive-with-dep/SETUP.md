@@ -13,7 +13,9 @@ wrk --bring <path> --dep <path> -> mode conflict (hard error)
 2. Run `wrk --bring <dep> --dep <dep>` from consumer.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := initBringConsumerRepo(t, req.WorkRoot, true)
 	dep := initBringDepRepo(t, req.WorkRoot, "mydep", true)
 

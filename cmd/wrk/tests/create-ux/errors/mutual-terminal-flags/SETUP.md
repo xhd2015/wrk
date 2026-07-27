@@ -11,7 +11,9 @@ wrk --new-terminal --reuse-terminal -> non-zero
 1. Run two terminal mode flags together.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	installCreateUXMocks(t, req, "darwin")
 	req.Args = []string{"--new-terminal", "--reuse-terminal"}
 	return nil

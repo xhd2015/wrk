@@ -14,7 +14,9 @@ myrepo -> wrk --push --json
 2. Run `wrk --push --json`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupPushMainWithOrigin(t, req)
 	req.Args = []string{"--push", "--json"}
 	return nil

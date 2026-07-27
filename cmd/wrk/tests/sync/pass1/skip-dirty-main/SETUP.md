@@ -17,7 +17,9 @@ myrepo (dirty) + wt/feature-login -> wrk --sync
 4. Run `wrk --sync` from main.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, wtPath := initMainWithLinkedBranch(t, req, "feature-login", "wt-feature-login")
 
 	wtTip := commitFile(t, wtPath, "ahead.txt", "a\n", "feat: ahead")

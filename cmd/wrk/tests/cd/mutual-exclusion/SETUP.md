@@ -21,7 +21,8 @@ wrk --cd <path> --where x -> non-zero, mutually exclusive
 - Error stderr should mention mutually exclusive (or specifically `--cd` / `--no-cd`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	target := cdAbsTarget(t, req, "jumpto")
 	req.MainRepo = target
 	req.RepoDir = initNeutralCwd(t, req.WorkRoot, "workspace")

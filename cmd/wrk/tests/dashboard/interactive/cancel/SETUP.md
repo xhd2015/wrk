@@ -18,7 +18,8 @@ linked-wt (ahead) + WRK_DASHBOARD_ACTION=cancel
 3. Run bare `wrk` from linked worktree (non-TTY harness).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupDashboardLinkedAhead(t, req)
 	setDashboardAction(t, req, "cancel", false /* dryRun */)
 	req.Args = nil

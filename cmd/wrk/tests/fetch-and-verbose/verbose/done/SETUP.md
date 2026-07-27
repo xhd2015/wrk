@@ -7,7 +7,8 @@ linked wt already-included -> wrk --done -v -> stderr merge and/or worktree remo
 ```
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

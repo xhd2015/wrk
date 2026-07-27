@@ -11,7 +11,9 @@ wrk --add (no path) -> non-zero exit
 1. Run `wrk --add` with no following path argument.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--add"}
 	return nil
 }

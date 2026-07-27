@@ -24,7 +24,14 @@ consumer (git, no go.mod) + mydep (module example.com/dep)
 3. Run `wrk --bring <dep>` from the consumer.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := filepath.Join(req.WorkRoot, "consumer")
 	initGitRepoOnMain(t, consumer)
 	// NO go.mod at repo root. No go.mod in any subdirectory.

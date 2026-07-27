@@ -27,7 +27,8 @@ sourceMain (git repo with modules)
 - Missing tags are per-module soft omissions into Missing, not a hard inventory error.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Op = OpSourceReleases
 	return nil
 }

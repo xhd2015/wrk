@@ -16,7 +16,8 @@ wrk <mainRepo> -t 'ship feature' --open-in-agent
 2. Run with `--open-in-agent` and a task.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupCreateUXFromFakeHome(t, req)
 	req.TaskDesc = "ship feature"
 	req.TaskFlag = "-t"

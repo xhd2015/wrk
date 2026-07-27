@@ -15,7 +15,9 @@ wrk --status -> primary main + ListLinked order; no ---- external ----
 3. Run `wrk --status` from main root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, _, _ := setupWrkWorktreeFromMain(t, req)
 	createSecondExternalWrkWorktree(t, req, mainRepo)
 	req.RepoDir = mainRepo

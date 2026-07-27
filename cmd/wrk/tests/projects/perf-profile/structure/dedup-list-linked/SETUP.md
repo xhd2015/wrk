@@ -12,7 +12,9 @@ main repo + 3 linked worktrees -> exactly one list_linked phase in perf log
 2. Assert perf log records only one `list_linked*` phase per project.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensurePerfProfileHelpersUsed()
 	setupPerfProfileRepo(t, req, "perf-dedup", 3)
 	return nil

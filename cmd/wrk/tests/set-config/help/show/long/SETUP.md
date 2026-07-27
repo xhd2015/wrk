@@ -12,7 +12,9 @@ workspace/ -> wrk --set-config --show --help
 1. Run `wrk --set-config --show --help` with empty config (help only).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = setConfigArgs("--show", "--help")
 	return nil
 }

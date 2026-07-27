@@ -27,7 +27,9 @@ wrk --open-in-agen
 - Desired: last byte of stderr is `\n` (prefer `Fprintln` / single append).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	// Parse-time hard error; cwd need not be a git checkout.
 	req.RepoDir = req.WorkRoot
 	req.Args = []string{"--open-in-agen"}

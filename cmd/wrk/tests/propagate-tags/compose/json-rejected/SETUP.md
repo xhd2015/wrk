@@ -15,7 +15,9 @@ workspace/ -> wrk --tag-next --propagate-tags --json
 2. Run compose with `--json`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.RepoDir = initNeutralCwd(t, req.WorkRoot, "workspace")
 	req.Args = []string{"--tag-next", "--propagate-tags", "--json"}
 	return nil

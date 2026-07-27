@@ -34,9 +34,11 @@ myrepo (main) [+ existing linked WTs]
 import (
 	"path/filepath"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Parent target-dir Setup already inits myrepo + TargetDir/RepoDir.
 	ensureNamedBringReuseHelpersUsed()
 	return nil

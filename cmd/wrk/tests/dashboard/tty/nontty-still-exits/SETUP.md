@@ -15,7 +15,8 @@ linked-wt (clean) -> wrk  (harness pipes; no ACTION)
 3. Assert P2 snapshot core (process does not hang).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupDashboardLinkedWorktree(t, req)
 	req.Args = nil
 	req.ExtraEnv = nil

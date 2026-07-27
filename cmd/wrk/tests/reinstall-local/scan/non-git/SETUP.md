@@ -25,7 +25,8 @@ workDir (non-git) + useMain=false
 - Error when no go.mod is found lives under `error/no-go-mod`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.UseMain = false
 	req.WantError = false
 	req.WantErrSubstrs = []string{}

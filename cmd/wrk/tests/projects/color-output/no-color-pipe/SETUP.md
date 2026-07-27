@@ -13,7 +13,9 @@ tracked clean project -> wrk --projects (pipe) -> no ANSI, Worktrees:    aligned
 3. Run `wrk --projects` (no `--color`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureColorOutputHelpersUsed()
 	origin := setupColorBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupColorTrackedMainRepo(t, req.WorkRoot, "plain", origin, "plain project")

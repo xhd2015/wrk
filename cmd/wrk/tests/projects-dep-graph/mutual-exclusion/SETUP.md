@@ -18,7 +18,8 @@ wrk --projects-dep-graph + --projects|--list
 - Same exclusive-mode family as bare `--projects`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	depGraphEnsureHelpersUsed()
 	return nil
 }

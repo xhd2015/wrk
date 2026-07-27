@@ -43,8 +43,12 @@ HOME=FakeHome
 
 ```go
 import (
+
 	"os/exec"
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+
+	"os"
 )
 
 // seedScanGitReposNoDebug runs a quiet first scan so the product default mirror
@@ -80,7 +84,8 @@ func forceScanDebugEnvOff(req *Request) {
 	req.ExtraEnv = append(req.ExtraEnv, "WRK_SCAN_DEBUG=")
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Isolate HOME → product default cache under sandbox only.
 	req.FakeHome = req.WorkRoot
 

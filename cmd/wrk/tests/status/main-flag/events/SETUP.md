@@ -22,7 +22,8 @@ wrk --main --status -> events.jsonl last:
 - `command` is `"status"` (not `"main"`); shell is not launched.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureMainFlagHelpersUsed()
 	return nil
 }

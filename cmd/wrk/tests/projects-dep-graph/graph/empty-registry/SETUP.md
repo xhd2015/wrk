@@ -18,9 +18,12 @@
 import (
 	"os"
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	// WRK_HOME exists but projects.json is intentionally absent.
 	if _, err := os.Stat(filepath.Join(req.WrkHome, "projects.json")); err == nil {
 		t.Fatalf("projects.json should be absent for empty-registry leaf")

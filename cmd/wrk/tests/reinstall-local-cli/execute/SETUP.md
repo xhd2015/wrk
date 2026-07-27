@@ -31,7 +31,8 @@ mod/ + gobin/ -> wrk --reinstall-local
 - Summary always: `reinstalled N, skipped M, failed F\n`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: execute path defaults (no --dry-run).
 	req.Args = []string{"--reinstall-local"}
 	return nil

@@ -12,7 +12,8 @@ wrk -t 'ship feature' --new-window --new-terminal --open-in-agent
 1. Run full flag set with task.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.TaskDesc = "ship feature"
 	req.TaskFlag = "-t"
 	req.Args = []string{"--new-window", "--new-terminal", "--open-in-agent"}

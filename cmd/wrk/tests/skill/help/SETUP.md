@@ -13,7 +13,7 @@ wrk skill | wrk skill --help | wrk skill -h
 - Descendants set empty skill args or help flags only (no action flag).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	ensureSkillHelpersUsed()
 	return nil
 }

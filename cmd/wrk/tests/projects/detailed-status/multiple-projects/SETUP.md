@@ -13,7 +13,9 @@ wrk --add aaa + wrk --add zzz -> wrk --projects -> two blocks, blank line separa
 3. Run `wrk --projects`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureDetailedStatusHelpersUsed()
 	originA := setupBareOrigin(t, req.WorkRoot, "origin-aaa")
 	originZ := setupBareOrigin(t, req.WorkRoot, "origin-zzz")

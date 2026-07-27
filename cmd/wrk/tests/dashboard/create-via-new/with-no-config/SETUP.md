@@ -16,7 +16,8 @@ myrepo -> wrk --new --no-config
 3. Run `wrk --new --no-config`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Args = []string{"--new", "--no-config"}
 	return nil
 }

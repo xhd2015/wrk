@@ -19,7 +19,8 @@ wrk --web + another mode flag (--list, --status, …)
   (e.g. `wrk: --web is mutually exclusive with other modes`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Error path: run wrk to completion (not the long-running WebProbe path).
 	req.WebProbe = false
 	req.WebPath = ""

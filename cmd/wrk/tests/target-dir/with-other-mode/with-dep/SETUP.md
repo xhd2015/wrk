@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"github.com/xhd2015/doctest/session"
 )
 
 const tdDepModulePath = "example.com/dep"
@@ -40,7 +41,9 @@ func tdRunGo(t *testing.T, dir string, args ...string) {
 	}
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	skipIfNoGit(t)
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf("go not found in PATH: %w", err)

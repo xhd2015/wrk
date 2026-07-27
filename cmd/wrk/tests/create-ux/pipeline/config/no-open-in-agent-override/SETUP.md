@@ -13,7 +13,8 @@ config agent on + terminal new; wrk --no-open-in-agent
 2. Run bare create with `--no-open-in-agent`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	writeCreateUXConfig(t, req.WrkHome, map[string]interface{}{
 		"terminal": map[string]interface{}{"mode": "new"},
 		"agent": map[string]interface{}{

@@ -18,7 +18,9 @@ myrepo (v0.0.1) + wt (feature-work)
 3. Run `wrk --merge-back --tag-next --dry-run` without `-y`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupMergeBackPipelineLocal(t, req)
 	recordMergeBackDryRunBaseline(t, req)
 	req.Args = []string{"--merge-back", "--tag-next", "--dry-run"}

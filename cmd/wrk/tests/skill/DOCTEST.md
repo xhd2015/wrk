@@ -1,11 +1,13 @@
 # wrk skill — flag actions `--list` / `--show` / `--install`
 
 ## Version
-0.0.2
+0.0.3
 
 Decision tree for `wrk skill`: early-dispatched flag actions that read the wrk
-skill from `//go:embed SKILL.md` in the wrk binary and optionally install
-`SKILL.md` to agent tool directories. No git checkout is required.
+skill from `//go:embed SKILL.md` and optionally install `SKILL.md` to agent tool
+directories. No git checkout is required.
+
+**Layer:** L2 in-process CLI via `wrkcli.Capture` (short path — not binary e2e).
 
 # DSN (Domain Specific Notion)
 
@@ -13,8 +15,9 @@ skill from `//go:embed SKILL.md` in the wrk binary and optionally install
   `skill` is mutually exclusive with all other wrk modes/flags (`--done`,
   create, etc.). Skill-local flags (`--list`/`-l`, `--show`, `--install`) are
   skill actions, not wrk project-list modes.
-- **Embedded SKILL.md** — `go-pkgs/wrkcli/SKILL.md` is compiled into the wrk
-  binary via `//go:embed`; no filesystem skills project lookup at runtime.
+- **Embedded SKILL.md** — `wrkcli/SKILL.md` is compiled into the package via
+  `//go:embed`; no filesystem skills project lookup at runtime.
+- **Run** — `wrkcli.Capture` with `Dir=RepoDir` and `WRK_HOME` env only.
 - **Shape 1 single skill** — no skill name argument; one embedded skill (`wrk`).
 - **Action flags (exactly one)** — `--list` / `-l`, `--show`, or `--install`
   select the skill action. Subcommands `list` / `show` / `install` are rejected.
@@ -76,20 +79,21 @@ skill/
 ## How to Run
 
 ```sh
-doctest vet ./tests/skill
-doctest test ./tests/skill
-doctest test ./tests/skill/list/basic
-doctest test ./tests/skill/show/header
-doctest test ./tests/skill/help/empty
-doctest test ./tests/skill/reject-old-subcommand/list
-doctest test ./tests/skill/install/dry-run-cursor
+doctest vet ./cmd/wrk/tests/skill
+doctest test ./cmd/wrk/tests/skill
+doctest test ./cmd/wrk/tests/skill/list/basic
+doctest test ./cmd/wrk/tests/skill/show/header
+doctest test ./cmd/wrk/tests/skill/help/empty
+doctest test ./cmd/wrk/tests/skill/reject-old-subcommand/list
+doctest test ./cmd/wrk/tests/skill/install/dry-run-cursor
 ```
 
 ```go
 import (
-	"bytes"
-	"os/exec"
 	"testing"
+
+	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/wrk/wrkcli"
 )
 
 type Request struct {
@@ -105,32 +109,17 @@ type Response struct {
 	ExitCode int
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
-	bin := getWrkBin(t)
-
-	args := append([]string(nil), req.Args...)
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	cmd.Env = skillWrkEnv(req)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			return nil, err
-		}
-	}
-
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
+	_ = d // inject context available; Capture uses explicit Dir/Env only
+	res := wrkcli.Capture(wrkcli.CaptureOpts{
+		Args: append([]string(nil), req.Args...),
+		Dir:  req.RepoDir,
+		Env:  skillCaptureEnv(req),
+	})
 	return &Response{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		ExitCode: exitCode,
+		Stdout:   res.Stdout,
+		Stderr:   res.Stderr,
+		ExitCode: res.ExitCode,
 	}, nil
 }
 ```

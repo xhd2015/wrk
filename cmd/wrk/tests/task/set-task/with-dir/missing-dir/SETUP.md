@@ -13,7 +13,14 @@ wrk <nonexistent> --set-task "task" -> non-zero exit, "does not exist"
 3. Verify non-zero exit with "does not exist" error.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.RepoDir = req.WorkRoot
 	req.TargetDir = filepath.Join(req.WorkRoot, "nonexistent-dir")
 	req.SetTaskDesc = "my task"

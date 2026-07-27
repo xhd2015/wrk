@@ -14,7 +14,8 @@ source bash.sh from wtA; wrk --done <wtB>
 2. Run wrapper `wrk --done <wtB>` with StartDir = wtA.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	// A is only the surviving shell cwd; B is the operated tree.
 	wtA := runWrkWithArgs(t, req, mainRepo)

@@ -13,7 +13,9 @@ git repo + prerelease head -> wrk --tag-next -> 0 tag created
 2. Run `wrk --tag-next`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupPrereleaseSkipRepo(t, req)
 	req.Args = []string{"--tag-next"}
 	return nil

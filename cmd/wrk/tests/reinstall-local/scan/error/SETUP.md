@@ -25,7 +25,8 @@ workDir (empty / no go.mod, non-git)
   surface a clear CLI message later.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.UseMain = false
 	req.WantError = true
 	return nil

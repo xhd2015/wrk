@@ -12,7 +12,9 @@ wrk --bash-integration --complete -- wrk --status be 2 -> beta
 2. Complete value position after `--status` with prefix `be`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	req.InProcess = true
+	_ = d
 	seedStandardProjects(req)
 	req.CompleteWords = []string{"wrk", "--status", "be"}
 	req.CompleteCWord = 2

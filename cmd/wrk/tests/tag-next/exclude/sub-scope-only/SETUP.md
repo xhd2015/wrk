@@ -13,7 +13,9 @@ git repo + scoped tags -> wrk --tag-next -> root skip, sub bump
 2. Run `wrk --tag-next`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupSubScopeOnlyRepo(t, req)
 	req.Args = []string{"--tag-next"}
 	return nil

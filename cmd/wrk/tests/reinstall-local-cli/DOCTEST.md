@@ -354,6 +354,9 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+
+	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/wrk/wrkcli"
 )
 
 // Request drives the wrk binary under GOBIN isolation.
@@ -367,6 +370,11 @@ type Request struct {
 	BinDir     string // GOBIN for this leaf ({WorkRoot}/gobin)
 	Args       []string
 	ExtraEnv   []string // additional KEY=VAL (GOBIN is always set by Run)
+
+	// InProcess runs via wrkcli.Capture (L2 short path) instead of the product binary.
+	// Prefer for help / mutual-exclusion leaves that do not need a process boundary.
+	// Leave false (default) for true L3 e2e integration.
+	InProcess bool
 }
 
 type Response struct {
@@ -375,10 +383,25 @@ type Response struct {
 	ExitCode int
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
+	adoptDoctestContext(d)
+	args := append([]string(nil), req.Args...)
+
+	if req.InProcess {
+		res := wrkcli.Capture(wrkcli.CaptureOpts{
+			Args: args,
+			Dir:  req.ModuleRoot,
+			Env:  reinstallLocalCLIEnv(req),
+		})
+		return &Response{
+			Stdout:   res.Stdout,
+			Stderr:   res.Stderr,
+			ExitCode: res.ExitCode,
+		}, nil
+	}
+
 	bin := getWrkBin(t)
 
-	args := append([]string(nil), req.Args...)
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = req.ModuleRoot
 	cmd.Env = reinstallLocalCLIEnv(req)

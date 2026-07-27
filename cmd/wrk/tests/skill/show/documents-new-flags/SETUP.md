@@ -14,7 +14,7 @@ workspace/ -> wrk skill --show
 2. Assert embedded skill text names the new flags (P8 polish).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.Args = []string{"skill", "--show"}
 	return nil
 }

@@ -7,9 +7,14 @@ main repo cwd -> wrk --list -v -> stdout = git worktree list; stderr empty
 ```
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repo := filepath.Join(req.WorkRoot, "list-v-main")
 	initFetchVerboseRepo(t, repo, "list v main")
 	req.RepoDir = repo

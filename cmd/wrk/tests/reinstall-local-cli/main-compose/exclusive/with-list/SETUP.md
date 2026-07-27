@@ -14,7 +14,9 @@ workspace/ -> wrk --main --reinstall-local --list
    required; exclusion should fire before planning / shell).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--main", "--reinstall-local", "--list"}
 	return nil
 }

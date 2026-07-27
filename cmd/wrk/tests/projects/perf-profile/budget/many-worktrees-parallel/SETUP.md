@@ -12,7 +12,9 @@ main repo + 12 linked worktrees -> wrk --projects perf budget
 2. Assert perf log budgets encoding the parallel-gather fix.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensurePerfProfileHelpersUsed()
 	setupPerfProfileRepo(t, req, "perf-budget", 12)
 	return nil

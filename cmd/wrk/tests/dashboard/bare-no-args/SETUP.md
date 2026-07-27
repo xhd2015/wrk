@@ -15,7 +15,8 @@ myrepo -> wrk
 - Critical assertion: no new path under worktrees from create.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupDashboardMainRepo(t, req)
 	req.Args = nil
 	return nil

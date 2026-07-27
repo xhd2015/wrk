@@ -20,7 +20,9 @@ consumer/external/mydep-main-{date}-1
 4. Run `wrk --bring <dep>` via `Run`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureBringReuseHelpersUsed()
 
 	consumer := initBringConsumerRepo(t, req.WorkRoot, true)

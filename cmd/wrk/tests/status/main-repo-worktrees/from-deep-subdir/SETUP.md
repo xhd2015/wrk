@@ -20,9 +20,13 @@ wrk --status -> main Dir: absolute (Rel would be ../../../..); Remote still pres
 - External also absolute under the same rule.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	req.InProcess = true
 	mainRepo, _, _ := createExternalWrkWorktree(t, req)
 	subdir := filepath.Join(mainRepo, "a", "b", "c", "d")
 	mkdirAll(t, subdir)

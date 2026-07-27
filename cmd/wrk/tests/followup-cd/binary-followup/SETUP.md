@@ -16,7 +16,8 @@ WRK_FOLLOWUP_FILE=tmp wrk <mode> -> file contains 0..1 lines: cd /abs
 2. Descendants configure CLI args, env, and git fixtures.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	req.Mode = "binary"
 	if req.FollowupFile == "" {

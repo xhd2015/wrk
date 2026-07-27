@@ -11,7 +11,8 @@ wrk --fetch [other mode] -> exit 1, stderr --fetch is only valid with --projects
 - Descendants set `req.Args` to invalid `--fetch` combinations.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureFetchVerboseHelpersUsed()
 	req.RepoDir = req.WorkRoot
 	return nil

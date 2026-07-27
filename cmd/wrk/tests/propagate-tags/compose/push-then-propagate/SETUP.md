@@ -20,9 +20,12 @@ cwd=lib -> wrk --tag-next --propagate-tags --push
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupComposeRootBump(t, req, true)
 	// Advance source after origin was seeded so tags-only push cannot satisfy
 	// "branch tip on origin" (origin lags source HEAD). Re-capture snapshots.

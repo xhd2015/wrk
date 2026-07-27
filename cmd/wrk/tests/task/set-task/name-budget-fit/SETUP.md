@@ -20,9 +20,12 @@ wrk --set-task <long desc> (WRK_SET_TASK_CONFIRM=1)
 import (
 	"path/filepath"
 	"strings"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	skipIfNoGit(t)
 	basename := strings.Repeat("r", 180)
 	mainRepo := filepath.Join(req.WorkRoot, basename)

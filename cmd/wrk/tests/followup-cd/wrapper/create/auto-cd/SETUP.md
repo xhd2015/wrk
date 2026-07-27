@@ -14,7 +14,8 @@ wrk <mainRepo> -> stderr "cd <worktree>"; FinalPWD = worktree; exit 0
 2. Invoke `wrk <mainRepo>` via installed wrapper (default auto-cd on).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	req.RepoDir = mainRepo
 	// Shell cwd is exact user home so create home gate opens.

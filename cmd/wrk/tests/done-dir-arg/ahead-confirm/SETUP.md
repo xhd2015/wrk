@@ -14,7 +14,9 @@ myrepo (main) + wt (main-{date}) -> ahead commit on wt -> wrk --done <wtDir> --c
 3. Run `wrk --done --confirm-from-stdin <wtDir>` from WorkRoot with "\n" on stdin.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	_, wtDir, _ := setupWrkWorktreeFromMain(t, req)
 
 	commitAheadOnWorktree(t, wtDir, "feature-work", "ahead work")

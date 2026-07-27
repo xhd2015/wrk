@@ -12,7 +12,9 @@ stale tracking ref fixture + wrk --projects --fetch -> needs pull(1 commit behin
 2. Record and run `wrk --projects --fetch`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	origin := setupFetchVerboseBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupFetchVerboseTrackedRepo(t, req.WorkRoot, "fetch-behind", origin, "fetch behind base")
 	pushCommitToFetchVerboseOrigin(t, req.WorkRoot, origin, "remote-only.txt", "remote\n", "on origin only")

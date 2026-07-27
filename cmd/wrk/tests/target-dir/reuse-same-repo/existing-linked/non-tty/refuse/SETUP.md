@@ -14,7 +14,9 @@
 2. Run `wrk myrepo {WorkRoot}/target` without TTY (default doctest pipe).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	paths := namedBringExistingWorktrees(t, req, 1)
 	req.WtDir = paths[0]
 	return nil

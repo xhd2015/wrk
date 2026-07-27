@@ -13,7 +13,9 @@ myrepo (main only) -> wrk --sync --dry-run -> exit 0, would: zero summary
 2. Run `wrk --sync --dry-run` from the main repo.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	initMainOnlyRepo(t, req)
 	req.Args = []string{"--sync", "--dry-run"}
 	return nil

@@ -13,13 +13,19 @@
 3. Run `wrk --dep`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := initConsumerRepo(t, req.WorkRoot, false)
-	dep := initDepRepo(t, req.WorkRoot, "mydep", true)
+	depPath := initDepRepo(t, req.WorkRoot, "mydep", true)
 
 	req.RepoDir = consumer
-	req.DepPath = dep
-	req.Args = []string{"--dep", dep}
+	req.DepPath = depPath
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

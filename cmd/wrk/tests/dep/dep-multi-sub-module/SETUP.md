@@ -20,6 +20,10 @@ consumer (requires dep/b) + dep (a/ and b/) -> wrk --dep -> replace => <external
 3. Run `wrk --dep <dep>`.
 
 ```go
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
 import "path/filepath"
 
 const depModulePathA = "example.com/dep/a"
@@ -27,17 +31,17 @@ const depModulePathB = "example.com/dep/b"
 
 func initDepRepoMultiSub(t *testing.T, workRoot, name string) string {
 	t.Helper()
-	dep := filepath.Join(workRoot, name)
-	initGitRepoOnMain(t, dep)
+	depPath := filepath.Join(workRoot, name)
+	initGitRepoOnMain(t, depPath)
 	for _, sub := range []string{"a", "b"} {
-		subDir := filepath.Join(dep, sub)
+		subDir := filepath.Join(depPath, sub)
 		mkdirAll(t, subDir)
 		writeFile(t, filepath.Join(subDir, "go.mod"), "module example.com/dep/"+sub+"\n\ngo 1.22\n")
 		writeFile(t, filepath.Join(subDir, sub+".go"), "package "+sub+"\n")
 	}
-	runGitIsolated(t, dep, "add", ".")
-	runGitIsolated(t, dep, "commit", "-m", "add sub modules")
-	return dep
+	runGitIsolated(t, depPath, "add", ".")
+	runGitIsolated(t, depPath, "commit", "-m", "add sub modules")
+	return depPath
 }
 
 func initConsumerRepoRequiringB(t *testing.T, workRoot string) string {
@@ -55,15 +59,17 @@ func initConsumerRepoRequiringB(t *testing.T, workRoot string) string {
 	return consumer
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := initConsumerRepoRequiringB(t, req.WorkRoot)
-	dep := initDepRepoMultiSub(t, req.WorkRoot, "mydep")
+	depPath := initDepRepoMultiSub(t, req.WorkRoot, "mydep")
 
 	req.RepoDir = consumer
-	req.DepPath = dep
+	req.DepPath = depPath
 	req.ConsumerTop = consumer
 	req.DepModulePath = depModulePathB
-	req.Args = []string{"--dep", dep}
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

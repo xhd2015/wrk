@@ -1,3 +1,4 @@
+
 ## Expected Output
 
 ```
@@ -28,7 +29,8 @@ warning: bin foo: ambiguous under script (./script/foo/install, ./script/x/foo/i
 - 0
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
 	want := "would: go install ./cmd/foo\nwould: reinstall 1 binaries (0 skipped)\n"

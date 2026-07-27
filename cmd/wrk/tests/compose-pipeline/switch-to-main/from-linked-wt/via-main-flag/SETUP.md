@@ -16,7 +16,8 @@ linked wt
 - Grouping only; leaves set fixtures and Args.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping node: git required for descendant compose fixtures.
 	skipIfNoGit(t)
 	return nil

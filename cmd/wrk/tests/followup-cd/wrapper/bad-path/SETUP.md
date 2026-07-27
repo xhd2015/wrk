@@ -12,7 +12,8 @@ fake wrk writes cd /missing; real wrapper executes cd
 1. Descendants install wrapper and use fake wrk on PATH.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "wrapper")
 	return nil
 }

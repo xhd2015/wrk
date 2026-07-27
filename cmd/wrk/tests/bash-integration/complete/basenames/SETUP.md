@@ -13,7 +13,9 @@ wrk --bash-integration --complete -- wrk al 1 -> alpha, alphalong
 2. Complete first positional with prefix `al`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	req.InProcess = true
+	_ = d
 	seedStandardProjects(req)
 	req.CompleteWords = []string{"wrk", "al"}
 	req.CompleteCWord = 1

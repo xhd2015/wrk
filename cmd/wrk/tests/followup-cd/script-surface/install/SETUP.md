@@ -11,7 +11,8 @@ wrk --bash-integration --install -> {WRK_HOME}/integration/bash.sh
 1. Set Mode to install.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Mode = "install"
 	return nil
 }

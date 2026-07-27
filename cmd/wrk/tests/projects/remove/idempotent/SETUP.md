@@ -12,7 +12,8 @@ wrk --rm twice -> second call exit 0, empty stdout
 - Descendants vary whether the path was never recorded or already removed.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureRemoveHelpersUsed()
 	return nil
 }

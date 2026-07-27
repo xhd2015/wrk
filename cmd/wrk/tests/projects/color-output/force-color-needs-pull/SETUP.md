@@ -13,7 +13,9 @@ main behind origin/main -> wrk --projects --color -> orange needs pull(1 commit 
 3. Record and run `wrk --projects --color`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureColorOutputHelpersUsed()
 	withProjectsColor(req)
 	origin := setupColorBareOrigin(t, req.WorkRoot, "origin")

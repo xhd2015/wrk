@@ -18,7 +18,9 @@ myrepo + wtA (ahead)
 2. Run `wrk --merge-back -y --sync` from the worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	skipIfNoGit(t)
 	_, wtDir, _ := setupWrkWorktreeFromMain(t, req)
 	commitAheadOnWorktree(t, wtDir, "feature-work", "ahead of main")

@@ -13,7 +13,12 @@ saved/<basename> recorded -> wrk --dep sub/<basename> -> does not exist (no fall
 - Run `wrk --dep <path-with-separator>` from consumer cwd without that relative path.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureDepBasenameFallbackHelpersUsed()
 	return nil
 }

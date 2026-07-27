@@ -12,7 +12,7 @@ workspace/ -> wrk skill --list --done -> non-zero, mutually exclusive
 1. Run `wrk skill --list --done` from neutral cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.Args = []string{"skill", "--list", "--done"}
 	return nil
 }

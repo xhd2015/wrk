@@ -17,7 +17,8 @@ git checkout cwd -> wrk --status -> status blocks rooted at checkout top
 - `req.RepoDir` is the process cwd for invoking `wrk --status`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Args = []string{"--status"}
 	return nil
 }

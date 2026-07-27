@@ -1,3 +1,4 @@
+
 ## Expected
 
 - Exit code 42 (propagated from fake shell).
@@ -10,9 +11,12 @@
 - 42
 
 ```go
-import "github.com/xhd2015/doctest/assert"
+import (
+	"github.com/xhd2015/doctest/assert"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 42 {
 		t.Fatalf("expected exit 42 from shell, got %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)

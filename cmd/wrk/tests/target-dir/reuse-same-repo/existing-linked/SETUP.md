@@ -19,7 +19,13 @@ myrepo + existing linked WT(s)
 - This grouping ensures helpers; leaves create prior linked WTs and set TTY/stdin.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureNamedBringReuseHelpersUsed()
 	target := filepath.Join(req.WorkRoot, "target")
 	mkdirAll(t, target)

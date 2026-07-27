@@ -1,3 +1,8 @@
+---
+label: e2e
+explanation: product binary CLI integration (process boundary)
+---
+
 ## Expected Output
 
 ```
@@ -28,9 +33,11 @@ bashrc: {HOME}/.bashrc (marker is up to date)
 import (
 	"os"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertExit0(t, resp, err)
 	assertInstallReport(t, resp, "is up to date", "is up to date", "is up to date", "is up to date")
 	if _, statErr := os.Stat(resp.BashShPath); statErr != nil {

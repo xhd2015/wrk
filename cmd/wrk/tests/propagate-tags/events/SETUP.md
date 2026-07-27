@@ -17,7 +17,8 @@ source repo -> wrk --propagate-tags --dry-run -> event logged under WRK_HOME
 - Descendants run a successful bare `--propagate-tags` and assert the last event.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	propTagsEnsureHelpersUsed()
 	return nil
 }

@@ -16,9 +16,12 @@ wrk --bash-integration --install -> {custom}/integration/bash.sh + marker source
 import (
 	"os"
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.WrkHome = filepath.Join(req.WorkRoot, "custom-wrk")
 	return os.MkdirAll(req.WrkHome, 0o755)
 }

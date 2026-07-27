@@ -24,7 +24,9 @@ repo/ (1 staged) -> wrk --gen-commit-msg --agent-runner opencode --agent-runner-
 4. Run wrk with agent-runner flags; no `--commit`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	stageOneTextFile(t, req)
 	req.HEADSubject = gitHEADSubject(t, req.RepoDir)
 	writeMockConfig(t, req, mockConfigAddFeature)

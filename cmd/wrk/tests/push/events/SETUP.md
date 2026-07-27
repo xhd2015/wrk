@@ -14,7 +14,9 @@ myrepo + origin -> wrk --push
 3. Assert last events.jsonl event (do not re-invoke wrk before read).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupPushMainWithOrigin(t, req)
 	req.Args = []string{"--push"}
 	return nil

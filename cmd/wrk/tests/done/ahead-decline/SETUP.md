@@ -14,7 +14,9 @@ myrepo + wt -> commit on wt -> wrk --done --confirm --confirm-from-stdin (n) -> 
 3. Run `wrk --done --confirm --confirm-from-stdin` with `n\n` on stdin.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	_, wtDir, _ := setupWrkWorktreeFromMain(t, req)
 
 	commitAheadOnWorktree(t, wtDir, "feature-work", "ahead of main")

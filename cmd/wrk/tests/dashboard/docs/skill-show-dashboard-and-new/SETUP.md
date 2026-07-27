@@ -15,7 +15,9 @@ workspace/ -> wrk skill --show
 2. Assert agent-facing skill text reflects create entry change (P4).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"skill", "--show"}
 	return nil
 }

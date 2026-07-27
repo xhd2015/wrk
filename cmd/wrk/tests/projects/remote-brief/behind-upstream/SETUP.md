@@ -13,7 +13,9 @@ main tracked to origin/main -> origin has extra commit -> Remote: needs pull(1 c
 3. Record and run `wrk --projects`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureRemoteBriefHelpersUsed()
 	origin := setupRemoteBriefBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupRemoteBriefTrackedRepo(t, req.WorkRoot, "behind", origin, "behind base")

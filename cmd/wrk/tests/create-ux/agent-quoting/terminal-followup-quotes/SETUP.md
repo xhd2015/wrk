@@ -13,7 +13,8 @@ wrk -t 'fix "quoted" task' --new-terminal --open-in-agent
 2. Terminal + agent path.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.TaskDesc = `fix "quoted" task`
 	req.TaskFlag = "-t"
 	req.Args = []string{"--new-terminal", "--open-in-agent"}

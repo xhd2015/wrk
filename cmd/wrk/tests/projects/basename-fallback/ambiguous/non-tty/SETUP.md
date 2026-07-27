@@ -13,7 +13,9 @@ non-TTY wrk myrepo -> error listing both absolute paths; no worktree
 2. Run `wrk myrepo` from neutral cwd without `WRK_BASENAME_CONFIRM`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repoA := initSavedGitRepo(t, req.WorkRoot, "aaa", "myrepo")
 	repoZ := initSavedGitRepo(t, req.WorkRoot, "zzz", "myrepo")
 	recordSavedProject(t, req, repoA)

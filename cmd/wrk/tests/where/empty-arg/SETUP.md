@@ -11,7 +11,8 @@ wrk --where (no value) -> non-zero exit, requires argument error
 - Descendants invoke `wrk --where` without a following basename argument.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureWhereHelpersUsed()
 	return nil
 }```

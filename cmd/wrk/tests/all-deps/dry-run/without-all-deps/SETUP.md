@@ -13,7 +13,9 @@ wrk --dry-run -> error (host list: done|merge-back|all-deps|tag-next|propagate-t
 2. Run `wrk --dry-run` from the consumer (no `--all-deps`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	allDepsEnsureHelpersUsed()
 
 	consumer := initAllDepsConsumer(t, req.WorkRoot, []string{"example.com/dep1"}, "")

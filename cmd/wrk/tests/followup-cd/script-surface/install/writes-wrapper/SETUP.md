@@ -13,7 +13,8 @@ wrk --bash-integration --install
 1. Run install with no pre-seeded bash.sh.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "install")
 	if req.PreExistingBashSh != "" {
 		t.Fatalf("expected no pre-seeded bash.sh")

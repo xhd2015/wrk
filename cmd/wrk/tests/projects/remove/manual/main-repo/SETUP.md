@@ -13,7 +13,9 @@ wrk --add myrepo -> wrk --rm myrepo -> stdout main path; entry gone from project
 3. Run `wrk --rm <mainRepo>`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := initProjectsRepo(t, req.WorkRoot, "myrepo")
 	recordProjectViaAdd(t, req, mainRepo)
 	req.MainRepo = mainRepo

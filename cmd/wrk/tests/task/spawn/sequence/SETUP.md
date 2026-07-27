@@ -15,7 +15,14 @@ wrk --task "same task" (2nd) -> {basename}-{token}-{date}-same-task-1
 4. Verify first has no suffix; second has suffix 1.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	req.InProcess = true
+	_ = d
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo
 	initGitRepoOnMain(t, mainRepo)

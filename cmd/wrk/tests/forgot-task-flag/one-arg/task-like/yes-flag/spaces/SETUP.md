@@ -12,7 +12,8 @@ wrk "fix the login bug" -y   # cwd=myrepo
 1. setupOneArg spaces; parent adds `-y`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupOneArg(t, req, taskLikeSpaces)
 	return nil
 }

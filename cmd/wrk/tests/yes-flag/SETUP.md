@@ -21,7 +21,8 @@ cascade ahead on non-TTY -> -y (and bare --done) auto-yes cascade merge
 - TTY leaves set `req.UseScriptTTY = true` (runs wrk under `script`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

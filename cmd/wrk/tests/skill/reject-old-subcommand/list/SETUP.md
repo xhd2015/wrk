@@ -11,7 +11,7 @@ workspace/ -> wrk skill list -> non-zero; unknown / expected flag action
 1. Run `wrk skill list` (positional subcommand, not `--list`) from neutral cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.Args = []string{"skill", "list"}
 	return nil
 }

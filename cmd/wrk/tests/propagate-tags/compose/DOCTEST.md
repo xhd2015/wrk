@@ -100,6 +100,8 @@ import (
 	"bytes"
 	"os/exec"
 	"testing"
+	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/wrk/wrkcli"
 )
 
 type Request struct {
@@ -128,6 +130,11 @@ type Request struct {
 
 	// Optional env for Run (apply leaves set file:// GOPROXY for tidy).
 	ExtraEnv []string
+
+	// InProcess runs via wrkcli.Capture (L2 short path) instead of the product binary.
+	// Prefer for flag-layer reject leaves (e.g. json-rejected) that do not need a process boundary.
+	// Leave false (default) for true L3 e2e integration.
+	InProcess bool
 }
 
 type Response struct {
@@ -136,10 +143,25 @@ type Response struct {
 	ExitCode int
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
+	adoptDoctestContext(d)
+	args := append([]string(nil), req.Args...)
+
+	if req.InProcess {
+		res := wrkcli.Capture(wrkcli.CaptureOpts{
+			Args: args,
+			Dir:  req.RepoDir,
+			Env:  composeWrkEnv(req),
+		})
+		return &Response{
+			Stdout:   res.Stdout,
+			Stderr:   res.Stderr,
+			ExitCode: res.ExitCode,
+		}, nil
+	}
+
 	bin := getWrkBin(t)
 
-	args := append([]string(nil), req.Args...)
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = req.RepoDir
 	cmd.Env = composeWrkEnv(req)

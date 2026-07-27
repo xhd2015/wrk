@@ -25,7 +25,8 @@ moduleRoots (each with go.mod) + binDir
 - Group default: success path (no error).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.WantError = false
 	req.WantErrSubstrs = []string{}
 	return nil

@@ -14,7 +14,8 @@ wrk --new + --done | --list | --status
 - Mode validation must fail before create side effects.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupDashboardMainRepo(t, req)
 	return nil
 }

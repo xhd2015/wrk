@@ -14,7 +14,9 @@ workspace/ -> wrk --set-config --create --new-window --help
 2. Run `wrk --set-config --create --new-window --help`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = setConfigArgs("--create", "--new-window", "--help")
 	return nil
 }

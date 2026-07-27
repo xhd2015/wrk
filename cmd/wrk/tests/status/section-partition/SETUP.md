@@ -44,6 +44,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 
 	"github.com/xhd2015/wrk/wrkcli/storage"
 )
@@ -51,7 +52,8 @@ import (
 // Synthetic absolute fixture root (paths need not exist on disk).
 const fixtureRoot = "/section-partition-fixture"
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Root setup is intentionally light: pure-helper tree has no session
 	// binary build and no shared mutable fixtures. Leaves fill Request fields.
 	if req.ScanPaths == nil {

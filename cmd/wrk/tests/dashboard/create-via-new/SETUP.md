@@ -15,7 +15,8 @@ myrepo -> wrk --new [create flags...]
 - Optional create modifiers (`--no-config`, `-t`, …) remain create when combined with `--new`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupDashboardMainRepo(t, req)
 	return nil
 }

@@ -22,7 +22,8 @@ mixed discovery + partial binDir
 - Sort is by BinName only (not by method or path).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	if req.WantItems == nil {
 		req.WantItems = []WantPlanItem{}
 	}

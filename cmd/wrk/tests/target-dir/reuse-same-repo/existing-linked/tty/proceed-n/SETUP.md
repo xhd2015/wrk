@@ -16,7 +16,8 @@ myrepo-main-{date} exists
 2. Run named bring under fake TTY with stdin `n\n`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	paths := namedBringExistingWorktrees(t, req, 1)
 	req.WtDir = paths[0]
 	req.StdinInput = "n\n"

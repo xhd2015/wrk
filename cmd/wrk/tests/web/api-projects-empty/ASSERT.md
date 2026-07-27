@@ -1,3 +1,8 @@
+---
+label: e2e
+explanation: product binary CLI integration (process boundary)
+---
+
 ## Expected
 
 - `HTTPStatus` is 200.
@@ -18,9 +23,10 @@ import (
 	"strings"
 
 	"github.com/xhd2015/doctest/assert"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.HTTPStatus != 200 {
 		t.Fatalf("GET /api/wrk/projects expected 200, got %d body=%q stdout=%q stderr=%q",

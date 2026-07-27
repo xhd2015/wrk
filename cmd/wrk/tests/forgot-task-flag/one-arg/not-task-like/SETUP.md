@@ -12,7 +12,8 @@ wrk <existing-repo-path|basename>
 - Leaves provide a resolvable source positional.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping node: leaves configure positionals and interactive mode.
 	skipIfNoGit(t)
 	return nil

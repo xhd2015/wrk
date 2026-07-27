@@ -12,7 +12,8 @@ cwd/myrepo (non-git) + saved myrepo elsewhere -> wrk myrepo -> git error, no fal
 - Descendants create a non-git `./<basename>` in cwd and a saved project with the same basename elsewhere.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureBasenameFallbackHelpersUsed()
 	return nil
 }

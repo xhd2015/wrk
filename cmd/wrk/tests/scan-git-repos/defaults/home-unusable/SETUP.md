@@ -26,9 +26,12 @@ HOME=WorkRoot/not-a-dir-home  (file)
 import (
 	"os"
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	// File-as-home: stable rejection (missing dirs can be auto-created by tooling).
 	homeFile := filepath.Join(req.WorkRoot, "not-a-dir-home")
 	if err := os.WriteFile(homeFile, []byte("not a directory\n"), 0o644); err != nil {

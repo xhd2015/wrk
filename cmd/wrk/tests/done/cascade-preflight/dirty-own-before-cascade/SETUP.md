@@ -20,9 +20,12 @@ consumer dirty + clean external
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupCascadePreflightCleanContained(t, req)
 	writeFile(t, filepath.Join(req.WtDir, "dirty-own"), "uncommitted on consumer")
 	req.RepoDir = req.WtDir

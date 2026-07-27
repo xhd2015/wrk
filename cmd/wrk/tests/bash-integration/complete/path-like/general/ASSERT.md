@@ -1,3 +1,8 @@
+---
+label: e2e
+explanation: product binary CLI integration (process boundary)
+---
+
 ## Expected
 
 - Each path-like prefix (`./`, `../`, `/`) at positional cword 1 yields empty stdout.
@@ -14,9 +19,10 @@
 ```go
 import (
 	"testing"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}

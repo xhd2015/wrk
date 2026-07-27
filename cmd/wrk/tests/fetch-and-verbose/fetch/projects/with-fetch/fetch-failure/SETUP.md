@@ -12,7 +12,9 @@ tracked repo with unreachable origin + --fetch -> Remote: error: ... (exit 0)
 2. Record and run `wrk --projects --fetch`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	origin := setupFetchVerboseBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupFetchVerboseTrackedRepo(t, req.WorkRoot, "broken-fetch", origin, "broken fetch base")
 	runGitIsolated(t, repo, "remote", "set-url", "origin", "file:///nonexistent-wrk-fetch-failure.git")

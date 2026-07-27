@@ -25,7 +25,14 @@ repo/ (git)
 8. Expect multi dry-run covering both modules (scan root = git toplevel).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repo := filepath.Join(req.WorkRoot, "repo")
 	initGitRepoOnMain(t, repo)
 

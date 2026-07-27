@@ -19,7 +19,9 @@ broken scan block -> Dir: vendor/host/broken-wt + Status: error: ... ; siblings 
 2. Run `wrk --status` from `{WorkRoot}/myrepo`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureNestedBrokenLinkedHelpersUsed()
 	setupNestedBrokenLinkedFixture(t, req)
 	return nil

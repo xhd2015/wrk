@@ -21,12 +21,15 @@ consumer wt + external wt + deps/foo wt -> wrk --done -> both removed, consumer 
 import (
 	"os/exec"
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
 const cascadeBothDepModule = "example.com/dep"
 const cascadeBothFooModule = "example.com/foodep"
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	skipIfNoGit(t)
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Fatalf("go not found: %v", err)

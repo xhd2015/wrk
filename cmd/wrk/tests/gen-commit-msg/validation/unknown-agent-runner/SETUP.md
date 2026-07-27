@@ -19,7 +19,9 @@ repo/ (1 staged) -> wrk --gen-commit-msg --dry-run --agent-runner codex
 2. Run with `--dry-run --agent-runner codex`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	stageOneTextFile(t, req)
 	req.Args = []string{"--gen-commit-msg", "--dry-run", "--agent-runner", "codex"}
 	return nil

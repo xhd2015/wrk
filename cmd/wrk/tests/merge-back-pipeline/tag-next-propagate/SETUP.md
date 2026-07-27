@@ -18,7 +18,9 @@ linked wt + registered app
 2. Run `wrk --merge-back -y --tag-next --propagate-tags` from linked worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupMergeBackPipelinePropagateTagNext(t, req)
 	req.Args = []string{"--merge-back", "-y", "--tag-next", "--propagate-tags"}
 	return nil

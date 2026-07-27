@@ -16,7 +16,8 @@ wrk --tag-next --dry-run --json -> JSON only
 - Descendants set `req.Args` including `--json`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	tagNextEnsureHelpersUsed()
 	return nil

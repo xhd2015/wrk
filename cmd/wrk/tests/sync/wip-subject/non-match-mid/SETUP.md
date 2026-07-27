@@ -11,7 +11,8 @@ IsWipSubject("chore: wip: later") -> false
 1. Set subject to `chore: wip: later` (`wip:` appears after another prefix).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Subject = "chore: wip: later"
 	return nil
 }

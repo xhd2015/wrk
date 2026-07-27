@@ -17,7 +17,9 @@ linked-wt -> wrk --main --reinstall-local --dry-run
 3. Expect multi dry-run for **main** modules only.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	// Parent from-linked-wt sets ModuleRoot=linked-wt and compose Args.
 	req.Args = []string{"--main", "--reinstall-local", "--dry-run"}
 	return nil

@@ -12,7 +12,9 @@ wt ahead -> wrk --merge-back -y (non-TTY) -> exit 0; merged, wt kept
 2. Run `wrk --merge-back -y` from the worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	_, wtDir, _ := setupWrkWorktreeFromMain(t, req)
 	commitAheadOnWorktree(t, wtDir, "feature-work", "ahead of main")
 	req.RepoDir = wtDir

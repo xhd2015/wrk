@@ -13,9 +13,14 @@ myrepo (clean) -> wrk --status from main -> scan block only (unchanged)
 2. Run `wrk --status` from the main repo root.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	initMainRepo(t, mainRepo, "status main root")
 

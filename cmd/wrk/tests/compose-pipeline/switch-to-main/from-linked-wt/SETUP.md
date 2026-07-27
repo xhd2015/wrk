@@ -15,7 +15,8 @@ linked wt -> wrk --main --sync --tag-next … -> activeRoot := main at start; wt
 - Grouping: done/merge-back success leaves at this level; `via-main-flag/` for scope rewrite without done.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping node: git required for descendant compose fixtures.
 	skipIfNoGit(t)
 	return nil

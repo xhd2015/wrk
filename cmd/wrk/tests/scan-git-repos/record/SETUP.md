@@ -20,7 +20,8 @@ wrk --scan-git-repos <scan-root>
 - Descendants place one or more git checkouts under the scan root and set Args.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: success-path record leaves share scan helpers.
 	ensureScanGitReposHelpersUsed()
 	return nil

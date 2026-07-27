@@ -12,7 +12,8 @@ wrk --bash-integration --install -> script under custom path; marker uses $WRK_H
 1. Descendants set custom `req.WrkHome`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Mode = "install"
 	req.DryRun = false
 	return nil

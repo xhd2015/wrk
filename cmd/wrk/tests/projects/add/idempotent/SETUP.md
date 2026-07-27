@@ -13,7 +13,9 @@ wrk --list (auto) then wrk --add <same main> -> single entry, source stays auto
 3. Run `wrk --add <mainRepo>`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := initProjectsRepo(t, req.WorkRoot, "myrepo")
 	runWrkWithArgs(t, req, mainRepo, "--list")
 	req.MainRepo = mainRepo

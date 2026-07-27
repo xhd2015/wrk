@@ -18,7 +18,8 @@ wrk --done [--confirm-from-stdin] -> merge-back --rm via worktree.MergeBack
 - Piped confirmation follows the mvd merge-back pattern: set `req.StdinInput` and `--confirm-from-stdin`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

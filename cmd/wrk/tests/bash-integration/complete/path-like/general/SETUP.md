@@ -14,7 +14,8 @@ wrk --bash-integration --complete -- wrk <path-like> 1 -> empty stdout
 2. Projects remain seeded from parent path-like setup.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.CompleteCases = []CompleteCase{
 		{Name: "relative-dot", Words: []string{"wrk", "./ex"}, CWord: 1},
 		{Name: "parent-relative", Words: []string{"wrk", "../foo"}, CWord: 1},

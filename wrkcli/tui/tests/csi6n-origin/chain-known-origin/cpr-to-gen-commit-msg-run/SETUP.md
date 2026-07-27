@@ -16,9 +16,13 @@ BlankAbove=12
 1. Set BlankAbove=12 so root Run synthesizes CPR and aims gen-commit-msg Run.
 
 ```go
-import "testing"
+import (
+	"testing"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.BlankAbove = 12
 	req.Buf = nil // force synthetic CPR from BlankAbove + viewLines
 	req.StageID = "gen-commit-msg"

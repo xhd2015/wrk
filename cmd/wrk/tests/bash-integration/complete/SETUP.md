@@ -13,9 +13,13 @@ wrk --bash-integration --complete -- <words> <cword> -> one candidate per stdout
 2. Descendants set completion words/cword and optional `req.ProjectPaths`.
 
 ```go
-import "strings"
+import (
+	"strings"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Mode = "complete"
 	req.DryRun = false
 	return nil

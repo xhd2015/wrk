@@ -10,9 +10,14 @@ myrepo (main) + refs/heads/main-2026-06-30 -> wrk myrepo <wt> -v
 ```
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repo := filepath.Join(req.WorkRoot, "myrepo")
 	initFetchVerboseRepo(t, repo, "create v branch collision always-new")
 	runGitIsolated(t, repo, "branch", branchName("main", wrkDate, 0))

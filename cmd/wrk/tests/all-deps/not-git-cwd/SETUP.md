@@ -13,7 +13,9 @@ plain dir (no .git) -> wrk --all-deps -> error (is not a git repository)
 2. Run `wrk --all-deps` from the non-git cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	allDepsEnsureHelpersUsed()
 
 	req.RepoDir = t.TempDir()

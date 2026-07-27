@@ -15,7 +15,9 @@ repo basename 180×'r' + --task <long>
 3. Assert byte budgets and invariant.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	req.InProcess = true
+	_ = d
 	_, _ = initLongBasenameRepo(t, req, longRepoBasenameLen)
 	req.TaskDesc = longTaskDesc()
 	return nil

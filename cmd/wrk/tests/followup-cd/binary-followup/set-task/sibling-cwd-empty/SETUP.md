@@ -14,7 +14,9 @@ wrk <wtB> --set-task "new task" -> B moved; follow-up empty (A still exists)
 2. Run `wrk <wtB> --set-task "new task"` with process cwd = wtA, confirm + follow-up env set.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := setupMainRepo(t, req)
 	wtA := runWrkWithArgs(t, req, mainRepo, "--task", "keep here")
 	wtB := runWrkWithArgs(t, req, mainRepo, "--task", "original task")

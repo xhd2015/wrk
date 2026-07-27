@@ -17,7 +17,9 @@ wrk --cd {WorkRoot}/jumpto --exec pwd
 3. Run `wrk --cd <abs> --exec pwd` from a neutral cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	target := execCDTarget(t, req, "jumpto")
 	req.MainRepo = target // reuse MainRepo as "resolved jump path" for asserts
 	enableExecFollowup(t, req)

@@ -14,9 +14,11 @@ wrk --bash-integration [...] -> script or flag list includes follow-up surface
 ```go
 import (
 	"strings"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// script-surface does not require a git checkout
 	if req.RepoDir == req.WorkRoot || req.RepoDir == "" {
 		req.RepoDir = req.WorkRoot

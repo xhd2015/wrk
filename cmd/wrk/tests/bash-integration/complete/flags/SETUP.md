@@ -12,7 +12,9 @@ wrk --bash-integration --complete -- wrk - 1 -> matching flags
 2. Complete flag prefix `-` at word index 1.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	req.InProcess = true
+	_ = d
 	seedStandardProjects(req)
 	req.CompleteWords = []string{"wrk", "-"}
 	req.CompleteCWord = 1

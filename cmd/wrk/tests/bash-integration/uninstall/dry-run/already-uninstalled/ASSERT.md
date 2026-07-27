@@ -1,3 +1,4 @@
+
 ## Expected
 
 - Exit code 0.
@@ -17,11 +18,12 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 
 	"github.com/xhd2015/doctest/assert"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}

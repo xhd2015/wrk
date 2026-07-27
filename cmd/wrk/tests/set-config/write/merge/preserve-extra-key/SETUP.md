@@ -14,7 +14,9 @@ wrk --set-config --create --new-terminal
 2. Run terminal-only set-config.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	writeSetConfigRaw(t, req.WrkHome, `{
   "version": 1,
   "extra": 1

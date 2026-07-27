@@ -1,3 +1,4 @@
+
 ## Expected Output
 
 ```
@@ -39,7 +40,13 @@ compiler noise onto stdout.)
 - 1
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+import (
+	"github.com/xhd2015/doctest/session"
+	"strings"
+)
+
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	assertExitCode(t, resp, 1)
 	assertNotContains(t, resp.Stdout, "would:")

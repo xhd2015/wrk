@@ -16,9 +16,13 @@ wrk skill --show
 - Coverage backfill where product already documents help; skill may RED until SKILL.md is updated.
 
 ```go
-import "strings"
+import (
+	"strings"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Docs leaves do not require a git checkout; neutral WorkRoot cwd.
 	req.RepoDir = req.WorkRoot
 	_ = assertEmbeddedSkillStdoutDash

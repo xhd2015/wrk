@@ -17,9 +17,13 @@ BuildInventory -> all three modules with correct Dir/Path/ownership
 4. Expect two projects and three modules with Dir/Path as above.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	libPath := filepath.Join(req.WorkRoot, "repos", "lib")
 	appPath := filepath.Join(req.WorkRoot, "repos", "app")
 	initRootAndSubModuleRepo(t, libPath, "example.com/lib")

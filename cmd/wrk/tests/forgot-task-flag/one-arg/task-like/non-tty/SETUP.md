@@ -13,7 +13,8 @@ non-TTY wrk "fix the login bug" (cwd = git repo)
 - No confirm env; no `-y`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.UseScriptTTY = false
 	return nil
 }

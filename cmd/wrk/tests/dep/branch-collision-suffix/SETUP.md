@@ -17,16 +17,22 @@ consumer --dep mydep
 4. Run `wrk --dep <dep>` from consumer.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := initConsumerRepo(t, req.WorkRoot, true)
-	dep := initDepRepo(t, req.WorkRoot, "mydep", true)
-	runGitIsolated(t, dep, "branch", branchName("main", wrkDate, 0))
+	depPath := initDepRepo(t, req.WorkRoot, "mydep", true)
+	runGitIsolated(t, depPath, "branch", branchName("main", wrkDate, 0))
 
 	req.RepoDir = consumer
-	req.DepPath = dep
+	req.DepPath = depPath
 	req.ConsumerTop = consumer
 	req.DepModulePath = depModulePath
-	req.Args = []string{"--dep", dep}
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

@@ -18,7 +18,8 @@ linked-wt (ahead, dirty) + DRY_RUN + argv log
 4. Keys: `j` (DONE), `space` (select DONE), five `j` (to RUN ALL), Enter.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	linked := setupDashboardLinkedAhead(t, req)
 	markDashboardDirtyUntracked(t, linked)
 	req.Args = nil

@@ -46,8 +46,9 @@ type DirHintOptions struct {
 
 // resolveDirArg resolves dir to an absolute path: Abs → stat → optional basename
 // fallback via resolveBasenameFromProjects when allowBasenameFallback is true.
+// Relative dirs resolve against processCwd() (Capture virtual Dir when set).
 func resolveDirArg(dir string, allowBasenameFallback bool, wrkHome string, hint *DirHintOptions) (string, error) {
-	absCandidate, err := filepath.Abs(dir)
+	absCandidate, err := absAgainstProcessCwd(dir)
 	if err != nil {
 		return "", fmt.Errorf("resolve dir: %w", err)
 	}
@@ -169,7 +170,7 @@ func quoteHintArg(arg string) string {
 // positional. When sourceDir is absent, returns the process cwd.
 func resolveSourceWorkDir(origWd, sourceDir string, allowBasenameFallback bool, wrkHome string, hint *DirHintOptions) (string, error) {
 	if sourceDir == "" {
-		wd, err := os.Getwd()
+		wd, err := processCwd()
 		if err != nil {
 			return "", fmt.Errorf("get cwd: %w", err)
 		}

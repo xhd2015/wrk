@@ -11,7 +11,8 @@ IsWipSubject("WIP: foo") -> true
 1. Set subject to `WIP: foo`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Subject = "WIP: foo"
 	return nil
 }

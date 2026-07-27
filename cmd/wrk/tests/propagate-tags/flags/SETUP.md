@@ -22,7 +22,8 @@ wrk --dry-run -> non-zero; stderr lists valid hosts including --propagate-tags
   `--propagate-tags` to appear in the error text.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Flag-validation subtree; leaves exercise bare --dry-run host list.
 	propTagsEnsureHelpersUsed()
 	return nil

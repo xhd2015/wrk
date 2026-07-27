@@ -19,7 +19,8 @@ linked-wt (ahead) -> tty-watch detach wrk
 5. Assert no compose / no create.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupDashboardLinkedAhead(t, req)
 	// Root Run may execute non-TTY bare wrk (harmless); ASSERT drives tty-watch.
 	req.Args = nil

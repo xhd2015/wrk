@@ -77,6 +77,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"github.com/xhd2015/doctest/session"
 )
 
 type scanProjectsFile struct {
@@ -90,7 +91,8 @@ type scanProjectEntry struct {
 	Source  string `json:"source"`
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	// Non-git cwd so auto-record does not add the wrk worktree itself.
 	req.RepoDir = req.WorkRoot

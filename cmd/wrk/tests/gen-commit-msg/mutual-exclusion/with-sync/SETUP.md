@@ -16,7 +16,9 @@ repo (staged change)
 2. Run `wrk --gen-commit-msg --sync --dry-run` from that git repo.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	stageOneTextFile(t, req)
 	req.Args = []string{"--gen-commit-msg", "--sync", "--dry-run"}
 	return nil

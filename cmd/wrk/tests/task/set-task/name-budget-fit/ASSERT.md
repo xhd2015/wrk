@@ -1,3 +1,4 @@
+
 ## Expected
 
 - Exit 0; worktree renamed.
@@ -14,10 +15,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 	"unicode/utf8"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit %d stderr=%q", resp.ExitCode, resp.Stderr)

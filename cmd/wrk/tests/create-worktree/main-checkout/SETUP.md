@@ -23,9 +23,11 @@ main repo checkout -> wrk -> {WRK_HOME}/worktrees/{basename}-{token}-{YYYY-MM-DD
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	repoDir := filepath.Join(req.WorkRoot, "myrepo")
 	req.RepoDir = repoDir
 	return nil

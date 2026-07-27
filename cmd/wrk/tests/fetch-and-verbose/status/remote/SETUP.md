@@ -13,7 +13,8 @@ nested RepoTypeMain -> no Remote:
 - Descendants run `wrk --status` and assert `Remote:` presence rules.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureFetchVerboseHelpersUsed()
 	return nil
 }

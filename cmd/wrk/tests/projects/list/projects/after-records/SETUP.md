@@ -13,7 +13,9 @@ wrk --list (repoA) + wrk --list (repoB) -> wrk --projects -> sorted detailed blo
 3. Run `wrk --projects`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureProjectListHelpersUsed()
 	originA := setupBareOriginForList(t, req.WorkRoot, "origin-aaa")
 	originZ := setupBareOriginForList(t, req.WorkRoot, "origin-zzz")

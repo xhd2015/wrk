@@ -14,7 +14,8 @@ wrk <myrepo> ./real-target
 2. SpawnDir = `./real-target` (path-like by `./` prefix).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := initMyrepoForForgotTask(t, req)
 	req.RepoDir = req.WorkRoot
 	req.TargetDir = mainRepo

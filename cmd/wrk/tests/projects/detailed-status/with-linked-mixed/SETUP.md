@@ -14,7 +14,9 @@ main repo + 2 clean linked wts + 1 dirty linked wt -> Worktrees: 3 total, 1 dirt
 4. Record and run `wrk --projects`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureDetailedStatusHelpersUsed()
 	origin := setupBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupTrackedMainRepo(t, req.WorkRoot, "mixed", origin, "mixed worktrees")

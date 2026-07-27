@@ -15,7 +15,8 @@ myrepo -> wrk (no args, non-TTY)
 3. Assert create did not run.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Parent sets main repo; force empty argv so mode is dashboard (not create).
 	req.Args = nil
 	req.TargetDir = ""

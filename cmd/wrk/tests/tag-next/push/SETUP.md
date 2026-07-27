@@ -19,7 +19,8 @@ wrk --tag-next --push --dry-run -> plan tags + would: git push for branch and ta
 - Descendants use `setupPushRepo` and set `req.Args` for `--tag-next --push` (± `--dry-run`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	tagNextEnsureHelpersUsed()
 	return nil

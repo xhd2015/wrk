@@ -90,6 +90,7 @@ implement the semantics above (P1 complete).
 ```go
 import (
 	"testing"
+	"github.com/xhd2015/doctest/session"
 
 	"github.com/xhd2015/wrk/wrkcli"
 )
@@ -113,7 +114,8 @@ type Response struct {
 	External []string
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
+	_ = d
 	// Classic TDD: PartitionStatusPaths / StatusPathLists are the production
 	// API under design. RED (compile or assert) until implementer lands them.
 	lists := wrkcli.PartitionStatusPaths(req.MainRoot, req.ScanPaths, req.LinkedOrdered)

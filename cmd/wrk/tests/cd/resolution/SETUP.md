@@ -27,7 +27,8 @@ wrk --cd local-basename     -> uses cwd dir when present (no projects required)
   or leaf-specific Args).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	if req.RepoDir == "" {
 		req.RepoDir = initNeutralCwd(t, req.WorkRoot, "workspace")
 	}

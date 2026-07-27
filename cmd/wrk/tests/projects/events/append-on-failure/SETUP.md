@@ -12,7 +12,9 @@ myrepo (main cwd) -> wrk --done -> error (not linked wt); event exit_code != 0
 2. Run `wrk --done` from main repo (not a linked worktree).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := initProjectsRepo(t, req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo
 	req.RepoDir = mainRepo

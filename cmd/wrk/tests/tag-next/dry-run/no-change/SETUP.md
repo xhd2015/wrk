@@ -13,7 +13,9 @@ git repo + tag at HEAD -> wrk --tag-next --dry-run -> all skip
 2. Run `wrk --tag-next --dry-run`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupNoChangeRepo(t, req)
 	req.Args = []string{"--tag-next", "--dry-run"}
 	return nil

@@ -48,6 +48,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"github.com/xhd2015/doctest/session"
 )
 
 type mainFlagEvent struct {
@@ -59,7 +60,8 @@ type mainFlagEvent struct {
 	ExitCode int      `json:"exit_code"`
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	// Override parent status default of pure --status.
 	req.Args = []string{"--main", "--status"}
@@ -261,7 +263,8 @@ func assertLastEventCommandStatusWithMain(t *testing.T, wrkHome string, wantExit
 func ensureMainFlagHelpersUsed() {
 	_ = setMainStatusArgs
 	_ = resolvePath
-	_ = statusDirLine
+	// statusDirLine lives in parent status package; rewriteStatusDirLines
+	// already references it via the generated status.StatusDirLine alias.
 	_ = runWrkCapture
 	_ = runStatusFromMain
 	_ = assertExitZeroEmptyStderr

@@ -15,7 +15,9 @@ wrk --projects -> exit 0; block is only Dir + Status error (no Branch/Commit/Rem
 4. Run `wrk --projects` (pipe mode, no `--color`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureDetailedStatusHelpersUsed()
 	origin := setupBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupTrackedMainRepo(t, req.WorkRoot, "broken-main", origin, "broken main repo")

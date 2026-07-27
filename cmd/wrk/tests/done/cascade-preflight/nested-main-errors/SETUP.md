@@ -17,7 +17,9 @@
 2. Run bare `wrk --done` from consumer worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupCascadePreflightWithNestedMain(t, req)
 	req.RepoDir = req.WtDir
 	req.Args = []string{"--done"}

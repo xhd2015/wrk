@@ -28,9 +28,15 @@ worktree. The dep worktree's `.git` was found pointing at
 4. Run `wrk --dep <dep>` from inside that linked consumer worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumerMain := initConsumerRepo(t, req.WorkRoot, true)
-	dep := initDepRepo(t, req.WorkRoot, "mydep", true)
+	depPath := initDepRepo(t, req.WorkRoot, "mydep", true)
 
 	// initConsumerRepo leaves go.mod uncommitted; commit it so the linked
 	// worktree created next actually checks out a go.mod.
@@ -42,10 +48,10 @@ func Setup(t *testing.T, req *Request) error {
 	consumerWt := runWrkFrom(t, req, consumerMain)
 
 	req.RepoDir = consumerWt
-	req.DepPath = dep
+	req.DepPath = depPath
 	req.ConsumerTop = consumerWt
 	req.DepModulePath = depModulePath
-	req.Args = []string{"--dep", dep}
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

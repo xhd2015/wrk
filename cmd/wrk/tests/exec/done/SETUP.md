@@ -20,7 +20,8 @@ linked wt (already included or -y confirmed)
 - Setup creates main + linked wt; leaves set `--done` + `--exec`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

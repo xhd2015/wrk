@@ -14,7 +14,9 @@ projects.json (otherrepo) + consumer requires dep1 only -> wrked 0 deps
 3. Run `wrk --all-deps` from the consumer.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	allDepsEnsureHelpersUsed()
 
 	other := allDepsDepDir(req.WorkRoot, "otherrepo")

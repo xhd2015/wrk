@@ -12,7 +12,7 @@ workspace/ -> wrk skill --header --show -> same YAML frontmatter as --show --hea
 1. Run `wrk skill --header --show` from neutral cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.Args = []string{"skill", "--header", "--show"}
 	return nil
 }

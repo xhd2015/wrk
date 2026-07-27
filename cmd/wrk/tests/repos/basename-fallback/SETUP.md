@@ -38,9 +38,11 @@ neutral cwd -> wrk myrepo --repos -> stat(cwd/myrepo) fails -> match saved proje
 import (
 	"path/filepath"
 	"sort"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureReposBasenameFallbackHelpersUsed()
 	return nil
 }

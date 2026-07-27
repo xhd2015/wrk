@@ -15,7 +15,8 @@
 - 0
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	assertSetConfigShowHelp(t, resp.Stdout, resp.Stderr, resp.ExitCode)
 	assertSetConfigNoConfigWrite(t, req.WrkHome)

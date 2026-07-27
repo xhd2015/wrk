@@ -16,9 +16,10 @@
 import (
 	"path/filepath"
 	"strings"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {
 		t.Fatalf("expected exit 0 (foreign dirty must not block --done --dry-run), got %d stdout=%q stderr=%q",

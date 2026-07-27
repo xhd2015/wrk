@@ -12,7 +12,9 @@ workspace/ -> wrk --set-config -h
 1. Run `wrk --set-config -h` from neutral cwd (isolated WRK_HOME).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = setConfigArgs("-h")
 	return nil
 }

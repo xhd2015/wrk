@@ -15,7 +15,9 @@ wrk myrepo -t 'optimize skills output' -> multi-line stderr + concrete path hint
 3. Run `wrk myrepo -t 'optimize skills output'` from workspace.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	savedRepo := initSavedGitRepo(t, req.WorkRoot, "saved", "myrepo")
 	recordSavedProject(t, req, savedRepo)
 	req.MainRepo = savedRepo

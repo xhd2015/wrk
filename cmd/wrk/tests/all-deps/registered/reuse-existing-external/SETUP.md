@@ -20,7 +20,14 @@ consumer (require dep1) + projects.json(mydep1)
 4. Run `wrk --all-deps` via `Run` — must reuse that path and apply replace.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	allDepsEnsureHelpersUsed()
 	registeredEnsureHelpersUsed()
 

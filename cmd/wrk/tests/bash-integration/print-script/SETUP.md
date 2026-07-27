@@ -14,7 +14,8 @@ wrk --bash-integration -> stdout script with:
 1. Set `req.Mode = "print"`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Mode = "print"
 	req.DryRun = false
 	return nil

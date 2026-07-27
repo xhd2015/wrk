@@ -14,7 +14,9 @@ external wt (dirty) -> appended Status: dirty (...)
 3. Run `wrk --status` from the main repo root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, wtDir, _ := createExternalWrkWorktree(t, req)
 	dirtyWorktreeFile(t, wtDir, "README.md", "# dirty external\n")
 	req.RepoDir = mainRepo

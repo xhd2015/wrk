@@ -12,7 +12,8 @@ wrk --where spl -> non-zero exit, stderr no-match message, empty stdout
 - Descendants run `wrk --where spl` with no matching saved project.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureWhereHelpersUsed()
 	return nil
 }```

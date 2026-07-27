@@ -16,7 +16,8 @@ sibling A; wrk --done B --force-cd (no channel) -> shell @ main
 1. Descendants create linked worktree then run --done.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "binary")
 	return nil
 }

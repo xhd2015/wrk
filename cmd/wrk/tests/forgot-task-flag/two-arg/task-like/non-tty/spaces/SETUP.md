@@ -14,7 +14,9 @@ wrk <myrepo> "fix the login bug" (non-TTY)
 2. Run `wrk <myrepo> "fix the login bug"` from WorkRoot without confirm env.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupTwoArg(t, req, taskLikeSpaces)
 	return nil
 }

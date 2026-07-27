@@ -17,7 +17,9 @@ myrepo (v0.0.1) + wtA (ahead)
    (No multi-project / GOBIN fixture required: abort stops before post stages.)
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDonePipelineLocal(t, req)
 	req.Args = []string{"--done", "--confirm", "--confirm-from-stdin", "--sync", "--tag-next", "--push", "--propagate-tags", "--reinstall-local"}
 	req.StdinInput = "n\n"

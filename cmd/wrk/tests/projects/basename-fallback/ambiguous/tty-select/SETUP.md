@@ -14,7 +14,9 @@ WRK_BASENAME_CONFIRM=1 + stdin "2" -> create from zzz/myrepo (lex-sorted #2)
 3. Run `wrk myrepo` from `{WorkRoot}/workspace` with `WRK_BASENAME_CONFIRM=1` and stdin `2\n`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repoA := initSavedGitRepo(t, req.WorkRoot, "aaa", "myrepo")
 	repoZ := initSavedGitRepo(t, req.WorkRoot, "zzz", "myrepo")
 	recordSavedProject(t, req, repoA)

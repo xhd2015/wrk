@@ -22,7 +22,8 @@ wrk --propagate-tags [...] -> exit ≠ 0, clear stderr
 - Stdout empty for mutual exclusion; other errors may leave stdout empty too.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Hard-error subtree; leaves set failing preconditions and args.
 	propTagsEnsureHelpersUsed()
 	return nil

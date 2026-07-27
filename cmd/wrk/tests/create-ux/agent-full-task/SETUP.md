@@ -18,7 +18,8 @@ wrk -t <full long task> --open-in-agent  (long basename repo)
 - Leaves set long basename repo, long TaskDesc, `--open-in-agent`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

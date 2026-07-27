@@ -38,9 +38,11 @@ consumer (git + go.mod) -> wrk --dep <basename> -> stat(cwd/<basename>) fails ->
 import (
 	"path/filepath"
 	"sort"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureDepBasenameFallbackHelpersUsed()
 	return nil
 }

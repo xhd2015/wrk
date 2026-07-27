@@ -30,7 +30,8 @@ non-TTY harness path still one-shot snapshot (regression)
 | `WRK_DASHBOARD_COMPOSE_ARGV_LOG` | argv log on TTY RUN |
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping only; leaves set fixtures.
 	_ = lookPathTTYWatch
 	_ = runDashboardTTYWatch

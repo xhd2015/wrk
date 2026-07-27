@@ -12,7 +12,9 @@ wrk --main --status --list -> non-zero; stderr mutually exclusive; empty stdout
 2. Args = `--main`, `--status`, `--list`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setMainStatusArgs(req, "--main", "--status", "--list")
 	return nil
 }

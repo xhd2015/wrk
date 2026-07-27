@@ -49,16 +49,21 @@ source bash.sh; wrk ... -> stderr "cd /abs"; builtin cd; pwd changes
 
 ```go
 import (
+
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"runtime"
 	"strings"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 	"unicode"
 
 	"github.com/xhd2015/gitops/git/git_isolated"
+
+	"time"
 )
 
 const wrkDate = "2026-06-30"
@@ -70,7 +75,55 @@ const (
 
 type seedBuilder func(seedDir string)
 
-func Setup(t *testing.T, req *Request) error {
+// harnessDoctest holds inject fields from d (no os.Setenv — Parallel-safe).
+var (
+	harnessMu          sync.Mutex
+	harnessSessionID   string
+	harnessDoctestRoot string
+)
+
+func adoptDoctestContext(d *session.Doctest) {
+	if d == nil {
+		return
+	}
+	harnessMu.Lock()
+	defer harnessMu.Unlock()
+	if d.DOCTEST_SESSION_ID != "" {
+		harnessSessionID = d.DOCTEST_SESSION_ID
+	}
+	if d.DOCTEST_ROOT != "" {
+		harnessDoctestRoot = d.DOCTEST_ROOT
+	}
+}
+
+func doctestSessionID(t *testing.T) string {
+	t.Helper()
+	harnessMu.Lock()
+	sid := harnessSessionID
+	harnessMu.Unlock()
+	if sid == "" {
+		sid = os.Getenv("DOCTEST_SESSION_ID")
+	}
+	if sid == "" {
+		t.Fatal("DOCTEST_SESSION_ID not set (expected d *session.Doctest in Setup)")
+	}
+	return sid
+}
+
+func doctestRootPath() string {
+	harnessMu.Lock()
+	root := harnessDoctestRoot
+	harnessMu.Unlock()
+	if root == "" {
+		root = os.Getenv("DOCTEST_ROOT")
+	}
+	return root
+}
+
+
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	adoptDoctestContext(d)
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		return fmt.Errorf("resolve work root: %w", err)
@@ -170,7 +223,7 @@ func fixtureCacheBase(t *testing.T) string {
 
 func fixtureSessionRoot(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(fixtureCacheBase(t), DOCTEST_SESSION_ID)
+	return filepath.Join(fixtureCacheBase(t), doctestSessionID(t))
 }
 
 func writeFileSeed(path, content string) {

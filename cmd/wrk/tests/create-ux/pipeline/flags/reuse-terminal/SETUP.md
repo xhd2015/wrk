@@ -11,7 +11,8 @@ wrk --reuse-terminal -> iterm reuse-current script; no space
 1. Run `wrk --reuse-terminal`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Args = []string{"--reuse-terminal"}
 	return nil
 }

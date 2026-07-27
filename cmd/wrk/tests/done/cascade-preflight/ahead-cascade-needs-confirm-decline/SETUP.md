@@ -17,7 +17,9 @@
    Product: cascade not-included requires confirm even under default auto-yes; `-y` is the skip.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupCascadePreflightAheadExternal(t, req)
 	req.RepoDir = req.WtDir
 	// D3/D4: not-included cascade target uses PromptConfirmPlan / confirm-from-stdin on pipes.

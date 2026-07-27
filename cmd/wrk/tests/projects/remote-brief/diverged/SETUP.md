@@ -14,9 +14,14 @@ main and origin/main each have unique commits -> Remote: diverged(N commits)
 4. Record and run `wrk --projects`.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureRemoteBriefHelpersUsed()
 	origin := setupRemoteBriefBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupRemoteBriefTrackedRepo(t, req.WorkRoot, "div", origin, "diverged base")

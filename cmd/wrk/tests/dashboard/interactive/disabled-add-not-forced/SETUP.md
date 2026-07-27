@@ -18,7 +18,8 @@ linked-wt (clean porcelain, Add changes [-])
 3. Assert recipe omits `--add-all`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Clean linked (no dirty) so Add changes is gated [-].
 	setupDashboardLinkedWorktree(t, req)
 	setDashboardAction(t, req, "run-done", true /* dryRun */)

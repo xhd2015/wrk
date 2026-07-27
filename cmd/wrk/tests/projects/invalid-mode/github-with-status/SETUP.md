@@ -12,7 +12,9 @@ wrk --status --github -> non-zero, stderr only valid with --projects
 2. Run `wrk --status --github`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := initProjectsRepo(t, req.WorkRoot, "myrepo")
 	req.RepoDir = mainRepo
 	req.Args = []string{"--status", "--github"}

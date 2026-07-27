@@ -13,7 +13,7 @@ wrk -h
 1. Run `wrk -h` from neutral cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.Args = []string{"-h"}
 	return nil
 }

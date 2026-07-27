@@ -19,7 +19,8 @@ linked worktree
 - Grouping: split by cwd (linked worktree vs main). Linked-wt leaves cover done/merge-back and via-main-flag.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping node: git required for descendant compose fixtures.
 	skipIfNoGit(t)
 	return nil

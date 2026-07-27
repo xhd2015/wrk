@@ -25,7 +25,8 @@ moduleA + moduleB both claim bin with install
   (see plan/skip-dup).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.WantError = true
 	req.WantModules = []WantModulePlan{}
 	return nil

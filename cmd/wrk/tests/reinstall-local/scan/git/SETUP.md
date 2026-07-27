@@ -25,7 +25,8 @@ workDir (in git) + useMain=false
 - Linked-worktree **main** identity is covered under `use-main/`, not here.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.UseMain = false
 	req.WantError = false
 	req.WantErrSubstrs = []string{}

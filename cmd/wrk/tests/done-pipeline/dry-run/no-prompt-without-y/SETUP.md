@@ -17,7 +17,9 @@ myrepo + wt (ahead)
 3. Run `wrk --done --dry-run` with empty stdin (no `-y`, no `--confirm-from-stdin`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDonePipelineLocal(t, req)
 	recordComposeDryRunBaseline(t, req)
 	// Explicit empty stdin; non-TTY. Must not require -y.

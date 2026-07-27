@@ -14,7 +14,9 @@ wrk --include-worktrees
 1. Run `wrk --include-worktrees` from isolated WorkRoot (no scan mode).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--include-worktrees"}
 	return nil
 }

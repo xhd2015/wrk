@@ -22,9 +22,14 @@ wrk --status -> main Dir: ../..  (+ Remote); external Dir via statusDirLine
   three `..` → **absolute** under the rule.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, _, _ := createExternalWrkWorktree(t, req)
 	subdir := filepath.Join(mainRepo, "pkg", "api")
 	mkdirAll(t, subdir)

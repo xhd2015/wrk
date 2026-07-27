@@ -25,7 +25,8 @@ scan-root/myrepo (new)
 - Descendants init one main under scan-root and set Args; known-main also seeds projects.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureScanGitReposHelpersUsed()
 	return nil
 }

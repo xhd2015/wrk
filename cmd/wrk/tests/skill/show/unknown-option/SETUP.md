@@ -12,7 +12,7 @@ workspace/ -> wrk skill --show --nope -> exit ≠0, stderr unknown option
 1. Run `wrk skill --show --nope` from neutral cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.Args = []string{"skill", "--show", "--nope"}
 	return nil
 }

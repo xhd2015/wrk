@@ -15,7 +15,9 @@ wrk spl --status -> multi-line stderr + <full-path> hint
 3. Run `wrk spl --status` from workspace.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repoA := initSavedGitRepo(t, req.WorkRoot, "aaa", "spl")
 	repoZ := initSavedGitRepo(t, req.WorkRoot, "zzz", "spl")
 	recordSavedProject(t, req, repoA)

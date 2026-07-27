@@ -23,9 +23,12 @@ wrk --set-task "new slug" (WRK_SET_TASK_CONFIRM=1, from consumer wt with deps/fo
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	req.InProcess = true
+	_ = d
 	consumerMain := initConsumerRepo(t, req.WorkRoot, false)
 
 	dep := initDepRepo(t, req.WorkRoot, "foodep")

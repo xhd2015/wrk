@@ -14,7 +14,13 @@ non-TTY wrk --dep mydep -> error listing both absolute paths; no external worktr
 3. Run `wrk --dep mydep` without `WRK_BASENAME_CONFIRM`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := initConsumerForDepBasename(t, req.WorkRoot)
 	depA := initSavedDepRepo(t, req.WorkRoot, "aaa", "mydep")
 	depZ := initSavedDepRepo(t, req.WorkRoot, "zzz", "mydep")

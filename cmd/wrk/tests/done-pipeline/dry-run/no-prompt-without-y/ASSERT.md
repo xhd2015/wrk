@@ -15,7 +15,7 @@
 - 0
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {
 		t.Fatalf("dry-run without -y must exit 0 (no confirm required); exit=%d stderr=%q stdout=%q",

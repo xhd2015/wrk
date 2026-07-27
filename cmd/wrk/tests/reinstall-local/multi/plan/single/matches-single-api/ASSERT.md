@@ -18,11 +18,12 @@
 import (
 	"reflect"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 
 	"github.com/xhd2015/wrk/wrkcli"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertMultiPlanOK(t, req, resp, err)
 	if len(req.ModuleRoots) != 1 {
 		t.Fatalf("test fixture: want 1 ModuleRoot, got %d", len(req.ModuleRoots))

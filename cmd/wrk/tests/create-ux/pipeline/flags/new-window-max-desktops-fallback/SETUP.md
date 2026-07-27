@@ -16,7 +16,8 @@ WRK_SPACE_FAIL=max-desktops; wrk --new-window
 2. Run `wrk --new-window`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Args = []string{"--new-window"}
 	req.ExtraEnv = append(req.ExtraEnv, "WRK_SPACE_FAIL=max-desktops")
 	return nil

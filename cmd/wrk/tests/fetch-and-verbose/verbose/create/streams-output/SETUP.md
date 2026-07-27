@@ -7,9 +7,14 @@ main repo -> wrk -v -> stderr has timestamp worktree add log + git's own lines
 ```
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repo := filepath.Join(req.WorkRoot, "create-v-stream")
 	initFetchVerboseRepo(t, repo, "create v stream")
 	req.RepoDir = repo

@@ -12,7 +12,8 @@ wrk --bash-integration --complete -- wrk --done <path-like> 2 -> empty stdout
 2. Descendants vary the path-like prefix shape only.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Words filled by leaf: wrk --done <path-like>
 	req.CompleteCWord = 2
 	return nil

@@ -24,7 +24,8 @@
 - Method is always `go-run-install` for script-derived items.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	if req.WantItems == nil {
 		req.WantItems = []WantPlanItem{}
 	}

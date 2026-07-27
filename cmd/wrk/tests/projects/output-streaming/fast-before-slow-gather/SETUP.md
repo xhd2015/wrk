@@ -15,7 +15,9 @@ aaa (clean, no upstream, no worktrees) + zzz (12 linked worktrees, tracked origi
 4. Run `wrk --projects` (doctest Run + streaming probe in Assert).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureOutputStreamingHelpersUsed()
 
 	repoA := setupFastNoUpstreamRepo(t, req.WorkRoot, "aaa")

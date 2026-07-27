@@ -10,7 +10,9 @@ main repo + 12 linked worktrees + WRK_PROJECTS_PERF_LOG -> JSONL with run/projec
 2. Record project and run `wrk --projects` with perf log enabled.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensurePerfProfileHelpersUsed()
 	setupPerfProfileRepo(t, req, "perf-emit", 12)
 	return nil

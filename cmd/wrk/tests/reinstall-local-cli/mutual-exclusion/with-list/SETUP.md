@@ -13,7 +13,9 @@ workspace/ -> wrk --reinstall-local --list -> non-zero, mutually exclusive
    exclusion should fire before planning).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--reinstall-local", "--list"}
 	return nil
 }

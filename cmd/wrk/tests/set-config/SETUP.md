@@ -44,9 +44,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	if req.RepoDir == "" {
 		req.RepoDir = req.WorkRoot
 	}
@@ -228,14 +230,25 @@ func assertEmptyStdout(t *testing.T, stdout string) {
 }
 
 // runWrkSetConfig runs wrk once with isolated WRK_HOME (same leaf) for multi-step merge leaves.
+// When req.InProcess, uses wrkcli.Capture (L2) so merge leaves need no product binary.
 func runWrkSetConfig(t *testing.T, req *Request, args ...string) *Response {
 	t.Helper()
+	dir := req.RepoDir
+	if dir == "" {
+		dir = req.WorkRoot
+	}
+	if req.InProcess {
+		tmp := *req
+		tmp.RepoDir = dir
+		resp, err := runWrkInProcess(&tmp, args)
+		if err != nil {
+			t.Fatalf("wrk %v: %v", args, err)
+		}
+		return resp
+	}
 	bin := getWrkBin(t)
 	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	if cmd.Dir == "" {
-		cmd.Dir = req.WorkRoot
-	}
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "WRK_HOME="+req.WrkHome, "WRK_DATE="+wrkDate)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout

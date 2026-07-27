@@ -35,6 +35,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"github.com/xhd2015/doctest/session"
 )
 
 const (
@@ -42,7 +43,8 @@ const (
 	taskLikeSpaces     = "fix the login bug"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	ensureForgotTaskFlagHelpersUsed()
 	return nil

@@ -36,11 +36,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 )
 
 const depModulePath = "example.com/dep"
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf("go not found in PATH: %w", err)
@@ -153,15 +155,15 @@ func initConsumerRepo(t *testing.T, workRoot string, withRequire bool) string {
 
 func initDepRepo(t *testing.T, workRoot, name string, withGoMod bool) string {
 	t.Helper()
-	dep := filepath.Join(workRoot, name)
-	initGitRepoOnMain(t, dep)
+	depPath := filepath.Join(workRoot, name)
+	initGitRepoOnMain(t, depPath)
 	if withGoMod {
-		writeFile(t, filepath.Join(dep, "go.mod"), "module "+depModulePath+"\n\ngo 1.22\n")
-		writeFile(t, filepath.Join(dep, "dep.go"), "package dep\n")
-		runGitIsolated(t, dep, "add", "go.mod", "dep.go")
-		runGitIsolated(t, dep, "commit", "-m", "add go module")
+		writeFile(t, filepath.Join(depPath, "go.mod"), "module "+depModulePath+"\n\ngo 1.22\n")
+		writeFile(t, filepath.Join(depPath, "dep.go"), "package dep\n")
+		runGitIsolated(t, depPath, "add", "go.mod", "dep.go")
+		runGitIsolated(t, depPath, "commit", "-m", "add go module")
 	}
-	return dep
+	return depPath
 }
 
 func runGo(t *testing.T, dir string, args ...string) {

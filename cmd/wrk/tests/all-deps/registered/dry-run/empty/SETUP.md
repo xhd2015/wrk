@@ -14,12 +14,14 @@ consumer (requires dep1) + empty projects -> wrk --all-deps --dry-run
 3. Run `wrk --all-deps --dry-run` from the consumer.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	allDepsEnsureHelpersUsed()
 	dryRunEnsureHelpersUsed()
 
 	consumer := initAllDepsConsumer(t, req.WorkRoot, []string{"example.com/dep1"}, "")
 
+	req.InProcess = true
 	req.RepoDir = consumer
 	req.ConsumerTop = consumer
 	req.Args = []string{"--all-deps", "--dry-run"}

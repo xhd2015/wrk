@@ -13,9 +13,11 @@ wrk --sync --list -> error before sync body
 2. Run `wrk --sync --list` from the main repo.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	initMainOnlyRepo(t, req)
 	req.Args = []string{"--sync", "--list"}
+	req.InProcess = true
 	return nil
 }
 ```

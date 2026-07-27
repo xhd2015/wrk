@@ -17,7 +17,9 @@ consumer (go.mod require example.com/dep) + mydep (module example.com/dep)
 3. Run `wrk --bring <dep>` from consumer.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := initBringConsumerRepo(t, req.WorkRoot, true)
 	dep := initBringDepRepo(t, req.WorkRoot, "mydep", true)
 

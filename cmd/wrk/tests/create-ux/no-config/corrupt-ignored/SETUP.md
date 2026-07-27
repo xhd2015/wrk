@@ -21,9 +21,11 @@ wrk --no-config
 import (
 	"path/filepath"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Deliberately invalid JSON — without --no-config a load would fail.
 	writeFile(t, filepath.Join(req.WrkHome, "config.json"), "{not-json\n")
 	req.Args = []string{"--no-config"}

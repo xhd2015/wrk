@@ -17,7 +17,9 @@ linked worktree (feature-push) + bare origin
 2. Run `wrk --push` with cwd = linked worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupPushFromLinkedWorktree(t, req)
 	req.Args = []string{"--push"}
 	return nil

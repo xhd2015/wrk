@@ -15,7 +15,13 @@ consumer requires dep, no ./mydep -> wrk --dep mydep -> external/mydep-main-{dat
 4. Run `wrk --dep mydep` from consumer cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := initConsumerForDepBasename(t, req.WorkRoot)
 	savedDep := initSavedDepRepo(t, req.WorkRoot, "saved", "mydep")
 	recordSavedProject(t, req, savedDep)

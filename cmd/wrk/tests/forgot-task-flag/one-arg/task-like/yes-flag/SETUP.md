@@ -12,7 +12,8 @@
 - Append `-y` to Args.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Args = append(req.Args, "-y")
 	return nil
 }

@@ -11,7 +11,8 @@ wrk --bash-integration combined with other modes -> error
 1. Set `req.Mode = "mutual"`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Mode = "mutual"
 	req.CLIArgs = []string{"--bash-integration", "--list"}
 	return nil

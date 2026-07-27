@@ -11,7 +11,7 @@ workspace/ -> wrk skill -h -> usage on stdout, exit 0
 1. Run `wrk skill -h` from neutral cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.Args = []string{"skill", "-h"}
 	return nil
 }

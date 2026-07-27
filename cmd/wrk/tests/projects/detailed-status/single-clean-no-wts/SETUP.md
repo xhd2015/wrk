@@ -13,7 +13,9 @@ wrk --add <repo> -> wrk --projects -> full status block + remote compare + zero 
 3. Run `wrk --projects`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureDetailedStatusHelpersUsed()
 	origin := setupBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupTrackedMainRepo(t, req.WorkRoot, "solo", origin, "solo project")

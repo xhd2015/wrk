@@ -18,9 +18,14 @@ linked wt block -> Master: needs fast forward(+N commits)
 4. Run `wrk --status` from the main repo root.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureMasterFieldHelpersUsed()
 	mainRepo := setupMainRepoWithSubject(t, req.WorkRoot, "myrepo", "status main root")
 	wtDir := addLinkedWorktreeInRepo(t, mainRepo, "wt-linked", "wt-side")

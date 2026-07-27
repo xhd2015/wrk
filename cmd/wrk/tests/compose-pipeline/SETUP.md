@@ -64,9 +64,11 @@ import (
 	"strings"
 
 	"github.com/xhd2015/gitops/git/git_isolated"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }
@@ -102,7 +104,7 @@ func seedMainRootBumpAP(t *testing.T, req *Request) string {
 	t.Helper()
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo
-	cloneRepoFromSeed(t, fixtureSeedMainGoMod, buildSeedMainGoMod, mainRepo)
+	cloneMainGoModFromSeed(t, mainRepo)
 	mainRepo = compositionResolvePath(t, mainRepo)
 	req.MainRepo = mainRepo
 	createLightweightTagAP(t, mainRepo, "v0.0.1", "")

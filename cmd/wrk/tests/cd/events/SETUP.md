@@ -22,7 +22,8 @@ WRK_FOLLOWUP_FILE set; wrk --cd /abs
 - Event `work_dir` is the resolved absolute cd target per requirement.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	enableInPlaceChannel(t, req)
 	if req.RepoDir == "" {
 		req.RepoDir = initNeutralCwd(t, req.WorkRoot, "workspace")

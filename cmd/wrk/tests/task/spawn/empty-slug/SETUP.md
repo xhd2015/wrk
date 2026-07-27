@@ -13,7 +13,14 @@ wrk --task "!!!" -> slug is empty -> non-zero exit, error
 3. Verify non-zero exit — slug is empty after sanitization.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo
 	initGitRepoOnMain(t, mainRepo)

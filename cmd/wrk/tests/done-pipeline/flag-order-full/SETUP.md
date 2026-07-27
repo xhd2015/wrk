@@ -15,7 +15,9 @@ myrepo (origin, v0.0.1) + wtA + wtB
 2. Run with flags reordered: push/tag-next/sync before done.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDonePipelineSyncWithOrigin(t, req)
 	req.Args = []string{"--push", "--tag-next", "--sync", "--done", "-y"}
 	return nil

@@ -13,7 +13,9 @@ wrk --cd myrepo -> stdout saved abs; shell cwd = saved abs
 2. Neutral cwd; install fake bash; `wrk --cd myrepo`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	skipIfNoGit(t)
 	saved := initSavedGitRepo(t, req.WorkRoot, "saved", cdBasename)
 	recordSavedProject(t, req, saved)

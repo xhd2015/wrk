@@ -7,7 +7,9 @@ tracked repo up-to-date + optional linked wt -> root Remote: identical; linked h
 ```
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	origin := setupFetchVerboseBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupFetchVerboseTrackedRepo(t, req.WorkRoot, "status-ident", origin, "status ident base")
 	wtDir := addLinkedWorktreeInRepo(t, repo, "wt-linked", "wt-ident")

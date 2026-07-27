@@ -12,7 +12,8 @@ source bash.sh from linked wt; wrk --done
 1. Descendants prepare already-included linked worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "wrapper")
 	return nil
 }

@@ -20,9 +20,15 @@ consumer (go-pkgs/ requires dep, tools/ does not) + dep -> wrk --dep -> replace 
 3. Run `wrk --dep <dep>` from the consumer repo root.
 
 ```go
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
 import "path/filepath"
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := filepath.Join(req.WorkRoot, "consumer")
 	initGitRepoOnMain(t, consumer)
 	modDir1 := filepath.Join(consumer, "go-pkgs")
@@ -37,17 +43,17 @@ func Setup(t *testing.T, req *Request) error {
 	runGitIsolated(t, consumer, "add", ".")
 	runGitIsolated(t, consumer, "commit", "-m", "add sub-modules")
 
-	dep := initDepRepo(t, req.WorkRoot, "mydep", true)
+	depPath := initDepRepo(t, req.WorkRoot, "mydep", true)
 
 	consumer, err := filepath.EvalSymlinks(consumer)
 	if err != nil {
 		t.Fatalf("eval symlinks %s: %v", consumer, err)
 	}
 	req.RepoDir = consumer
-	req.DepPath = dep
+	req.DepPath = depPath
 	req.ConsumerTop = consumer
 	req.ConsumerModDir = modDir1
-	req.Args = []string{"--dep", dep}
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

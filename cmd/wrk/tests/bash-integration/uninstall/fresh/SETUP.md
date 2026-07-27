@@ -13,7 +13,9 @@ wrk --bash-integration --uninstall -> markers gone, bash.sh intact
 2. Run uninstall.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.PreExistingBashSh = preInstalledBashShContent()
 	req.PreExistingBashProfile = preInstalledProfileContent()
 	req.PreExistingBashRC = preInstalledProfileContent()

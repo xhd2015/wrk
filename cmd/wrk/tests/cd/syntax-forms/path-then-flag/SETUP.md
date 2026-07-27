@@ -13,7 +13,9 @@ wrk /WorkRoot/jumpto --cd -> in-place success (same as --cd PATH)
 2. TargetDir=abs, Args=`["--cd"]`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setCDPathThenFlag(req, req.MainRepo)
 	return nil
 }

@@ -14,7 +14,8 @@ BuildInventory(wrkHome)
 2. Expect zero projects, modules, edges, and skipped paths.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// WRK_HOME exists from root Setup but projects.json is absent.
 	req.WantProjectPaths = []string{}
 	req.WantModules = []WantModule{}

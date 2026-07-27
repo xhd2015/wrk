@@ -14,7 +14,8 @@ source bash.sh; wrk --no-cd <mainRepo>
 2. Run `wrk --no-cd <mainRepo>` via wrapper.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	req.RepoDir = mainRepo
 	req.StartDir = req.FakeHome

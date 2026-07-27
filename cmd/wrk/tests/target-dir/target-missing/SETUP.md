@@ -14,7 +14,8 @@ wrk <dir> <absent-target> -> <target-dir> (parent exists) | error (parent missin
 - `parent-missing/` uses `{WorkRoot}/missing-parent/wt`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

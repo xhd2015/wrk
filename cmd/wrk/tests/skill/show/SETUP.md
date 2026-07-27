@@ -12,7 +12,7 @@ wrk skill --show [--header] -> stdout full file or YAML header only
 - Descendants set `req.Args` for `wrk skill --show` (and optional `--header`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	ensureSkillHelpersUsed()
 	return nil
 }

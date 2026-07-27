@@ -13,8 +13,10 @@ mod/ -> wrk --reinstall-local --dry-run -> non-zero, error mentions go.mod
 2. Run `wrk --reinstall-local --dry-run` from ModuleRoot.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// ModuleRoot exists but has no go.mod — C6.
+	req.InProcess = true
 	req.Args = []string{"--reinstall-local", "--dry-run"}
 	return nil
 }

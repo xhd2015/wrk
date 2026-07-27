@@ -13,7 +13,9 @@
 2. Run `wrk --projects-dep-graph` from the neutral workspace cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--projects-dep-graph"}
 	return nil
 }

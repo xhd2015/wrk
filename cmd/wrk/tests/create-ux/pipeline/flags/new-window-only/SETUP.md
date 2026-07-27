@@ -12,7 +12,8 @@ wrk --new-window
 1. Run `wrk --new-window`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Args = []string{"--new-window"}
 	return nil
 }

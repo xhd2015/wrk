@@ -15,7 +15,9 @@ wrk <mainRepo> -> stdout worktree path; follow-up: cd <abs-worktree>
 3. Run `wrk <mainRepo>` with follow-up env set (positional create so home gate sees shell cwd, not source workDir).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := setupMainRepo(t, req)
 	// Shell cwd must be exact user home for the create home gate.
 	// Binary Run uses cmd.Dir = req.RepoDir; HOME=FakeHome so UserHomeDir → FakeHome.

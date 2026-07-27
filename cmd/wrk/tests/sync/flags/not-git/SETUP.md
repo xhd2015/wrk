@@ -13,7 +13,9 @@ neutral dir -> wrk --sync -> not a git repository
 2. Run `wrk --sync`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.RepoDir = initNeutralCwd(t, req.WorkRoot, "not-git")
 	req.Args = []string{"--sync"}
 	return nil

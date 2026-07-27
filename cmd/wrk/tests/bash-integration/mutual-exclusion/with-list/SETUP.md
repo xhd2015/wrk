@@ -11,8 +11,10 @@ wrk --bash-integration --list -> non-zero exit, stderr error, empty stdout
 1. Run `wrk --bash-integration --list` from neutral cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "mutual")
+	req.InProcess = true
 	return nil
 }
 ```

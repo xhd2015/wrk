@@ -15,7 +15,9 @@ wrk -> stdout worktree path; follow-up empty (home gate closed)
 3. Expect create success but no follow-up `cd` (shell is not yanked).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := setupMainRepo(t, req)
 	// Shell cwd is main checkout — not FakeHome / user home.
 	req.RepoDir = mainRepo

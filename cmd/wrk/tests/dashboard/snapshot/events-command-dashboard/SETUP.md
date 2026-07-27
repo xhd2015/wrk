@@ -15,7 +15,8 @@ myrepo -> wrk (no args)
 3. Assert last event is dashboard.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupDashboardMainRepo(t, req)
 	req.Args = nil
 	return nil

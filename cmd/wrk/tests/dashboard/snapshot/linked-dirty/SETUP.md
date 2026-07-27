@@ -16,7 +16,8 @@ linked-wt (dirty untracked)
 2. Bare `wrk` non-TTY from linked cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	linked := setupDashboardLinkedWorktree(t, req)
 	markDashboardDirtyUntracked(t, linked)
 	req.RepoDir = linked

@@ -17,7 +17,9 @@ myrepo (main, no origin)
 2. Run `wrk --push`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupPushNoRemote(t, req)
 	req.Args = []string{"--push"}
 	return nil

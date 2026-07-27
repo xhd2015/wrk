@@ -12,7 +12,9 @@ origin git@github.com:owner/repo.git -> wrk --projects --github -> shown
 2. Record and run `wrk --projects --github`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureGitHubFilterHelpersUsed()
 	origin := setupBareOrigin(t, req.WorkRoot, "origin-ssh")
 	repo := setupTrackedMainRepo(t, req.WorkRoot, "ssh-repo", origin, "ssh github project")

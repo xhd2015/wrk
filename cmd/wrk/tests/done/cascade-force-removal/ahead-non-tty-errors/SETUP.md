@@ -13,7 +13,9 @@ consumer wt + ahead external dep -> wrk --done (non-TTY)
 2. Run bare `wrk --done` from consumer wt (non-TTY).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupConsumerWithAheadExternalDep(t, req)
 	req.RepoDir = req.WtDir
 	req.Args = []string{"--done", "-y"}  // D3: cascade not-included needs -y

@@ -12,7 +12,8 @@ wrk <basename> --done -> normal missing-dir error
 - Descendants record a saved project and invoke a non-create mode with basename `<dir>`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureBasenameFallbackHelpersUsed()
 	return nil
 }

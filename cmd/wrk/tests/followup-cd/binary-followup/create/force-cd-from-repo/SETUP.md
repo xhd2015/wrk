@@ -16,7 +16,9 @@ wrk --force-cd -> stdout worktree path; follow-up: cd <abs-worktree>
 3. Expect create success and ungated follow-up `cd` to the new worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := setupMainRepo(t, req)
 	// Shell cwd is main checkout — home gate would normally skip write.
 	req.RepoDir = mainRepo

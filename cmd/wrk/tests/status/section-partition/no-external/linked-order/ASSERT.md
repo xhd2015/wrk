@@ -14,7 +14,7 @@
 - N/A (no process).
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertPartition(t, req, resp, err)
 	// Extra pin: path sort of the two linked paths is Early then Late,
 	// so a buggy path-sort primary would fail the WantPrimary check above.

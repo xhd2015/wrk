@@ -15,7 +15,9 @@ linked-wt -> wrk --reinstall-local --main --dry-run
 3. Expect identical stdout to MC1.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--reinstall-local", "--main", "--dry-run"}
 	return nil
 }

@@ -24,7 +24,14 @@ mod/
 6. Expect non-zero exit at plan time; no install mutation of the stub.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	writeGoMod(t, req.ModuleRoot, "example.com/cli-exec-coll-parent")
 
 	modA := filepath.Join(req.ModuleRoot, "mod-a")

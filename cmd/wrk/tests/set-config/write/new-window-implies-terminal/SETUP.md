@@ -13,7 +13,9 @@ wrk --set-config --create --new-window
 2. Run `--set-config --create --new-window` only.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = setConfigArgs("--create", "--new-window")
 	return nil
 }

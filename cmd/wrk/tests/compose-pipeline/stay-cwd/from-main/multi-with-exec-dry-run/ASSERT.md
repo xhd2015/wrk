@@ -1,3 +1,4 @@
+
 ## Expected
 
 - Flag layer accepts multi-stage + `--exec` without `--done`.
@@ -14,9 +15,12 @@
 - 0 preferred; failure must not be flag rejection of this combo.
 
 ```go
-import "strings"
+import (
+	"strings"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	se := resp.Stderr
 	assertNoMutexReject(t, se)

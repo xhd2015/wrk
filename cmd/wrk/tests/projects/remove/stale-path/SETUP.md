@@ -14,7 +14,9 @@ wrk --add myrepo -> delete .git -> wrk --rm <old-path> -> entry removed, stdout 
 4. Run `wrk --rm <mainRepo>` using the original absolute path.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := initProjectsRepo(t, req.WorkRoot, "myrepo")
 	recordedPath := resolvePath(t, mainRepo)
 	recordProjectViaAdd(t, req, mainRepo)

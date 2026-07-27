@@ -20,9 +20,13 @@ Loading=true, click on any Run chip
 2. Leave origin unknown; use simple top-anchored absY.
 
 ```go
-import "testing"
+import (
+	"testing"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Op = "resolve"
 	req.Loading = true
 	req.OriginYSet = false

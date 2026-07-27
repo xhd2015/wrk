@@ -16,7 +16,9 @@ myrepo (v0.0.1) + wtA (ahead)
 2. Run with full post flags and stdin `n\n`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupMergeBackPipelineLocal(t, req)
 	req.Args = []string{"--merge-back", "--confirm", "--confirm-from-stdin", "--sync", "--tag-next", "--push"}
 	req.StdinInput = "n\n"

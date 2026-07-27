@@ -21,9 +21,11 @@ wrk <myrepo> <target-dir> -t 'ship feature' --new-window --new-terminal --open-i
 ```go
 import (
 	"testing"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Empty create UX: do not write create.* config (config.json may be absent).
 	req.TaskDesc = "ship feature"
 	req.TaskFlag = "-t"

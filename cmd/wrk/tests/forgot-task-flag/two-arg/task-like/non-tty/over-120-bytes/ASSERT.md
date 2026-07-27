@@ -12,9 +12,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertTaskLikeErrorTwoArg(t, resp, err)
 	arg := strings.Repeat("a", 121)
 	assertFileNotExists(t, filepath.Join(req.WorkRoot, arg))

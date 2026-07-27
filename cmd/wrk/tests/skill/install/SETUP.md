@@ -12,7 +12,7 @@ wrk skill --install [flags] -> install.HandleInstall (SkillDirName wrk)
 - Descendants run `wrk skill --install` with flags.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	ensureSkillHelpersUsed()
 	return nil
 }

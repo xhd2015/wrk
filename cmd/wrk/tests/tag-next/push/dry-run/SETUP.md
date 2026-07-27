@@ -22,9 +22,12 @@ git repo + bare origin
 import (
 	"path/filepath"
 	"strings"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupPushRepo(t, req)
 	sha := strings.TrimSpace(gitOutputIsolated(t, req.OriginBare, "rev-parse", "refs/heads/main"))
 	writeFile(t, filepath.Join(req.WorkRoot, "origin-main-before"), sha+"\n")

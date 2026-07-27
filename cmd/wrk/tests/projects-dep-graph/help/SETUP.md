@@ -16,7 +16,8 @@ wrk -h / wrk --help -> usage lists --projects-dep-graph
 - Help may print on stdout and/or stderr; leaves search both.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	depGraphEnsureHelpersUsed()
 	return nil
 }

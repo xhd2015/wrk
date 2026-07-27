@@ -13,7 +13,9 @@ vendor/host/broken-wt (broken) + wrk --status --color -> red error: value on sca
 2. Run `wrk --status --color` from `{WorkRoot}/myrepo` (pipe-safe).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureNestedBrokenLinkedHelpersUsed()
 	setupNestedBrokenLinkedFixture(t, req)
 	req.Args = []string{"--status", "--color"}

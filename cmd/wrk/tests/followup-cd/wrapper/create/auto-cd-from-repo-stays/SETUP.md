@@ -14,7 +14,8 @@ wrk -> worktree created; no stderr "cd …"; FinalPWD stays main
 2. Invoke `wrk --new` via installed wrapper (auto-cd on, home gate closed).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	req.RepoDir = mainRepo
 	req.StartDir = mainRepo

@@ -14,7 +14,8 @@ source bash.sh from wtA; wrk <wtB> --set-task "new task"
 2. Run wrapper `wrk <wtB> --set-task "new task"` with StartDir = wtA and confirm env.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	wtA := runWrkWithArgs(t, req, mainRepo, "--task", "keep here")
 	wtB := runWrkWithArgs(t, req, mainRepo, "--task", "original task")

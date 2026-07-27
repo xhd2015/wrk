@@ -15,7 +15,9 @@ WorkRoot -> wrk myrepo --status -> is not a git repository (no fallback to saved
 3. Run `wrk myrepo --status` from `{WorkRoot}`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	initNonGitBasenameInDir(t, req.WorkRoot, "myrepo")
 	savedRepo := initSavedGitRepo(t, req.WorkRoot, "saved", "myrepo")
 	recordSavedProject(t, req, savedRepo)

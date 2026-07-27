@@ -16,7 +16,8 @@ wrk <wtB> --set-task "new task" --force-cd
 2. Run set-task with `--force-cd`, confirm env, no follow-up env; cwd = wtA.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	wtA := runWrkWithArgs(t, req, mainRepo, "--task", "keep here")
 	wtB := runWrkWithArgs(t, req, mainRepo, "--task", "original task")

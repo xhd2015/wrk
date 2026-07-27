@@ -15,9 +15,14 @@ myrepo + ?? new.txt -> wrk --status -> dirty (1 added, 0 changed, 0 renamed, 0 d
 4. Run `wrk --status` from the repo root.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repo := filepath.Join(req.WorkRoot, "myrepo")
 	statusInitRepoWithSubject(t, repo, "untracked dirty base")
 

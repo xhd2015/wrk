@@ -18,7 +18,9 @@ linked wt + registered app
 2. Run `wrk --done -y --propagate-tags` (no `--tag-next`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDonePipelinePropagateExisting(t, req)
 	req.Args = []string{"--done", "-y", "--propagate-tags"}
 	return nil

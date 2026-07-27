@@ -12,7 +12,9 @@ wrk --bash-integration --complete -- wrk --where al 2 -> alpha, alphalong
 2. Complete value position after `--where` with prefix `al`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	req.InProcess = true
+	_ = d
 	seedStandardProjects(req)
 	req.CompleteWords = []string{"wrk", "--where", "al"}
 	req.CompleteCWord = 2

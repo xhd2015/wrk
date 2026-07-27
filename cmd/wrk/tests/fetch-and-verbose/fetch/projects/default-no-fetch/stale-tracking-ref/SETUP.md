@@ -13,7 +13,9 @@ tracked repo; push commit to origin; no fetch in main -> wrk --projects -> ident
 3. Record project and run `wrk --projects`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	origin := setupFetchVerboseBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupFetchVerboseTrackedRepo(t, req.WorkRoot, "stale-main", origin, "stale base")
 	pushCommitToFetchVerboseOrigin(t, req.WorkRoot, origin, "remote-only.txt", "remote\n", "on origin only")

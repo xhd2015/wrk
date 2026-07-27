@@ -49,7 +49,8 @@ after successful create / `--cd` / `--dep` / `--bring` / `--set-task` / `--done`
 - **deps/** — manually linked worktrees may also live under `{consumerTop}/deps/...` (or any path under the checkout); created via `git -C <depMain> worktree add` into the consumer tree. `--done` cascade discovers them via `scan_repo.Scan`, same as `external/*`.
 - **runGitIsolated** / **gitOutputIsolated** / **gitWorktreeListIsolated** — thin wrappers over `github.com/xhd2015/gitops/git/git_isolated` (`MustRun`, `MustOutput`, `WorktreeList`).
 - **git_isolated** — hook-free git runner; ignores global/system gitconfig; repo-local `core.hookspath` still applies.
-- **Session fixtures** — doctest injects `DOCTEST_SESSION_ID` (referenced directly in harness code, not via `os.Getenv`). Seeds live at `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/seeds/` (macOS `cp -c`, Linux `cp -a`); `getWrkBin` builds once per session to `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/wrk` with a file lock across leaf processes.
+- **Session fixtures** — doctest injects `d *session.Doctest` (`DOCTEST_ROOT` / `DOCTEST_CASE` / `DOCTEST_SESSION_ID`); harness adopts via `adoptDoctestContext` (**no** process `Setenv` of `DOCTEST_*`). Seeds live at `{DOCTEST_FIXTURE_ROOT}/{session}/seeds/` (macOS `cp -c`, Linux `cp -a`); `getWrkBin` builds once per session to `{DOCTEST_FIXTURE_ROOT}/{session}/bin/wrk` with a file lock across leaf processes.
+- **Request.InProcess** — when true, `Run` uses `wrkcli.Capture` (L2) with isolated `WRK_HOME`/`WRK_DATE` overrides (no product binary). Short paths only; leave false for L3 e2e. Dual-mode on mega-tree root and nested roots: `sync/`, `gen-commit-msg/`, `projects-dep-graph/`, `reinstall-local-cli/`, `propagate-tags/` (+ `compose/`), `bash-integration/`, `bash-integration-install-messaging/`, `followup-cd/`, `tag-next/`, `status/main-repo-worktrees/`.
 - **Request.StdinInput** — when non-empty, piped to wrk stdin before wait (mvd merge-back pattern).
 - **wrk --all-deps** — automates `--dep` for every dependency discoverable from registered projects: scans the consumer tree (`gotool/mod/scan.Scan`) for all Go modules and builds the union of required-module sets and existing local `Replace` sets; loads candidate dep repos from `{WRK_HOME}/projects.json` via `storage.ListProjects` (lexicographically sorted absolute main-repo paths — same order as `wrk --projects`); for each registered project path that is a git main repo, scans it with `gotool/mod/scan.Scan` and matches module paths against required modules; skips self, modules not required, already-replaced modules (tolerated, not errored — unlike `--done`), already-seen modules, missing project paths, and non-git project paths (all skipped silently); for each match links an external worktree under `{consumerTop}/external/` via the shared `linkExternalDep` core and records a `replace` in every consumer module that requires it (sub-module `Dir` when `m.Dir != "."`); runs `go mod tidy` in each affected consumer module (skipped when zero deps linked). Consumers without a root `go.mod` (module lives in a subdirectory) are supported via module scanning. Stdout: one line per linked dep in **registered project path order** (lexicographic), with matched modules within each project in `mod/scan` Dir order: `wrk <module-path> at ./external/<name>[/<subdir>]` (path relative to `consumerTop`), then a final summary `wrked <N> deps`. Empty or absent `projects.json` → single line `wrked 0 deps`, exit 0, no tidy, no `external/` created, no replaces. **Same-repo reuse (Policy A)**: `linkExternalDep` reuses live linked worktrees of `depMain` under `{consumerTop}/external/` (lex-smallest; stderr reuse warnings; no second WT); replace/tidy still applied when needed. `--all-deps --dry-run` plans the existing path name when reuse applies, warns on stderr, writes nothing.
 - **Removed from --all-deps** — `--scan-root` flag and `WRK_SCAN_ROOT` env var (and `resolveScanRoot()` / `scan_repo.Scan` in the `--all-deps` code path). Passing `--scan-root` → non-zero exit; stderr mentions unknown/unexpected flag or `scan-root` removed.
@@ -84,7 +85,7 @@ after successful create / `--cd` / `--dep` / `--bring` / `--set-task` / `--done`
 - **Stderr hard-error trailing newline** — when `main` receives a non-nil error that is **not** `wrkcli.ExitCodeError`, it writes `err.Error()` to stderr and ensures the last byte is `\n` (prefer `Fprintln` / single append; do not double-append if the string already ends with `\n`), then exits `1`. `ExitCodeError` stays silent (exit with `Code` only). Shell prompt must not glue to the error line.
 - **Stdout assertions** — doctest leaves use `assert.Output` with `version: 2` full-match templates only (no `<contains>` for stdout). Multi-block stdout (e.g. `--status` scan blocks, `--projects` project blocks) is asserted with one v2 template covering the entire stdout; blocks are joined with `\n\n`. Stderr error messages continue to use `<contains>` partial match (except sealed exact-body cases that also pin trailing `\n`).
 - **wrk --projects streaming** — stdout must flush each lex-ordered project block as soon as that project's gather completes (not after all projects finish). `output-streaming/fast-before-slow-gather` probes pipe timing: first bytes are the fast `aaa` block while the slow `zzz` project (12 worktrees) is still gathering.
-- **Run profile labels** — leaves labeled `slow` include cold/perf fixtures (12-worktree `--projects`, multi-repo, linked `--list`, `--projects` output-streaming, `--sync` multi-worktree, `scan-git-repos/streaming/first-path-before-finish` pad-walk timing probe, …); `many-worktrees-parallel` is also `flaky` (timing budget). Discovery runs (`doctest test ./tests`) skip labeled leaves; run them with `doctest test --label slow ./tests`.
+- **Run profile labels** — **`e2e`** marks true process-boundary leaves only (TTY/`script`, web probe, bash wrapper install, multi-invoke complete, fake-shell fallback, create-ux mock-env under Parallel, …) — sparse (~10–15% of leaves after harden). **`slow`** / **`heavy`** are cost. **L2 mass** (unlabeled discovery): library trees + `Request.InProcess` → `wrkcli.Capture` for CLI (short paths, dry-run plans, apply/status/projects when Capture-safe). Discovery runs the L2 mass; full process-boundary: `doctest test --label e2e ./tests`.
 - **wrk --add `<dir>`** — standalone mode; `--add` consumes the next argument as `<dir>`; validates dir exists + is git; resolves to main repo root; records with `source: "manual"` (idempotent); mutually exclusive with other modes; prints resolved main repo path on stdout (single line) on success.
 - **wrk --rm `<dir>`** — standalone mode; `--rm <dir>` (no `--remove` alias); `--rm` consumes the next argument as `<dir>`; mutually exclusive with all other modes; requires non-empty path (`wrk: --rm requires a path argument`). Help text: `--rm <dir>  remove a recorded main repository path`. Resolves target: `filepath.Abs` + `storage.NormalizePath`; if path exists and is inside a git work tree → resolve to main repo via `worktree.ShowToplevel` + `worktree.ResolveMainRepo` (same as `--add`); if path does not exist → use normalized absolute path as-is (stale/moved entries). **Success (entry removed)**: exit 0; stdout = removed main-repo absolute path (single line, trimmed). **Idempotent (not in projects.json)**: exit 0; empty stdout; no error. Does not delete worktrees, git repos, or events.jsonl history. Appends event `command: "rm"`, `args: ["--rm", "<path-arg>"]`, `exit_code: 0`. Auto-record still runs before remove.
 - **wrk --where `<basename>`** — standalone read-only lookup mode; `--where` consumes the next argument as a **basename only** (no path separators, not absolute); loads `{WRK_HOME}/projects.json` via `storage.FindProjectsByBasename(wrkHome, basename)` matching `filepath.Base(NormalizePath(p.Path)) == basename`; **does not** stat cwd, `filepath.Abs(name)`, or resolve paths on disk (unlike create-mode basename fallback). **0 matches** → non-zero exit, stderr no-match message, empty stdout. **1 match** → exit 0, stdout = one full absolute path + trailing `\n`. **2+ matches** → exit 0, stdout = all matching full paths sorted lexicographically, one per line, trailing `\n` after last line (no TTY prompt). **Empty/missing arg** (`wrk --where`) → non-zero exit, stderr `wrk: --where requires a path argument`. **Non-basename input** (contains `/` or `\`, or absolute path) → non-zero exit, basename-only rejection. **Mutually exclusive** with all other modes (`--status`, `--list`, `--projects`, create, etc.). **Extra positionals** → non-zero exit, `wrk: unexpected arguments`. No writes (no git ops, no worktree creation, no `projects.json` mutation). Appends event `command: "where"`, `args: ["--where", "<basename>"]`. Auto-record still runs on invocation.
@@ -1208,14 +1209,17 @@ wrk tests
 # Verify tree structure (no test execution)
 doctest vet ./tests
 
-# Fast discovery run (skips labeled leaves — slow perf/multi-repo fixtures)
+# Fast discovery run (skips labeled leaves — e2e / slow / tty / flaky)
 doctest test ./tests
 
-# Slow / perf leaves only (12-worktree perf, multi-repo --projects, linked list, output-streaming, scan-git-repos first-path-before-finish, …)
+# True binary integration leaves (process boundary; pilot: dir-arg, list, sync, …)
+doctest test --label e2e ./tests
+
+# Slow / perf leaves only (often also e2e; 12-worktree perf, multi-repo --projects, …)
 doctest test --label slow ./tests
 
-# Full CI: fast suite then slow suite
-doctest test ./tests && doctest test --label slow ./tests
+# Full CI: discovery then e2e (and optionally slow/tty)
+doctest test ./tests && doctest test --label e2e ./tests
 
 # Flaky timing budget (subset of slow)
 doctest test --label flaky ./tests/projects/perf-profile/budget/many-worktrees-parallel
@@ -1497,6 +1501,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/wrk/wrkcli"
 )
 
 type Request struct {
@@ -1552,6 +1559,11 @@ type Request struct {
 	// --web long-running server probe (web/ leaves)
 	WebProbe bool   // when true: start wrk, wait for listen URL, GET WebPath, kill process
 	WebPath  string // HTTP path to probe (default "/"); only used when WebProbe
+
+	// InProcess runs via wrkcli.Capture (L2 short path) instead of the product binary.
+	// Prefer for help / mutual-exclusion / early reject leaves that do not need a
+	// process boundary. Leave false (default) for true L3 e2e integration.
+	InProcess bool
 }
 
 type Response struct {
@@ -1562,13 +1574,19 @@ type Response struct {
 	HTTPBody   string // set when WebProbe; response body of GET WebPath
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
-	bin := getWrkBin(t)
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
+	adoptDoctestContext(d)
 	args := buildWrkCLIArgs(req)
 
 	if err := prepareFollowupFile(req); err != nil {
 		return nil, err
 	}
+
+	if req.InProcess {
+		return runWrkInProcess(req, args)
+	}
+
+	bin := getWrkBin(t)
 
 	if req.UseScriptTTY {
 		return execScriptTTYWrk(t, req, bin, args)
@@ -1582,6 +1600,39 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 	cmd.Dir = req.RepoDir
 	cmd.Env = wrkEnv(req)
 	return captureCommandOutput(cmd, req.StdinInput)
+}
+
+// runWrkInProcess is L2 short-path execution via wrkcli.Capture (no product binary).
+// Mirrors wrkEnv extras needed for demoted leaves (ExtraEnv, PathPrepend, follow-up,
+// SetTask/Basename, FakeHome) without os.Environ(). Skip UseScriptTTY / WebProbe /
+// UseMinimalPath — those stay binary e2e.
+func runWrkInProcess(req *Request, args []string) (*Response, error) {
+	env := []string{"WRK_HOME=" + req.WrkHome, "WRK_DATE=" + wrkDate}
+	if req.FakeHome != "" {
+		env = append(env, "HOME="+req.FakeHome)
+	}
+	if req.SetTaskEnv != "" {
+		env = append(env, req.SetTaskEnv)
+	}
+	if req.BasenameEnv != "" {
+		env = append(env, req.BasenameEnv)
+	}
+	if req.ProjectsPerfLog != "" {
+		env = append(env, "WRK_PROJECTS_PERF_LOG="+req.ProjectsPerfLog)
+	}
+	env = appendExtraEnv(env, req)
+	env = appendCDEnv(env, req)
+	res := wrkcli.Capture(wrkcli.CaptureOpts{
+		Args:  args,
+		Dir:   req.RepoDir,
+		Env:   env,
+		Stdin: req.StdinInput,
+	})
+	return &Response{
+		Stdout:   res.Stdout,
+		Stderr:   res.Stderr,
+		ExitCode: res.ExitCode,
+	}, nil
 }
 
 // prepareFollowupFile truncates FollowupFile so in-place --cd leaves can detect writes.

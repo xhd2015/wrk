@@ -85,9 +85,58 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
+
+	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/wrk/wrkcli"
 )
+
+// harnessDoctest holds inject fields from d (no os.Setenv — Parallel-safe).
+var (
+	harnessMu          sync.Mutex
+	harnessSessionID   string
+	harnessDoctestRoot string
+)
+
+func adoptDoctestContext(d *session.Doctest) {
+	if d == nil {
+		return
+	}
+	harnessMu.Lock()
+	defer harnessMu.Unlock()
+	if d.DOCTEST_SESSION_ID != "" {
+		harnessSessionID = d.DOCTEST_SESSION_ID
+	}
+	if d.DOCTEST_ROOT != "" {
+		harnessDoctestRoot = d.DOCTEST_ROOT
+	}
+}
+
+func doctestSessionID(t *testing.T) string {
+	t.Helper()
+	harnessMu.Lock()
+	sid := harnessSessionID
+	harnessMu.Unlock()
+	if sid == "" {
+		sid = os.Getenv("DOCTEST_SESSION_ID")
+	}
+	if sid == "" {
+		t.Fatal("DOCTEST_SESSION_ID not set (expected d *session.Doctest in Setup)")
+	}
+	return sid
+}
+
+func doctestRootPath() string {
+	harnessMu.Lock()
+	root := harnessDoctestRoot
+	harnessMu.Unlock()
+	if root == "" {
+		root = os.Getenv("DOCTEST_ROOT")
+	}
+	return root
+}
 
 type Request struct {
 	WorkRoot string
@@ -107,6 +156,11 @@ type Request struct {
 	// `wrk --bash-integration` print) before the tested run, without markers
 	// unless PreExistingBashProfile/RC are also set.
 	SeedCurrentScript bool
+
+	// InProcess runs via wrkcli.Capture (L2 short path) instead of the product binary.
+	// Prefer for early reject / pure messaging short paths. Leave false for install e2e.
+	// Not supported with PreInstall (multi-step needs binary path).
+	InProcess bool
 }
 
 type Response struct {
@@ -135,15 +189,14 @@ type Response struct {
 	BeforeBashRCExists       bool
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
+	adoptDoctestContext(d)
 	if req.WorkRoot == "" || req.WrkHome == "" || req.FakeHome == "" {
 		return nil, fmt.Errorf("Setup must initialize WorkRoot, WrkHome, and FakeHome")
 	}
 
-	bin := getWrkBin(t)
-
 	if req.SeedCurrentScript {
-		script, err := captureEmbeddedBashSh(t, req, bin)
+		script, err := captureEmbeddedBashSh(t, req, "")
 		if err != nil {
 			return nil, fmt.Errorf("capture embedded bash.sh: %w", err)
 		}
@@ -154,12 +207,6 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 		return nil, err
 	}
 
-	if req.PreInstall {
-		if _, _, _, err := runWrkOnce(t, req, bin, []string{"--bash-integration", "--install"}); err != nil {
-			return nil, fmt.Errorf("pre-install: %w", err)
-		}
-	}
-
 	resp := &Response{
 		Home:            req.FakeHome,
 		WrkHome:         req.WrkHome,
@@ -167,6 +214,37 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 		BashProfilePath: filepath.Join(req.FakeHome, ".bash_profile"),
 		BashRCPath:      filepath.Join(req.FakeHome, ".bashrc"),
 		EventsPath:      filepath.Join(req.WrkHome, "events.jsonl"),
+	}
+
+	// L2 short path: single install/messaging invocation via wrkcli.Capture.
+	// Not used for PreInstall multi-step flows.
+	if req.InProcess {
+		if req.PreInstall {
+			return nil, fmt.Errorf("InProcess does not support PreInstall")
+		}
+		resp.BeforeBashShContent, resp.BeforeBashShExists = readFileIfExists(resp.BashShPath)
+		resp.BeforeBashProfileContent, resp.BeforeBashProfileExists = readFileIfExists(resp.BashProfilePath)
+		resp.BeforeBashRCContent, resp.BeforeBashRCExists = readFileIfExists(resp.BashRCPath)
+
+		args := buildArgs(req)
+		res := wrkcli.Capture(wrkcli.CaptureOpts{
+			Args: args,
+			Dir:  req.RepoDir,
+			Env:  installMessagingCaptureEnv(req),
+		})
+		resp.Stdout = res.Stdout
+		resp.Stderr = res.Stderr
+		resp.ExitCode = res.ExitCode
+		captureFilesystemState(resp)
+		return resp, nil
+	}
+
+	bin := getWrkBin(t)
+
+	if req.PreInstall {
+		if _, _, _, err := runWrkOnce(t, req, bin, []string{"--bash-integration", "--install"}); err != nil {
+			return nil, fmt.Errorf("pre-install: %w", err)
+		}
 	}
 
 	resp.BeforeBashShContent, resp.BeforeBashShExists = readFileIfExists(resp.BashShPath)
@@ -184,6 +262,13 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 
 	captureFilesystemState(resp)
 	return resp, nil
+}
+
+func installMessagingCaptureEnv(req *Request) []string {
+	return []string{
+		"HOME=" + req.FakeHome,
+		"WRK_HOME=" + req.WrkHome,
+	}
 }
 
 func buildArgs(req *Request) []string {
@@ -220,6 +305,22 @@ func runWrkOnce(t *testing.T, req *Request, bin string, args []string) (stdout, 
 
 func captureEmbeddedBashSh(t *testing.T, req *Request, bin string) (string, error) {
 	t.Helper()
+	// Prefer in-process capture when dual-mode leaf or when called without a bin
+	// (SeedCurrentScript before getWrkBin). Binary path still available for e2e.
+	if req.InProcess || bin == "" {
+		res := wrkcli.Capture(wrkcli.CaptureOpts{
+			Args: []string{"--bash-integration"},
+			Dir:  req.RepoDir,
+			Env:  installMessagingCaptureEnv(req),
+		})
+		if res.ExitCode != 0 {
+			return "", fmt.Errorf("print-script exit %d; stderr=%s", res.ExitCode, res.Stderr)
+		}
+		if res.Stdout == "" {
+			return "", fmt.Errorf("print-script returned empty stdout")
+		}
+		return res.Stdout, nil
+	}
 	stdout, stderr, code, err := runWrkOnce(t, req, bin, []string{"--bash-integration"})
 	if err != nil {
 		return "", err
@@ -264,7 +365,7 @@ func getWrkBin(t *testing.T) string {
 		}
 		base = filepath.Join(home, "Library", "Caches", "doctest", "fixtures")
 	}
-	sessionRoot := filepath.Join(base, DOCTEST_SESSION_ID)
+	sessionRoot := filepath.Join(base, doctestSessionID(t))
 	bin := filepath.Join(sessionRoot, "bin", "wrk")
 	if _, err := os.Stat(bin); err == nil {
 		return bin
@@ -274,7 +375,7 @@ func getWrkBin(t *testing.T) string {
 		if _, err := os.Stat(bin); err == nil {
 			return
 		}
-		modRoot := findModuleRoot(DOCTEST_ROOT)
+		modRoot := findModuleRoot(doctestRootPath())
 		if modRoot == "" {
 			t.Fatal("find module root: no go.mod in ancestors")
 		}

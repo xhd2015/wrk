@@ -20,7 +20,8 @@ main + linked wt -> wrk --sync -> pass1 harvest or skip
 - Descendants build the main+worktree fixture and set `req.Args` / SHA fields.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

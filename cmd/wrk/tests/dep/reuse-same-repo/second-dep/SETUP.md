@@ -17,28 +17,35 @@ consumer (require dep) + mydep
 3. Run `wrk --dep <dep>` again via doctest `Run`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureDepReuseHelpersUsed()
 
 	consumer := initConsumerRepo(t, req.WorkRoot, true)
-	dep := initDepRepo(t, req.WorkRoot, "mydep", true)
+	depPath := initDepRepo(t, req.WorkRoot, "mydep", true)
 	// Canonicalize dep like bring fixtures (path comparisons / messages).
-	if resolved, err := filepath.EvalSymlinks(dep); err == nil {
-		dep = resolved
+	if resolved, err := filepath.EvalSymlinks(depPath); err == nil {
+		depPath = resolved
 	}
 
-	first := runWrkWithArgs(t, req, consumer, "--dep", dep)
+	first := runWrkWithArgs(t, req, consumer, "--dep", depPath)
 	wantFirst := externalWorktreePath(consumer, "mydep", "main", 0)
 	if first != wantFirst {
 		t.Fatalf("first --dep: expected %q, got %q", wantFirst, first)
 	}
 
 	req.RepoDir = consumer
-	req.DepPath = dep
+	req.DepPath = depPath
 	req.ConsumerTop = consumer
 	req.DepModulePath = depModulePath
 	req.ExternalWtDir = wantFirst
-	req.Args = []string{"--dep", dep}
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

@@ -17,7 +17,9 @@
 4. Run `wrk --status` (no `--color`) from the main repo root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureColorStatusHelpersUsed()
 	// Parent color-output SETUP already sets req.Args = ["--status"] (no --color).
 	mainRepo, child := setupColorStatusMainPlusNested(t, req.WorkRoot)

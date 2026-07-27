@@ -18,9 +18,14 @@ wrk --projects-dep-graph
 3. Run exclusive mode.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	solo := filepath.Join(req.WorkRoot, "repos", "solo")
 	initSingleModuleRepo(t, solo, "example.com/solo")
 	solo = resolvePath(t, solo)

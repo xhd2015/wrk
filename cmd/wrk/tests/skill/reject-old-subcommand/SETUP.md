@@ -12,7 +12,7 @@ wrk skill list|show|install (positional subcommand) -> non-zero, clear error
 - Descendants pass a former skill subcommand as a positional after `skill`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	ensureSkillHelpersUsed()
 	return nil
 }

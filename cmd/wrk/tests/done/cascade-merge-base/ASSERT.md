@@ -15,7 +15,8 @@
   the cascade removes the dep worktree without crashing, both pass.
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 
 	assertNotContains(t, resp.Stderr, "failed to find merge base")

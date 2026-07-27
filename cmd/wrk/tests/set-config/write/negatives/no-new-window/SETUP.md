@@ -13,7 +13,9 @@ seed window+terminal -> wrk --set-config --create --no-new-window
 2. Run `--no-new-window`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	writeSetConfigRaw(t, req.WrkHome, `{
   "version": 1,
   "create": {

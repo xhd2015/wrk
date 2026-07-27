@@ -14,7 +14,14 @@ cwd=workspace; wrk --cd rel/target
 2. Install fake bash; run `wrk --cd rel/target`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	rel := filepath.Join("rel", "target")
 	abs := filepath.Join(req.RepoDir, "rel", "target")
 	mkdirAll(t, abs)

@@ -15,7 +15,9 @@ workspace/ -> wrk --dry-run
 1. Run `wrk --dry-run` alone from the empty module dir (no host flags).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--dry-run"}
 	return nil
 }

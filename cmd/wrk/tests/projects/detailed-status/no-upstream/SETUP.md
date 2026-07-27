@@ -12,7 +12,9 @@ main repo without tracking branch -> Remote: (no upstream)
 2. Record and run `wrk --projects`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureDetailedStatusHelpersUsed()
 	repo := initProjectsRepo(t, req.WorkRoot, "noup")
 	recordProject(t, req, repo)

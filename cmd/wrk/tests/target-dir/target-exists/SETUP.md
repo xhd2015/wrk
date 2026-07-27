@@ -20,7 +20,8 @@ wrk <dir> <existing-dir> -> <existing-dir>/<basename>-<token>-<date>[-N]
 - `target-is-file/` pre-creates `{WorkRoot}/target` as a regular file.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

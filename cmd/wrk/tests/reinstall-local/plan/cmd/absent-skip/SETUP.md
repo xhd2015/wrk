@@ -16,7 +16,13 @@ PlanLocalReinstalls
 4. Expect one skip item (still listed).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	writeGoMod(t, req.ModuleRoot, "example.com/cmd-absent")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "missing"))
 	// intentionally no touchBin for "missing"

@@ -23,20 +23,25 @@
 3. Run `wrk --dep <dep-root>` from the consumer.
 
 ```go
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
+
 const subModulePath = "example.com/dep/sub"
 
 func initDepRepoWithSubModule(t *testing.T, workRoot, name string) string {
 	t.Helper()
-	dep := filepath.Join(workRoot, name)
-	initGitRepoOnMain(t, dep)
+	depPath := filepath.Join(workRoot, name)
+	initGitRepoOnMain(t, depPath)
 	// Intentionally NO go.mod at the repo root: the module lives in sub/.
-	subDir := filepath.Join(dep, "sub")
+	subDir := filepath.Join(depPath, "sub")
 	mkdirAll(t, subDir)
 	writeFile(t, filepath.Join(subDir, "go.mod"), "module "+subModulePath+"\n\ngo 1.22\n")
 	writeFile(t, filepath.Join(subDir, "sub.go"), "package sub\n")
-	runGitIsolated(t, dep, "add", ".")
-	runGitIsolated(t, dep, "commit", "-m", "add sub module")
-	return dep
+	runGitIsolated(t, depPath, "add", ".")
+	runGitIsolated(t, depPath, "commit", "-m", "add sub module")
+	return depPath
 }
 
 func initConsumerRepoRequiringSub(t *testing.T, workRoot string) string {
@@ -53,15 +58,17 @@ func initConsumerRepoRequiringSub(t *testing.T, workRoot string) string {
 	return consumer
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := initConsumerRepoRequiringSub(t, req.WorkRoot)
-	dep := initDepRepoWithSubModule(t, req.WorkRoot, "mydep")
+	depPath := initDepRepoWithSubModule(t, req.WorkRoot, "mydep")
 
 	req.RepoDir = consumer
-	req.DepPath = dep
+	req.DepPath = depPath
 	req.ConsumerTop = consumer
 	req.DepModulePath = subModulePath
-	req.Args = []string{"--dep", dep}
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

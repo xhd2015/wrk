@@ -13,7 +13,8 @@ main + linked wt -> wrk --sync --dry-run -> would: details + would: summary
 - Descendants build fixtures and pass `--dry-run`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

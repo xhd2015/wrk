@@ -20,7 +20,9 @@ repo/ (1 staged) -> wrk --gen-commit-msg --dry-run
 2. Run `wrk --gen-commit-msg --dry-run` from the repo cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	stageOneTextFile(t, req)
 	req.Args = []string{"--gen-commit-msg", "--dry-run"}
 	return nil

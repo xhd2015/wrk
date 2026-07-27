@@ -24,7 +24,8 @@ moduleA Action=skip + moduleB Action=skip (same BinName, bin absent)
 - Only install×install is a hard cross-module collision.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: same-bin mixed-action success (no collision).
 	if req.ModuleRoots == nil {
 		req.ModuleRoots = []string{}

@@ -17,11 +17,13 @@ consumer wt + ahead external dep (no local replace) -> TTY wrk --done -y -> both
 import (
 	"os/exec"
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
 const yesCascadeDepModule = "example.com/dep"
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Fatalf("go not found: %v", err)

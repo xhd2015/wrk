@@ -15,7 +15,9 @@ linked wt -> wrk --tag-next
 2. Run bare `--tag-next` with cwd = linked wt.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupAPLinkedAhead(t, req)
 	req.Args = []string{"--tag-next"}
 	return nil

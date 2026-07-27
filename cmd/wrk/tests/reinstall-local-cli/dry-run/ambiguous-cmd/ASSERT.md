@@ -1,3 +1,4 @@
+
 ## Expected Output
 
 ```
@@ -27,7 +28,8 @@ warning: bin foo: ambiguous under cmd (./cmd/foo, ./cmd/nested/foo); skipping
 - 0
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
 	want := "would: reinstall 0 binaries (0 skipped)\n"

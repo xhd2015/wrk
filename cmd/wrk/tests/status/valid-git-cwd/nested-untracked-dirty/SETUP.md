@@ -18,9 +18,14 @@ myrepo (clean) + myrepo/tools/child + ?? new.txt -> wrk --status
 5. Run `wrk --status` from `{WorkRoot}/myrepo`.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repo := filepath.Join(req.WorkRoot, "myrepo")
 	child := filepath.Join(repo, "tools", "child")
 

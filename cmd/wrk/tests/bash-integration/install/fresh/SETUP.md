@@ -12,7 +12,9 @@ wrk --bash-integration --install -> bash.sh + one marker in each profile
 1. Run install on empty fake HOME and isolated WRK_HOME.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	requireMode(t, req, "install")
 	requireNoPreseed(t, req)
 	return nil

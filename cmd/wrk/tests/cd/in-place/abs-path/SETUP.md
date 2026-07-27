@@ -13,7 +13,9 @@ wrk --cd /WorkRoot/jumpto -> empty stdout; follow-up: cd /WorkRoot/jumpto
 2. Run `wrk --cd <abs>` with follow-up channel open.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	target := cdAbsTarget(t, req, "jumpto")
 	req.MainRepo = target
 	setCDFlagThenPath(req, target)

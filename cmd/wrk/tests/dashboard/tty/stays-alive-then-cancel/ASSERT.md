@@ -1,3 +1,8 @@
+---
+label: e2e
+explanation: product binary CLI integration (process boundary)
+---
+
 ## Expected
 
 - Live tty-watch snapshot shows dashboard UI **before** process exit.
@@ -10,7 +15,13 @@
 - Process exits cleanly (tty-watch may not expose exit code; assert exited + no compose).
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+import (
+	"github.com/xhd2015/doctest/session"
+	"strings"
+)
+
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	// Non-TTY harness Run is fine (static snapshot); drive real TTY via tty-watch.
 	alive, final := runDashboardTTYWatch(t, req, "cancel", nil, "q")

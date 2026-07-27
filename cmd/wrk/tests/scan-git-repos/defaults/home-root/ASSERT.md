@@ -18,7 +18,7 @@
 - 0
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {
 		t.Fatalf("bare --scan-git-repos should default to $HOME and exit 0; got exit %d stderr=%q stdout=%q",

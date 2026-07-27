@@ -14,7 +14,9 @@ workspace/ -> wrk --gen-commit-msg -h
 1. Run `wrk --gen-commit-msg -h` from neutral cwd (no git required).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--gen-commit-msg", "-h"}
 	return nil
 }

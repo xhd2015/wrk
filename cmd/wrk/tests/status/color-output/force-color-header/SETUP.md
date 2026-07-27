@@ -16,7 +16,9 @@
 4. Run `wrk --status --color` from the main repo root (pipe-safe force color).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureColorStatusHelpersUsed()
 	withStatusColor(req)
 	mainRepo, child := setupColorStatusMainPlusNested(t, req.WorkRoot)

@@ -1,5 +1,5 @@
 ---
-label: tty
+label: e2e, tty
 explanation: requires `script` fake TTY for cascade auto-yes
 ---
 
@@ -15,7 +15,7 @@ explanation: requires `script` fake TTY for cascade auto-yes
 - 0
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {
 		t.Fatalf("expected exit 0 (TTY -y auto-confirms cascade), got %d stdout=%q stderr=%q", resp.ExitCode, resp.Stdout, resp.Stderr)

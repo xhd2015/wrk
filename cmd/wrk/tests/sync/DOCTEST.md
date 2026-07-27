@@ -79,7 +79,10 @@ bodies must stay GREEN (zero-summary exact stdout; probe helper).
   prefixes `wip:`, `wip(`, `[wip]`. Empty / mid-string-only → false.
 - **Dual-mode Run** — when `req.WipProbe` is true, root `Run` calls
   `wrkcli.IsWipSubject(req.Subject)` and returns `Response.IsWip` without
-  invoking the CLI binary. When `WipProbe` is false (default), CLI path.
+  invoking the CLI binary. When `req.InProcess` is true (and not WipProbe),
+  root `Run` uses `wrkcli.Capture` (L2 short path) with `syncWrkEnv` +
+  `buildSyncCLIArgs` (no product binary). Prefer for mutual-exclusion / early
+  reject leaves. When both are false (default), product-binary CLI path.
 
 ## Tree Overview
 
@@ -158,17 +161,26 @@ Note: `--sync --done` / `--merge-back --sync` composition lives under monotree
 
 ## How to Run
 
+Most leaves are **L3 binary e2e** (`label: e2e`; costly multi-worktree leaves also `slow`).
+**L2 in-process** (unlabeled): `wip-subject/*` (WipProbe) and short-path mutual-exclusion
+leaves with `Request.InProcess` (`flags/mutual-exclusion/*`).
+Default discovery skips labeled leaves; use `--label e2e` (or `--label-all` / `--label slow`).
+
 ```sh
 doctest vet ./cmd/wrk/tests/sync
+# default discovery: L2 leaves only (wip-subject + mutual-exclusion InProcess)
 doctest test ./cmd/wrk/tests/sync
-doctest test ./cmd/wrk/tests/sync/flags/no-linked-noop
-doctest test ./cmd/wrk/tests/sync/flags/dry-run-ok
+doctest test ./cmd/wrk/tests/sync/flags/mutual-exclusion
 doctest test ./cmd/wrk/tests/sync/wip-subject
-doctest test ./cmd/wrk/tests/sync/pass1
-doctest test ./cmd/wrk/tests/sync/pass2
-doctest test ./cmd/wrk/tests/sync/combined
-doctest test ./cmd/wrk/tests/sync/dry-run
-doctest test ./cmd/wrk/tests/sync/edge
+# full sync integration
+doctest test --label e2e ./cmd/wrk/tests/sync
+doctest test --label e2e ./cmd/wrk/tests/sync/flags/no-linked-noop
+doctest test --label e2e ./cmd/wrk/tests/sync/flags/dry-run-ok
+doctest test --label 'e2e && slow' ./cmd/wrk/tests/sync/pass1
+doctest test --label e2e ./cmd/wrk/tests/sync/pass2
+doctest test --label e2e ./cmd/wrk/tests/sync/combined
+doctest test --label e2e ./cmd/wrk/tests/sync/dry-run
+doctest test --label e2e ./cmd/wrk/tests/sync/edge
 ```
 
 Classic TDD Phase 3: new `pass1/*`, `pass2/*`, `combined/*`, `dry-run/*`,
@@ -180,6 +192,7 @@ import (
 	"bytes"
 	"os/exec"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 
 	"github.com/xhd2015/wrk/wrkcli"
 )
@@ -194,6 +207,11 @@ type Request struct {
 	// Phase 2 pure-function probe (default false = CLI path for Phase 1/3 leaves).
 	WipProbe bool   // when true: call wrkcli.IsWipSubject(Subject); no CLI
 	Subject  string // commit subject for WipProbe
+
+	// InProcess runs via wrkcli.Capture (L2 short path) instead of the product binary.
+	// Prefer for mutual-exclusion / early reject leaves. Leave false for true L3 e2e.
+	// Checked after WipProbe.
+	InProcess bool
 
 	// Phase 3 fixture fields (optional; set by multi-worktree Setups).
 	WtPath       string // primary linked worktree path
@@ -214,15 +232,30 @@ type Response struct {
 	IsWip    bool // set when WipProbe; result of wrkcli.IsWipSubject
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
+	adoptDoctestContext(d)
 	if req.WipProbe {
 		return &Response{
 			IsWip: wrkcli.IsWipSubject(req.Subject),
 		}, nil
 	}
 
-	bin := getWrkBin(t)
 	args := buildSyncCLIArgs(req)
+
+	if req.InProcess {
+		res := wrkcli.Capture(wrkcli.CaptureOpts{
+			Args: args,
+			Dir:  req.RepoDir,
+			Env:  syncWrkEnv(req),
+		})
+		return &Response{
+			Stdout:   res.Stdout,
+			Stderr:   res.Stderr,
+			ExitCode: res.ExitCode,
+		}, nil
+	}
+
+	bin := getWrkBin(t)
 
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = req.RepoDir

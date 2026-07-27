@@ -12,7 +12,8 @@ wrk --bash-integration --install -> integration/bash.sh + markers in .bash_profi
 1. Set `req.Mode = "install"`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Mode = "install"
 	req.PreInstall = false
 	return nil

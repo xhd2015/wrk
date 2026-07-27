@@ -13,7 +13,9 @@ DOT_PKGS_SPACE_GOOS=linux; wrk --new-window
 2. Run `--new-window`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	installCreateUXMocks(t, req, "linux")
 	req.Args = []string{"--new-window"}
 	return nil

@@ -31,7 +31,8 @@ git repo with staged files
 - Process cwd is the git repo (`req.RepoDir`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: dry-run leaves share stage + mock B helpers.
 	ensureGenCommitMsgHelpersUsed()
 	return nil

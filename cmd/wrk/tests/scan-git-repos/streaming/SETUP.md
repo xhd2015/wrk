@@ -48,6 +48,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"github.com/xhd2015/doctest/session"
 )
 
 // scanStreamProbe is the outcome of an incremental-stdout timing probe for --scan-git-repos.
@@ -59,7 +60,8 @@ type scanStreamProbe struct {
 	ExitCode    int
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: streaming / discovery-order / first-path-before-finish share scan helpers.
 	ensureScanGitReposHelpersUsed()
 	ensureScanStreamProbeHelpersUsed()

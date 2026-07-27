@@ -21,9 +21,12 @@ root-b/main-b + root-a/main-a
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	// root-b before root-a on CLI → discovery order main-b then main-a.
 	// Lex sort of abs paths is main-a then main-b (root-a < root-b).
 	rootB := filepath.Join(req.WorkRoot, "root-b")

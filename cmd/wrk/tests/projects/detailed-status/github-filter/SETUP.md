@@ -17,7 +17,8 @@ wrk --projects --github -> only mains whose origin URL host is github.com
 - Descendants record a mix of remotes, then run `wrk --projects --github`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureDetailedStatusHelpersUsed()
 	req.Args = []string{"--projects", "--github"}
 	req.RepoDir = req.WorkRoot

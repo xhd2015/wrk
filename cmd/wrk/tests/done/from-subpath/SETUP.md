@@ -17,9 +17,12 @@ myrepo + wt/pkg/sub -> wrk --done --confirm-from-stdin -> success
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	_, wtDir, _ := setupWrkWorktreeFromMain(t, req)
 
 	commitAheadOnWorktree(t, wtDir, "feature-work", "ahead from subpath")

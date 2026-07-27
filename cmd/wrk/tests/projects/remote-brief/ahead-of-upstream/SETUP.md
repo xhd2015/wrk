@@ -13,9 +13,14 @@ main tracked to origin/main -> one local commit -> Remote: needs push(+1 commit)
 3. Record and run `wrk --projects`.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureRemoteBriefHelpersUsed()
 	origin := setupRemoteBriefBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupRemoteBriefTrackedRepo(t, req.WorkRoot, "ahead", origin, "ahead base")

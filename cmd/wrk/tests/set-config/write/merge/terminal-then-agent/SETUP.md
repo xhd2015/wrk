@@ -14,7 +14,9 @@
 2. Leaf Run: agent-only set-config.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	first := runWrkSetConfig(t, req, setConfigArgs("--create", "--new-terminal")...)
 	if first.ExitCode != 0 {
 		t.Fatalf("first set-config exit %d stderr=%q", first.ExitCode, first.Stderr)

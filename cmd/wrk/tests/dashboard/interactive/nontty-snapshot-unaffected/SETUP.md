@@ -16,7 +16,8 @@ linked-wt (clean) -> wrk  (no ACTION env)
 3. Run bare `wrk`; assert P2 snapshot core.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupDashboardLinkedWorktree(t, req)
 	// Explicit: no interactive action env (P2 path).
 	req.ExtraEnv = nil

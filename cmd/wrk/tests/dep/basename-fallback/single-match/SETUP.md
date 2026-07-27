@@ -13,7 +13,12 @@ consumer -> wrk --dep mydep -> external worktree from saved/mydep
 - Run `wrk --dep <basename>` from consumer cwd without a local `./<basename>` entry.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureDepBasenameFallbackHelpersUsed()
 	return nil
 }

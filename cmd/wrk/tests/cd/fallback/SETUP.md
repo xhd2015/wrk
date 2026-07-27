@@ -30,7 +30,8 @@ wrk --cd <abs>
   and that the child shell's cwd is the resolved absolute target.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Default: channel closed. Leaves may installFakeBash and set paths.
 	if req.RepoDir == "" {
 		req.RepoDir = initNeutralCwd(t, req.WorkRoot, "workspace")

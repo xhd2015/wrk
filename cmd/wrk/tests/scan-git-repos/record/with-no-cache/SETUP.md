@@ -15,7 +15,9 @@ wrk --scan-git-repos --no-cache <scan-root>
 2. Run `wrk --scan-git-repos --no-cache <scan-root>`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	scanRoot := makeScanRoot(t, req.WorkRoot)
 	mainRepo := initScanMainRepo(t, scanRoot, "myrepo")
 	req.MainRepo = mainRepo

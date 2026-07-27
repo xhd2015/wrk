@@ -12,7 +12,9 @@ workspace/ -> wrk --set-config --show -h
 1. Run `wrk --set-config --show -h`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = setConfigArgs("--show", "-h")
 	return nil
 }

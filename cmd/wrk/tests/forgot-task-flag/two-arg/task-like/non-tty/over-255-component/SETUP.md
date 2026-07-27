@@ -16,9 +16,12 @@ wrk <myrepo> <256 x 'b'> (non-TTY)
 ```go
 import (
 	"strings"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupTwoArg(t, req, strings.Repeat("b", 256))
 	return nil
 }

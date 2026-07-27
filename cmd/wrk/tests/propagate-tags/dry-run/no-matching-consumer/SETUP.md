@@ -17,9 +17,14 @@ cwd=lib -> wrk --propagate-tags --dry-run
 3. Register both; dry-run from lib.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	libPath := filepath.Join(req.WorkRoot, "repos", "lib")
 	toolPath := filepath.Join(req.WorkRoot, "repos", "tool")
 

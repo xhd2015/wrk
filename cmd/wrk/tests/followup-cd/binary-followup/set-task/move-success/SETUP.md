@@ -13,7 +13,9 @@ wrk --set-task "new task" -> follow-up: cd <newPath>
 2. Run `--set-task "new task"` with confirm env and follow-up env.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := setupMainRepo(t, req)
 	wtDir := runWrkWithArgs(t, req, mainRepo, "--task", "original task")
 	req.WtDir = wtDir

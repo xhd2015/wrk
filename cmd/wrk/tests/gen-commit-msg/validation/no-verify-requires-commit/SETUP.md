@@ -17,7 +17,9 @@ workspace/ -> wrk --gen-commit-msg --no-verify
 1. Run `wrk --gen-commit-msg --no-verify` from neutral cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--gen-commit-msg", "--no-verify"}
 	return nil
 }

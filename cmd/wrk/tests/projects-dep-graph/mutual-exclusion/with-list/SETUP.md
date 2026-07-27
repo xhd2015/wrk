@@ -12,7 +12,9 @@ workspace/ -> wrk --projects-dep-graph --list
 1. Run `--projects-dep-graph` with `--list`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--projects-dep-graph", "--list"}
 	return nil
 }

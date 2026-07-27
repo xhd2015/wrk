@@ -15,7 +15,8 @@ wrk --bash-integration --install
 2. Run install again (the measured run).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "install")
 	if req.DryRun {
 		t.Fatalf("expected real install, not dry-run")

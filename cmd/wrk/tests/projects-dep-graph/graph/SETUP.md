@@ -21,7 +21,8 @@ workspace/ (non-git) + WRK_HOME projects.json
 - Implementation uses `BuildInventory` + `CrossEdges` under the hood.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Args = []string{"--projects-dep-graph"}
 	depGraphEnsureHelpersUsed()
 	return nil

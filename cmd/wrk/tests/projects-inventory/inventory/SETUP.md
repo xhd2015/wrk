@@ -28,7 +28,8 @@ WRK_HOME/projects.json
 - Cross vs intra classification requires owned modules registered in the same inventory.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Op = OpInventory
 	return nil
 }

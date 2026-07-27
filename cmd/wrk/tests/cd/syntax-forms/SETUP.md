@@ -23,7 +23,8 @@ wrk --cd /abs  <->  wrk /abs --cd
 - Both leaves expect exit 0, empty stdout, follow-up `cd /abs\n`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	enableInPlaceChannel(t, req)
 	target := cdAbsTarget(t, req, "jumpto")
 	req.MainRepo = target // reuse field as resolved abs target for asserts

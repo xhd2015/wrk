@@ -13,7 +13,8 @@ wrk --merge-back [--gen-commit-msg --commit …] [--tag-next|…] from main
   (including P2 `--gen-commit-msg --commit` pre-stage).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Narrow primary to --merge-back; leaves add modifiers on main-repo cwd.
 	skipIfNoGit(t)
 	return nil

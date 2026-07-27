@@ -1,3 +1,4 @@
+
 ## Expected Output
 
 ```
@@ -29,9 +30,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertExit0(t, resp, err)
 	assertInstallReport(t, resp, "installed", "installed", "installed", "installed")
 	if _, statErr := os.Stat(resp.BashShPath); statErr != nil {

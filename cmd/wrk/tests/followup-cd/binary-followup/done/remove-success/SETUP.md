@@ -13,7 +13,9 @@ wrk creates wt; merge branch into main; wrk --done + WRK_FOLLOWUP_FILE
 2. Run `wrk --done` from worktree with follow-up env set.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, wtDir, branch := setupWrkWorktreeFromMain(t, req)
 	commitAheadOnWorktree(t, wtDir, "feature-work", "already merged")
 	runGitIsolated(t, mainRepo, "merge", "--ff-only", branch)

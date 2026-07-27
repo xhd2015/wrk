@@ -13,7 +13,8 @@ neutral cwd -> wrk myrepo -> create from saved project path
 - Run `wrk <basename>` from a cwd without a local `./<basename>` entry.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureBasenameFallbackHelpersUsed()
 	return nil
 }

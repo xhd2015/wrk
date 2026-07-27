@@ -1,3 +1,8 @@
+---
+label: e2e
+explanation: product binary CLI integration (process boundary)
+---
+
 ## Expected
 
 - Exit 0.
@@ -14,7 +19,8 @@
 - 0
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	wt := wantDashboardCreateWorktree(req)
 	assertCreateOKPath(t, req, resp, err, wt)
 	if resp.Stderr != "" {

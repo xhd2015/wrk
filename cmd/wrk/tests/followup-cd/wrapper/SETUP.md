@@ -18,7 +18,8 @@ source bash.sh; wrk ...
 2. Descendants set start dir, CLI args, AutoCD, and fixtures.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	req.Mode = "wrapper"
 	return nil

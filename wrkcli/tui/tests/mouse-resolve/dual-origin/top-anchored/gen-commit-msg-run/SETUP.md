@@ -18,9 +18,13 @@ height = viewLines + 40
 2. Use dual-origin top-anchored geometry from ancestors.
 
 ```go
-import "testing"
+import (
+	"testing"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.StageID = "gen-commit-msg"
 	req.Target = "run"
 	return nil

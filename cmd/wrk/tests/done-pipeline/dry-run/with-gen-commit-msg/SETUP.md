@@ -28,9 +28,12 @@ myrepo (v0.0.1) + wt (feature-work ahead) + staged uncommitted file
 import (
 	"path/filepath"
 	"strings"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDonePipelineLocal(t, req)
 
 	// Stage an uncommitted change on the source worktree for gen-commit dry plan.

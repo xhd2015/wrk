@@ -16,7 +16,8 @@ wrk <mainRepo> --new-terminal
 2. Run with `--new-terminal` only (no agent).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupCreateUXFromFakeHome(t, req)
 	req.Args = []string{"--new-terminal"}
 	return nil

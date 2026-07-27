@@ -19,7 +19,9 @@ linked wt + registered app
 3. Run with `--dry-run` and **without** `-y`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDonePipelinePropagateTagNext(t, req)
 	req.Args = []string{"--done", "--tag-next", "--propagate-tags", "--dry-run"}
 	return nil

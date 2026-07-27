@@ -16,7 +16,8 @@ wrk --gen-commit-msg --sync [--dry-run] -> not mutually exclusive
 1. Descendants either reject list/status-style modes or allow pipeline stages with gen-commit.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: mutex leaves share root helpers; with-sync needs git (leaf sets RepoDir).
 	ensureGenCommitMsgHelpersUsed()
 	return nil

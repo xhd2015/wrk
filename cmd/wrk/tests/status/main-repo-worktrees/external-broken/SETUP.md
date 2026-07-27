@@ -14,7 +14,9 @@ external wt (alive, git fails) -> appended Dir + Status: error: ...
 3. Run `wrk --status` from the main repo root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, wtDir, _ := createExternalWrkWorktree(t, req)
 	breakWorktreeGitMetadata(t, req, wtDir)
 	req.RepoDir = mainRepo

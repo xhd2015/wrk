@@ -14,7 +14,8 @@ wrk --complete -- wrk - 1 -> flags still returned
 2. Run two complete invocations: basename attempt and flag attempt.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.CompleteCases = []CompleteCase{
 		{Name: "basename", Words: []string{"wrk", "al"}, CWord: 1},
 		{Name: "flags", Words: []string{"wrk", "-"}, CWord: 1},

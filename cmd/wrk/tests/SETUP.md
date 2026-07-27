@@ -20,6 +20,8 @@ wrk --list from cwd -> git worktree list stdout unchanged
 
 Each test runs the `wrk` CLI in an isolated environment. The `wrk` binary is built once per doctest session (`{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/wrk`, file-locked across leaf processes). Each leaf gets its own temp directory and isolated `WRK_HOME` at `{WorkRoot}/.wrk`.
 
+Harness inject uses `d *session.Doctest` (package-level adopt; **no** `os.Setenv` of `DOCTEST_*` — leaves run under `t.Parallel()`).
+
 ```go
 import (
 	"bytes"
@@ -77,13 +79,52 @@ func fixtureCacheBase(t *testing.T) string {
 	return filepath.Join(home, "Library", "Caches", "doctest", "fixtures")
 }
 
+// harnessDoctest holds inject fields from d *session.Doctest for this suite
+// process. Filled in Setup; never written via os.Setenv (Parallel-safe).
+var (
+	harnessMu          sync.Mutex
+	harnessSessionID   string
+	harnessDoctestRoot string
+)
+
+func adoptDoctestContext(d *session.Doctest) {
+	if d == nil {
+		return
+	}
+	harnessMu.Lock()
+	defer harnessMu.Unlock()
+	if d.DOCTEST_SESSION_ID != "" {
+		harnessSessionID = d.DOCTEST_SESSION_ID
+	}
+	if d.DOCTEST_ROOT != "" {
+		harnessDoctestRoot = d.DOCTEST_ROOT
+	}
+}
+
 func doctestSessionID(t *testing.T) string {
 	t.Helper()
-	sid := os.Getenv("DOCTEST_SESSION_ID")
+	harnessMu.Lock()
+	sid := harnessSessionID
+	harnessMu.Unlock()
+	// Suite process may still export DOCTEST_SESSION_ID once via go test cmd.Env
+	// (session.Once); prefer d-backed harness field, then that read-only env.
 	if sid == "" {
-		t.Fatal("DOCTEST_SESSION_ID not set")
+		sid = os.Getenv("DOCTEST_SESSION_ID")
+	}
+	if sid == "" {
+		t.Fatal("DOCTEST_SESSION_ID not set (expected d *session.Doctest in Setup)")
 	}
 	return sid
+}
+
+func doctestRootPath() string {
+	harnessMu.Lock()
+	root := harnessDoctestRoot
+	harnessMu.Unlock()
+	if root == "" {
+		root = os.Getenv("DOCTEST_ROOT")
+	}
+	return root
 }
 
 func fixtureSessionRoot(t *testing.T) string {
@@ -115,8 +156,8 @@ func withFlock(t *testing.T, lockPath string, fn func()) {
 
 func findWrkModuleRoot(t *testing.T) string {
 	t.Helper()
-	// 1) DOCTEST_ROOT is the tests tree (…/cmd/wrk/tests); walk up to wrk go.mod.
-	if start := os.Getenv("DOCTEST_ROOT"); start != "" {
+	// 1) Doctest tree root from d (…/cmd/wrk/tests); walk up to wrk go.mod.
+	if start := doctestRootPath(); start != "" {
 		if m := findModuleRoot(start); m != "" {
 			if _, err := os.Stat(filepath.Join(m, "cmd", "wrk")); err == nil {
 				return m
@@ -156,7 +197,7 @@ func findWrkModuleRoot(t *testing.T) string {
 		}
 		dir = parent
 	}
-	t.Fatal("find wrk module root: set DOCTEST_ROOT or go.mod replace github.com/xhd2015/wrk")
+	t.Fatal("find wrk module root: d.DOCTEST_ROOT or go.mod replace github.com/xhd2015/wrk")
 	return ""
 }
 
@@ -183,15 +224,8 @@ func getWrkBin(t *testing.T) string {
 }
 
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	// Seed env from session so helpers can resolve fixture paths and wrk module.
-	if d != nil {
-		if d.DOCTEST_ROOT != "" {
-			_ = os.Setenv("DOCTEST_ROOT", d.DOCTEST_ROOT)
-		}
-		if d.DOCTEST_SESSION_ID != "" {
-			_ = os.Setenv("DOCTEST_SESSION_ID", d.DOCTEST_SESSION_ID)
-		}
-	}
+	// Adopt inject fields from d (no os.Setenv — leaves run under t.Parallel()).
+	adoptDoctestContext(d)
 	// Resolve symlinks so derived paths match git's resolved output (macOS
 	// serves /var from /private/var; t.TempDir returns the symlinked form).
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
@@ -319,6 +353,14 @@ func cloneDirCoW(src, dst string) error {
 		return exec.Command("cp", "-cR", src, dst).Run()
 	}
 	return exec.Command("cp", "-a", src, dst).Run()
+}
+
+// cloneMainGoModFromSeed clones the main-gomod fixture seed into dest.
+// Prefer this from child-package SETUPs: passing buildSeedMainGoMod as a function
+// value is not remapped to droot.BuildSeedMainGoMod by the doctest generator.
+func cloneMainGoModFromSeed(t *testing.T, dest string) {
+	t.Helper()
+	cloneRepoFromSeed(t, fixtureSeedMainGoMod, buildSeedMainGoMod, dest)
 }
 
 func cloneRepoFromSeed(t *testing.T, seedID string, build seedBuilder, dest string) {
@@ -1116,6 +1158,7 @@ func ensureHelpersUsed() {
 	_ = gitOutputIsolated
 	_ = gitWorktreeListIsolated
 	_ = initGitRepoOnMain
+	_ = cloneMainGoModFromSeed
 	_ = cloneRepoFromSeed
 	_ = ensureSeed
 	_ = sanitizeBranchToken

@@ -21,7 +21,13 @@ mod/
 4. Expect ScanRoot=mod; one module plan with install onlybin.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	modRoot := filepath.Join(req.WorkRoot, "mod")
 	writeGoMod(t, modRoot, "example.com/nongit-mod")
 	writePackageMain(t, filepath.Join(modRoot, "cmd", "onlybin"))

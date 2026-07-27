@@ -24,7 +24,8 @@ moduleRoot (no go.mod)
 - Product must not invent a module path when go.mod is absent.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.WantError = true
 	req.WantModuleName = ""
 	req.WantItems = []WantPlanItem{}

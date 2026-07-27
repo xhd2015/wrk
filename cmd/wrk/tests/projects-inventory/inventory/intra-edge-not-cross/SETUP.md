@@ -19,9 +19,13 @@ BuildInventory
 4. Expect IntraEdges has the edge; CrossEdges empty.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	monoPath := filepath.Join(req.WorkRoot, "repos", "mono")
 	// initRootAndSub then rewrite root go.mod to add require on sub.
 	initRootAndSubModuleRepo(t, monoPath, "example.com/mono")

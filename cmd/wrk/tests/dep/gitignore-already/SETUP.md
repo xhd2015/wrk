@@ -12,17 +12,23 @@
 2. Create dep repo and run `wrk --dep`.
 
 ```go
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
 import "path/filepath"
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := initConsumerRepo(t, req.WorkRoot, true)
 	writeFile(t, filepath.Join(consumer, ".gitignore"), "/external\n")
-	dep := initDepRepo(t, req.WorkRoot, "mydep", true)
+	depPath := initDepRepo(t, req.WorkRoot, "mydep", true)
 
 	req.RepoDir = consumer
-	req.DepPath = dep
+	req.DepPath = depPath
 	req.ConsumerTop = consumer
-	req.Args = []string{"--dep", dep}
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

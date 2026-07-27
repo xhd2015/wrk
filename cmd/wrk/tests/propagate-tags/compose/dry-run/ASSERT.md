@@ -1,3 +1,4 @@
+
 ## Expected Output
 
 Two major stages separated by a blank line (propagate uses **planned** next tag):
@@ -33,7 +34,8 @@ would: update 1 module across 1 project
 - 0
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
 	if resp.Stderr != "" {

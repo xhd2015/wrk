@@ -41,6 +41,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"github.com/xhd2015/doctest/session"
 )
 
 type projectsFile struct {
@@ -63,7 +64,8 @@ type wrkEvent struct {
 	ExitCode int      `json:"exit_code"`
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

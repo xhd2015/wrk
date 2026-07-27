@@ -17,9 +17,12 @@ myrepo (detached HEAD) -> wrk -> myrepo-{short-hash}-2026-06-30
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repoDir := filepath.Join(req.WorkRoot, "myrepo")
 	initGitRepoOnMain(t, repoDir)
 	runGitIsolated(t, repoDir, "checkout", "--detach")

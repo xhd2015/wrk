@@ -14,7 +14,8 @@
 2. Leaves set Args (and optionally stage a repo for dry-run validation paths).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: validation leaves share root helpers (stage for runner path).
 	ensureGenCommitMsgHelpersUsed()
 	return nil

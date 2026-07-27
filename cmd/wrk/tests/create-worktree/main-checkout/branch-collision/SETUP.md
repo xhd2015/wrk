@@ -14,7 +14,9 @@ myrepo (main) + refs/heads/main-2026-06-30 -> wrk -> path+branch -1 (new -b, no 
 3. Run `wrk` from `myrepo` on `main`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	initGitRepoOnMain(t, req.RepoDir)
 	runGitIsolated(t, req.RepoDir, "branch", branchName("main", wrkDate, 0))
 	return nil

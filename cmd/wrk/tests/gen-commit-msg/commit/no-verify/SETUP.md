@@ -24,7 +24,9 @@ repo/ (hook exits 1) + staged
 4. Run wrk with `--commit --no-verify`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	stageOneTextFileWithFailingPreCommit(t, req)
 	writeMockConfig(t, req, mockConfigSkipHooks)
 	installFakeOpencodeEnv(t, req)

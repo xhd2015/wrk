@@ -17,7 +17,8 @@ wrk --exec=pwd          -> non-zero; cut is not a value flag (equals form reject
 - Leaves set bare or equals-form `--exec` and assert non-zero + stderr.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	if req.RepoDir == "" {
 		req.RepoDir = req.WorkRoot
 	}

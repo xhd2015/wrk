@@ -1,3 +1,4 @@
+
 ## Expected Output
 
 ```
@@ -28,9 +29,11 @@ bashrc: {HOME}/.bashrc (marker installed)
 ```go
 import (
 	"testing"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertExit0(t, resp, err)
 	assertInstallReport(t, resp, "updated", "is up to date", "installed", "installed")
 	if resp.BashShContent != req.PreExistingBashSh {

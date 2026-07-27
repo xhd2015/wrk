@@ -60,6 +60,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
 // productGitRepoScanCacheRoot is the product default when CacheRoot is empty:
@@ -138,7 +139,8 @@ func homeUniverseIndexHasPath(t *testing.T, fakeHome, path string) bool {
 	return false
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Isolate HOME → product default cache only under sandbox.
 	req.FakeHome = req.WorkRoot
 

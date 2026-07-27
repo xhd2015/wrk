@@ -32,7 +32,9 @@ clean consumer linked wt (zero nested cascade under consumer)
 2. Run bare `wrk --done`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupCascadeScanForeignIsolation(t, req)
 	req.Args = []string{"--done"}
 	return nil

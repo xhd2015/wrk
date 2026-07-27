@@ -18,7 +18,9 @@ myrepo (v0.0.1) + wt (feature-work ahead)
 3. Run `wrk --done --dry-run` from the worktree (no `-y`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDonePipelineLocal(t, req)
 	recordComposeDryRunBaseline(t, req)
 	req.Args = []string{"--done", "--dry-run"}

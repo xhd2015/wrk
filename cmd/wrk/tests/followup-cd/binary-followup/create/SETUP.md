@@ -27,7 +27,8 @@ cwd=main; wrk --force-cd (no channel) -> install hint + shell @ worktree
 2. Target-dir leaves pass a second absolute positional path and assert empty follow-up.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "binary")
 	return nil
 }

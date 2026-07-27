@@ -17,9 +17,13 @@ BuildInventory
 3. Expect SkippedPaths = [missing]; ProjectPaths = [good]; modules for good only.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	goodPath := filepath.Join(req.WorkRoot, "repos", "good")
 	initSingleModuleRepo(t, goodPath, "example.com/good")
 	goodPath = resolvePath(t, goodPath)

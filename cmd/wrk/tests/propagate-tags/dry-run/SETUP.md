@@ -26,7 +26,8 @@ source main -> ResolveSourceReleases -> match other projects
 - Side-effect asserts use pre-run snapshots from `captureRepoSnapshots`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Descendants override Args/RepoDir after building fixtures.
 	propTagsEnsureHelpersUsed()
 	if len(req.Args) == 0 {

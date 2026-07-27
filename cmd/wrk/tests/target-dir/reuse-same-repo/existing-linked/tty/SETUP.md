@@ -14,7 +14,8 @@ existing linked WT of myrepo + TTY
 - Descendants set `req.UseScriptTTY = true` and `req.StdinInput`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Fake TTY via root Run's execScriptTTYWrk path.
 	req.UseScriptTTY = true
 	if !req.UseScriptTTY {

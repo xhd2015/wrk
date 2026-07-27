@@ -1,3 +1,8 @@
+---
+label: e2e
+explanation: product binary CLI integration (process boundary)
+---
+
 ## Expected
 
 - Live dashboard before keys complete.
@@ -6,7 +11,13 @@
 - Worktree still present (dry-run).
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+import (
+	"github.com/xhd2015/doctest/session"
+	"strings"
+)
+
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	logPath := dashComposeArgvLogPath(req)
 	writeFile(t, logPath, "")

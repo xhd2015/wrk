@@ -19,7 +19,8 @@ wrk <dir> <target-dir> --dep <dep>   -> wrk: unexpected arguments
 - `with-dep/` builds a consumer repo requiring a dep, then `req.Args = ["--dep", depPath]`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

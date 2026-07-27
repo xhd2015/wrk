@@ -12,7 +12,7 @@ workspace/ -> wrk skill --show --header -> stdout ---\nname: wrk\n---\n
 1. Run `wrk skill --show --header` from neutral cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.Args = []string{"skill", "--show", "--header"}
 	return nil
 }

@@ -34,9 +34,11 @@ wrk <basename> -> stat(cwd/<basename>) is file -> lookup projects.json by basena
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureCwdFileExistsHelpersUsed()
 	return nil
 }

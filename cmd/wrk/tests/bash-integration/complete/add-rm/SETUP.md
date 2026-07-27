@@ -12,7 +12,8 @@ wrk --complete for --add and --rm value positions -> prefix-filtered basenames
 2. Run two complete invocations via `req.CompleteCases`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	seedStandardProjects(req)
 	req.CompleteCases = []CompleteCase{
 		{Name: "add", Words: []string{"wrk", "--add", "al"}, CWord: 2},

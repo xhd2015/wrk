@@ -14,7 +14,8 @@ existing linked WT of myrepo
 - Descendants pre-create linked WTs; leave `UseScriptTTY` false (default pipe).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Explicit non-TTY: no UseScriptTTY; no confirm escape hatches.
 	req.UseScriptTTY = false
 	if req.UseScriptTTY {

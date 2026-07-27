@@ -14,7 +14,9 @@ projects.json (mydep1, mydep2) + consumer -> wrk --all-deps --dry-run -> would: 
 3. Run `wrk --all-deps --dry-run` from the consumer.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	allDepsEnsureHelpersUsed()
 	dryRunEnsureHelpersUsed()
 

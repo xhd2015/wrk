@@ -13,7 +13,9 @@ wrk --cd /jumpto -> last event command=cd, exit_code=0, args include --cd
 2. Run `wrk --cd <abs>`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	target := cdAbsTarget(t, req, "jumpto")
 	req.MainRepo = target
 	setCDFlagThenPath(req, target)

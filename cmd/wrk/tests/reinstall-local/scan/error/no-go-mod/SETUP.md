@@ -16,7 +16,13 @@ empty/  <- workDir
 3. Expect non-nil error; substring includes `go.mod`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	empty := filepath.Join(req.WorkRoot, "empty")
 	mkdirAll(t, empty)
 	req.WorkDir = resolvePath(t, empty)

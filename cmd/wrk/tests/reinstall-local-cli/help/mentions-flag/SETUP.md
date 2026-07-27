@@ -14,7 +14,9 @@ wrk -h
 1. Run `wrk -h` from neutral module dir.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"-h"}
 	return nil
 }

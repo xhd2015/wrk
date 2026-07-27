@@ -14,7 +14,9 @@ myrepo (main) + wt (main-{date}) -> merge wt branch into main -> wrk --done <wtD
 3. Run `wrk --done <wtDir>` from WorkRoot (not from inside the worktree).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, wtDir, branch := setupWrkWorktreeFromMain(t, req)
 
 	commitAheadOnWorktree(t, wtDir, "feature-work", "already merged")

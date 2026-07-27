@@ -39,7 +39,8 @@ cwd + GOBIN -> wrk --reinstall-local --dry-run
   N/M are totals across all modules; K = number of modules in the multi plan.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: multi-module dry-run defaults.
 	req.Args = []string{"--reinstall-local", "--dry-run"}
 	return nil

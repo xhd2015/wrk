@@ -11,7 +11,8 @@ sequential --set-config --create writes -> union of keys; no wipe of other creat
 - Leaves seed config and/or run multiple writes.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	if req.RepoDir == "" {
 		req.RepoDir = req.WorkRoot
 	}

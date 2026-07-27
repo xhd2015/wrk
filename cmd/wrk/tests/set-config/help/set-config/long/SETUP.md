@@ -12,7 +12,9 @@ workspace/ -> wrk --set-config --help
 1. Run `wrk --set-config --help` from neutral cwd (isolated WRK_HOME).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = setConfigArgs("--help")
 	return nil
 }

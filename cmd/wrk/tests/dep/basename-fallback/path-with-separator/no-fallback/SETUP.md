@@ -13,7 +13,13 @@ saved/mydep recorded; consumer cwd -> wrk --dep sub/mydep -> does not exist (no 
 3. Run `wrk --dep sub/mydep` from consumer cwd (no local `sub/mydep`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := initConsumerForDepBasename(t, req.WorkRoot)
 	savedDep := initSavedDepRepo(t, req.WorkRoot, "saved", "mydep")
 	recordSavedProject(t, req, savedDep)

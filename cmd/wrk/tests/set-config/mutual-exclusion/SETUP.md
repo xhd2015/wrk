@@ -12,7 +12,8 @@ wrk --set-config ... --list | with create dir positional | --no-config
 - Leaves combine set-config with forbidden modes/args.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	if req.RepoDir == "" {
 		req.RepoDir = req.WorkRoot
 	}

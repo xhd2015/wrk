@@ -165,6 +165,7 @@ import (
 	"fmt"
 	"sort"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 
 	"github.com/xhd2015/wrk/wrkcli"
 )
@@ -253,7 +254,8 @@ type ReleaseSnap struct {
 	Version    string
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
+	_ = d
 	switch req.Op {
 	case OpInventory:
 		// Classic TDD: BuildInventory + CrossEdges/IntraEdges under design.

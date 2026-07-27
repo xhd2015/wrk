@@ -14,7 +14,9 @@ linked wt with main ahead -> wrk --status (pipe, no --color) -> no ANSI, Master:
 4. Run `wrk --status` (no `--color`) from the main repo root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureColorStatusHelpersUsed()
 	mainRepo := setupColorStatusMainRepo(t, req.WorkRoot, "myrepo", "status main root")
 	wtDir := addColorStatusLinkedWorktree(t, mainRepo, "wt-linked", "wt-side")

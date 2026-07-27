@@ -19,7 +19,9 @@ cwd=lib -> wrk --tag-next --propagate-tags
 2. Args: `--tag-next --propagate-tags` (flag order free; this leaf uses tag-next first).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupComposeRootBump(t, req, false)
 	req.Args = []string{"--tag-next", "--propagate-tags"}
 	return nil

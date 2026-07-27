@@ -49,6 +49,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"github.com/xhd2015/doctest/session"
 )
 
 const cdBasename = "myrepo"
@@ -62,7 +63,8 @@ type wrkEvent struct {
 	ExitCode int      `json:"exit_code"`
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureCDHelpersUsed()
 	return nil
 }

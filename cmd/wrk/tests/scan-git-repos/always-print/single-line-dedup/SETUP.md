@@ -15,7 +15,9 @@ scan-root/myrepo (one main, cold)
 2. Run `wrk --scan-git-repos <scan-root>` from non-git WorkRoot.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	scanRoot := makeScanRoot(t, req.WorkRoot)
 	mainRepo := initScanMainRepo(t, scanRoot, "myrepo")
 	req.MainRepo = mainRepo

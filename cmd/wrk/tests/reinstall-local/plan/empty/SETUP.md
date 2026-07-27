@@ -22,7 +22,8 @@ PlanLocalReinstalls
 - Empty plan is success — later CLI phases may print "nothing to do".
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.WantItems = []WantPlanItem{}
 	return nil
 }

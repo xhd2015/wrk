@@ -25,7 +25,8 @@ mainRoot + scan(main, nested…) + linkedOrdered
 - Later phases print `---- external ----` when this list is non-empty (P2+).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Shared baseline for has-external leaves: main fixture root is known.
 	req.MainRoot = pathMain()
 	return nil

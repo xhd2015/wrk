@@ -20,7 +20,9 @@ myrepo + wtA (ahead) + wtB (feature-stays)
 2. Run `wrk --merge-back -y --sync` from wtA.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupCompositionTwoWTs(t, req)
 	req.Args = []string{"--merge-back", "-y", "--sync"}
 	return nil

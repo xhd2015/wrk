@@ -15,7 +15,8 @@ PlanLocalReinstalls
 3. Expect empty Items, ModuleName `empty-mod`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	writeGoMod(t, req.ModuleRoot, "example.com/empty-mod")
 
 	req.WantModuleName = "empty-mod"

@@ -19,7 +19,13 @@ PlanLocalReinstalls
 5. Expect exactly one item: script path, not cmd; plus prefer-script notice.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	writeGoMod(t, req.ModuleRoot, "example.com/conflict-foo")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "foo"))
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "script", "foo", "install"))

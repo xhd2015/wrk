@@ -13,7 +13,9 @@ workspace/ -> wrk --propagate-tags --list
 2. Run `--propagate-tags` with `--list`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.RepoDir = initNeutralCwd(t, req.WorkRoot, "workspace")
 	req.Args = []string{"--propagate-tags", "--list"}
 	return nil

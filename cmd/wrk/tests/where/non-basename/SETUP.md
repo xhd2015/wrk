@@ -12,7 +12,8 @@ wrk --where sub/spl or wrk --where /abs/.../spl -> non-zero, basename-only rejec
 - Descendants seed a saved `spl` project when needed and pass a non-basename `--where` arg.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureWhereHelpersUsed()
 	return nil
 }```

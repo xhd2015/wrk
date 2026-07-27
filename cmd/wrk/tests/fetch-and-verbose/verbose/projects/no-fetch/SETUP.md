@@ -7,7 +7,9 @@ recorded tracked repo -> wrk --projects -v -> stderr empty
 ```
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	origin := setupFetchVerboseBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupFetchVerboseTrackedRepo(t, req.WorkRoot, "proj-v-clean", origin, "proj v clean")
 	recordFetchVerboseProject(t, req, repo)

@@ -16,7 +16,9 @@ wrk --status from main cwd -> primary only
 2. Run `wrk --status` from the main repo root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, _, _ := createExternalWrkWorktree(t, req)
 	req.RepoDir = mainRepo
 	return nil

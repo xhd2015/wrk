@@ -16,7 +16,14 @@ wrk --cd myrepo -> follow-up uses local workspace/myrepo abs (not saved)
 3. In-place `wrk --cd myrepo` so we can assert follow-up without shell.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	skipIfNoGit(t)
 	enableInPlaceChannel(t, req)
 	saved := initSavedGitRepo(t, req.WorkRoot, "saved", cdBasename)

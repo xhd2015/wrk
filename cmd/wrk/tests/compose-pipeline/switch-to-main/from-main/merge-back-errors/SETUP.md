@@ -14,9 +14,14 @@ myrepo (main) -> wrk --merge-back
 2. Run `wrk --merge-back` from main.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo
 	initGitRepoOnMain(t, mainRepo)

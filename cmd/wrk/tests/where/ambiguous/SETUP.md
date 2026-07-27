@@ -13,7 +13,8 @@ wrk --where spl -> stdout lists all matching absolute paths sorted; exit 0
 - Run `wrk --where spl` from neutral cwd without local `./spl`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureWhereHelpersUsed()
 	return nil
 }```

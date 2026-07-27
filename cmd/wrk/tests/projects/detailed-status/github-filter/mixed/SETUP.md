@@ -13,7 +13,14 @@ record GH + local bare origin + no-remote -> wrk --projects --github -> only GH 
 3. Run `wrk --projects --github`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureGitHubFilterHelpersUsed()
 
 	// GitHub: tracked bare then rewrite origin URL to github.com (local tracking refs remain).

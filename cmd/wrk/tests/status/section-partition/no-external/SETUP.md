@@ -25,7 +25,8 @@ mainRoot + scan(main, linked…) + linkedOrdered
 - Empty external is the P2 signal to omit `---- external ----` (not asserted here).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping default: no external paths expected unless a leaf overrides.
 	req.WantExternal = []string{}
 	return nil

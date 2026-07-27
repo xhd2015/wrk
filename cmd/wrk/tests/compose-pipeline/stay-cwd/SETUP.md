@@ -18,7 +18,8 @@ main | linked-wt
 - Grouping: split by cwd (main vs linked worktree).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping node: git required for descendant compose fixtures.
 	skipIfNoGit(t)
 	return nil

@@ -13,7 +13,8 @@ wrk --where spl -> stdout = saved path only (no cwd stat fallback)
 - Run `wrk --where spl` and assert stdout is the saved path only.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureWhereHelpersUsed()
 	return nil
 }```

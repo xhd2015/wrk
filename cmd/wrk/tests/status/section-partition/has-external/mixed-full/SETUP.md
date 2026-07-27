@@ -23,7 +23,13 @@ PartitionStatusPaths(
    in-tree linked not in external; no duplicates.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"sort"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	main := pathMain()
 	inTree := pathLinkedInTree()
 	late := pathLinkedLate()

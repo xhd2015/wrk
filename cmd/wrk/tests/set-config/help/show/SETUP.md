@@ -13,7 +13,8 @@ wrk --set-config --show -h|--help
 - Leaves set `--show` plus help form.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	if req.RepoDir == "" {
 		req.RepoDir = req.WorkRoot
 	}

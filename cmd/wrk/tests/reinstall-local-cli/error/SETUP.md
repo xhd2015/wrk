@@ -19,7 +19,8 @@ mod/ (empty) -> wrk --reinstall-local --dry-run -> error
 3. Assert non-zero exit and clear error.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: module-resolution error path.
 	req.Args = []string{"--reinstall-local", "--dry-run"}
 	return nil

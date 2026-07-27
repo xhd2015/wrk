@@ -17,7 +17,8 @@ wrk --web --port <free>
 3. Root `Run` starts wrk, GETs the API path, then kills the server.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// WRK_HOME is empty (no projects.json) — ListProjects returns [].
 	setupWebProbe(t, req, "/api/wrk/projects")
 	return nil

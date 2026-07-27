@@ -16,9 +16,14 @@ wrk --main --status -> full main scan with Dir vs inv cwd (main often "..", link
 2. cwd = in-tree linked root; Args = `--main`, `--status`.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	statusInitRepoWithSubject(t, mainRepo, "main flag in-tree linked")
 	wtDir := addInTreeLinkedWorktree(t, mainRepo, "wt-linked", "wt-side")

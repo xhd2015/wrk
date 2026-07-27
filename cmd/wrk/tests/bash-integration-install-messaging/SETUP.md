@@ -46,6 +46,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 
 	"github.com/xhd2015/doctest/assert"
 )
@@ -55,7 +56,8 @@ const (
 	wrkMarkerEnd   = "# === wrk integration end ==="
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		return fmt.Errorf("resolve work root: %w", err)

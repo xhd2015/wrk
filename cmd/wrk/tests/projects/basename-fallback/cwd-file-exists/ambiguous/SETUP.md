@@ -13,7 +13,8 @@ wrk spl <flags> -> guided stderr listing all matches + <full-path> hint
 - Run `wrk <basename>` with mode flags; hint preserves flags and uses `<full-path>` placeholder.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureCwdFileExistsHelpersUsed()
 	return nil
 }

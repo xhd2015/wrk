@@ -20,9 +20,15 @@ consumer (cwd = go-pkgs/) + dep -> wrk --dep -> external worktree + replace
 3. Run `wrk --dep <dep>` with cwd = `consumer/go-pkgs/`.
 
 ```go
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
 import "path/filepath"
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := filepath.Join(req.WorkRoot, "consumer")
 	initGitRepoOnMain(t, consumer)
 	modDir := filepath.Join(consumer, "go-pkgs")
@@ -32,7 +38,7 @@ func Setup(t *testing.T, req *Request) error {
 	runGitIsolated(t, consumer, "add", ".")
 	runGitIsolated(t, consumer, "commit", "-m", "add sub-module")
 
-	dep := initDepRepo(t, req.WorkRoot, "mydep", true)
+	depPath := initDepRepo(t, req.WorkRoot, "mydep", true)
 
 	consumer, err := filepath.EvalSymlinks(consumer)
 	if err != nil {
@@ -40,11 +46,11 @@ func Setup(t *testing.T, req *Request) error {
 	}
 	// cwd is inside go-pkgs/, not the repo root
 	req.RepoDir = filepath.Join(consumer, "go-pkgs")
-	req.DepPath = dep
+	req.DepPath = depPath
 	req.ConsumerTop = consumer
 	req.ConsumerModDir = modDir
 	req.DepModulePath = depModulePath
-	req.Args = []string{"--dep", dep}
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

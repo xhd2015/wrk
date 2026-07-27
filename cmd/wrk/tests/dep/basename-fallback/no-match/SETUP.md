@@ -13,7 +13,12 @@ consumer -> wrk --dep <basename> -> wrk: <candidate> does not exist
 - Run `wrk --dep <basename>`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureDepBasenameFallbackHelpersUsed()
 	return nil
 }

@@ -15,7 +15,12 @@ WRK_BASENAME_CONFIRM=1 + stdin "2" -> --dep succeeds from zzz/mydep (lex-sorted 
 4. Run `wrk --dep mydep` with `WRK_BASENAME_CONFIRM=1` and stdin `2\n`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	consumer := initConsumerForDepBasename(t, req.WorkRoot)
 	depA := initSavedDepRepo(t, req.WorkRoot, "aaa", "mydep")
 	depZ := initSavedDepRepo(t, req.WorkRoot, "zzz", "mydep")

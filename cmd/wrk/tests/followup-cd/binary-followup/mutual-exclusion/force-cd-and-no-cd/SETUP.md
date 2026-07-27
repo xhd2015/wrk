@@ -13,11 +13,13 @@ wrk --force-cd --no-cd -> non-zero; empty follow-up; error mentions both flags /
 2. Run with both flags and follow-up env set.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	req.RepoDir = mainRepo
 	req.UseFollowupEnv = true
 	req.CLIArgs = []string{"--force-cd", "--no-cd"}
+	req.InProcess = true
 	return nil
 }
 ```

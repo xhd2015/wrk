@@ -15,7 +15,8 @@ linked-wt (clean porcelain)
 2. Bare `wrk` non-TTY.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	linked := setupDashboardLinkedWorktree(t, req)
 	req.RepoDir = linked
 	req.Args = nil

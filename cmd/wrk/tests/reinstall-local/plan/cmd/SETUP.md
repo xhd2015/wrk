@@ -24,7 +24,8 @@
 - Bin name is the last path segment of the cmd package directory.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: cmd-only discovery branch defaults.
 	return ensureCmdGroupMarked(req)
 }

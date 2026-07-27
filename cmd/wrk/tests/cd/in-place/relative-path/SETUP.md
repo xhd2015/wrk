@@ -14,7 +14,14 @@ cwd=workspace; wrk rel/target --cd + WRK_FOLLOWUP_FILE
 2. Run `wrk rel/target --cd` from workspace with channel open.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	// Parent in-place Setup already set RepoDir=workspace
 	rel := filepath.Join("rel", "target")
 	abs := filepath.Join(req.RepoDir, "rel", "target")

@@ -20,25 +20,16 @@ no projects.json -> wrk --all-deps --dry-run -> would: wrked 0 deps
 - Descendants register deps (or leave projects empty) and run `wrk --all-deps --dry-run`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	allDepsEnsureHelpersUsed()
 	dryRunEnsureHelpersUsed()
 	return nil
 }
 
+// dryRunEnsureHelpersUsed keeps the intermediate node linked to parent helpers.
+// Do not bare-reference parent funcs here: child packages cannot resolve them.
 func dryRunEnsureHelpersUsed() {
-	_ = allDepsGoModJSON{}
-	_ = allDepsReadGoMod
-	_ = allDepsHasReplaceForModule
-	_ = allDepsReplacePathForModule
-	_ = allDepsGitignoreContainsExternal
-	_ = allDepsCountGitignoreExternalLines
-	_ = allDepsExternalRelPath
-	_ = allDepsExternalAbsPath
-	_ = registerAllDepsProject
-	_ = registerAllDepsProjects
-	_ = initAllDepsRepo
-	_ = initAllDepsConsumer
-	_ = allDepsEnsureHelpersUsed
+	allDepsEnsureHelpersUsed()
 }
 ```

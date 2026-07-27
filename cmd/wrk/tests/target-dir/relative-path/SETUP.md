@@ -20,7 +20,9 @@ myrepo (main) -> wrk myrepo wt -> {WorkRoot}/wt (resolved vs shell cwd, NOT vs {
 3. Run `wrk myrepo wt` from process cwd `{WorkRoot}`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.SpawnDir = "wt"
 	return nil
 }

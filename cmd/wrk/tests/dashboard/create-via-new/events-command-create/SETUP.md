@@ -14,7 +14,8 @@ myrepo -> wrk --new
 3. Assert last event is create with `--new` in args.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Args = []string{"--new"}
 	return nil
 }

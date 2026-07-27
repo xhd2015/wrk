@@ -35,9 +35,11 @@ import (
 
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 	"github.com/xhd2015/gitops/git"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	req.Args = []string{"--status"}
 	ensureSectionOrderHelpersUsed()
@@ -177,8 +179,8 @@ func ensureSectionOrderHelpersUsed() {
 	_ = appendedHealthyBlockPlain
 	_ = primaryLinkedBlockPlain
 	_ = createSecondExternalWrkWorktree
-	_ = statusStdoutPrimaryExternal
-	_ = assertNoExternalSectionHeader
-	_ = setupWrkWorktreeFromMain
+	// Parent/monotree helpers (statusStdoutPrimaryExternal,
+	// assertNoExternalSectionHeader, setupWrkWorktreeFromMain) are used from
+	// leaves via package rewrite; do not bare-ref them here.
 }
 ```

@@ -16,7 +16,8 @@ myrepo-main-{date} + myrepo-main-{date}-1
 2. Run named bring under fake TTY with stdin `\n`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	paths := namedBringExistingWorktrees(t, req, 2)
 	// Lex-smallest of the two abs paths is the unsuffixed one for this naming scheme.
 	req.WtDir = paths[0]

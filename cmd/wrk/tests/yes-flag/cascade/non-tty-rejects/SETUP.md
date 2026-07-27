@@ -13,7 +13,9 @@ consumer wt + ahead external dep -> wrk --done -y
 2. Run `wrk --done -y` on non-TTY.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupConsumerWithAheadExternalDep(t, req)
 	req.RepoDir = req.WtDir
 	req.Args = []string{"--done", "-y"}

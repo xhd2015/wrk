@@ -24,7 +24,8 @@ linked or main cwd + --main --status -> runStatus(mainRepo)
 - In-tree linked must not collapse to the linked-cwd shortcut shape.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Happy leaves own fixture layout; keep main-flag helpers referenced.
 	ensureMainFlagHelpersUsed()
 	return nil

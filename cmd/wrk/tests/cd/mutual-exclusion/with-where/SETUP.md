@@ -12,7 +12,9 @@ wrk --cd /jumpto --where myrepo -> non-zero; mutually exclusive
 2. Combine `--cd` and `--where`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--cd", req.MainRepo, "--where", cdBasename}
 	return nil
 }

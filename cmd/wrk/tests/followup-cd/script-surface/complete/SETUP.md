@@ -12,7 +12,8 @@ wrk --bash-integration --complete -- <words> <cword> -> flag candidates
 1. Set Mode to complete.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Mode = "complete"
 	return nil
 }

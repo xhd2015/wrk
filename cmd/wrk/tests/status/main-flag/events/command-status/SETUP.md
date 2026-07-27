@@ -15,7 +15,9 @@ external wt -> wrk --main --status
 3. Assert last event only (no second status invocation before read).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, wtDir, branch := setupExternalMainFlagFixture(t, req)
 	req.MainRepo = mainRepo
 	req.WtDir = wtDir

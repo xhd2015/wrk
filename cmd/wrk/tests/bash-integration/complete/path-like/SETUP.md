@@ -24,7 +24,8 @@ wrk --bash-integration --complete -- <words> <cword> -> empty stdout (exit 0)
 - Non-path-like regression lives under complete/basenames, complete/flags, complete/dep.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	seedStandardProjects(req)
 	return nil
 }

@@ -12,7 +12,9 @@ WorkRoot -> wrk myrepo --list -> projects.json records myrepo main path
 2. Run `wrk <mainRepo> --list` from `{WorkRoot}`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := initProjectsRepo(t, req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo
 	req.TargetDir = mainRepo

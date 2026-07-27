@@ -1,8 +1,6 @@
 ---
 label: slow, flaky
-explanation: 12 linked worktrees + bare remote; cold run ~45s; timing budget thresholds vary with machine load
 ---
-
 ## Expected
 
 After parallel worktree gathering (fixed worker pool + single main-repo goroutine):
@@ -17,7 +15,7 @@ Serial baseline today (~190ms worktree aggregate, ~300ms run) must not pass thes
 - 0
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit code %d stderr=%q", resp.ExitCode, resp.Stderr)

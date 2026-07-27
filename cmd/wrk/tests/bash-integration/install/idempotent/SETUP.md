@@ -13,7 +13,8 @@ wrk --bash-integration --install (twice) -> single marker per profile, script pr
 2. Run install twice (`req.RunTwice = true`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.PreExistingBashSh = preInstalledBashShContent()
 	req.PreExistingBashProfile = preInstalledProfileContent()
 	req.PreExistingBashRC = preInstalledProfileContent()

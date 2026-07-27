@@ -14,7 +14,8 @@ myrepo -> wrk -t "ship feature"
 2. Run `wrk -t "ship feature"` (TaskDesc + TaskFlag; no `--new`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupDashboardMainRepo(t, req)
 	req.TaskDesc = "ship feature"
 	req.TaskFlag = "-t"

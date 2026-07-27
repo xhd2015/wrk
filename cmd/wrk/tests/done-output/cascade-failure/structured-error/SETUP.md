@@ -19,7 +19,9 @@ consumer + diverged external
 2. Run bare `wrk --done` from consumer worktree (default auto-yes; non-TTY).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDivergedExternalForCascadeFail(t, req)
 	req.RepoDir = req.WtDir
 	req.Args = []string{"--done", "-y"}  // D3: diverged cascade needs -y to reach conflict Error:

@@ -14,7 +14,8 @@ myrepo -> wrk --new
 2. Run `wrk --new` (P1 create entry; bare no-args is no longer create).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupMainRepoForCreateUX(t, req)
 	installCreateUXMocks(t, req, "darwin")
 	req.Args = []string{"--new"}

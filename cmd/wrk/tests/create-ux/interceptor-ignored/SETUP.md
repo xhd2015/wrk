@@ -12,7 +12,8 @@ wrk -> native create; no intercept; exit 0
 - Seed interceptor-only config; run create.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupMainRepoForCreateUX(t, req)
 	installCreateUXMocks(t, req, "darwin")
 	return nil

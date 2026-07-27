@@ -13,9 +13,14 @@ cwd=lib (tagged) -> wrk --propagate-tags --dry-run -> event appended
 2. Run `wrk --propagate-tags --dry-run` from the source (no consumers required).
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	libPath := filepath.Join(req.WorkRoot, "repos", "lib")
 	initSingleModuleRepo(t, libPath, "example.com/lib", nil)
 	tagRepo(t, libPath, "v1.0.0")

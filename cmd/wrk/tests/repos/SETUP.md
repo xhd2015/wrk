@@ -27,9 +27,13 @@ wrk --repos + other mode -> error (mutually exclusive)
 - Ordering matches the repository discovery ordering used by `wrk --status`.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	req.Args = []string{"--repos"}
 	return nil

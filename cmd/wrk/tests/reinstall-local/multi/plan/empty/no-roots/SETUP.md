@@ -15,7 +15,8 @@ PlanLocalReinstallsMulti([], binDir)
 3. Expect empty `WantModules`, `WantError=false`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.ModuleRoots = []string{}
 	req.WantModules = []WantModulePlan{}
 	return nil

@@ -13,7 +13,9 @@ wrk --cd /jumpto -> wrk exit code 42; stdout still abs path; install hint
 2. Run `wrk --cd <abs>`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	target := cdAbsTarget(t, req, "jumpto")
 	req.MainRepo = target
 	installFakeBash(t, req, 42)

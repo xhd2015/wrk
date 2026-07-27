@@ -13,7 +13,8 @@ wrk --done [--gen-commit-msg --commit …] [--tag-next|--push|--sync|--reinstall
   (post stages and/or P2 `--gen-commit-msg --commit` pre-stage).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Narrow primary to --done; leaves add modifiers on main-repo cwd.
 	skipIfNoGit(t)
 	return nil

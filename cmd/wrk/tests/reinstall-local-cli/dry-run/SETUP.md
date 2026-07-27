@@ -25,7 +25,8 @@ mod/ + gobin/ -> wrk --reinstall-local --dry-run [--color]
 - Group default: successful dry-run (exit 0). Diagnostics are non-fatal.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: dry-run happy path defaults.
 	req.Args = []string{"--reinstall-local", "--dry-run"}
 	return nil

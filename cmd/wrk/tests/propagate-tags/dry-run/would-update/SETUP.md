@@ -25,7 +25,8 @@ app requires example.com/lib@older
 - Replace overlay is a descendant leaf, not this grouping's only case.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Mark subtree: plan expects at least one version-differing require.
 	// Leaf fixtures supply paths, go.mod requires, and snapshots.
 	propTagsEnsureHelpersUsed()

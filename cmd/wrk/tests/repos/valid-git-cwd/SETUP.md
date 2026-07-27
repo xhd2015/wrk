@@ -15,7 +15,8 @@ git checkout cwd -> wrk --repos -> repo paths rooted at checkout top
 - `wrk --repos` resolves the git toplevel before repository discovery.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Args = []string{"--repos"}
 	return nil
 }

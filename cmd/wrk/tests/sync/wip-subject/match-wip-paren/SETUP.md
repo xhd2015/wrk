@@ -11,7 +11,8 @@ IsWipSubject("wip(login): sketch") -> true
 1. Set subject to `wip(login): sketch`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Subject = "wip(login): sketch"
 	return nil
 }

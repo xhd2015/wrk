@@ -20,7 +20,8 @@ linked wt with parseable wrk name
 - Spawn worktree with `--task`, then run `--set-task` + `--exec` from inside it.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

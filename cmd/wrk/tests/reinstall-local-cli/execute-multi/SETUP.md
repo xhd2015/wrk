@@ -47,7 +47,8 @@ cwd + GOBIN -> wrk --reinstall-local
   stubs must remain unchanged.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: multi-module execute defaults (no --dry-run).
 	req.Args = []string{"--reinstall-local"}
 	return nil

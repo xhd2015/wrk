@@ -13,7 +13,8 @@ wrk -h | wrk --help
 - Descendants run root help (`-h` or `--help`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureReinstallLocalCLIHelpersUsed()
 	return nil
 }

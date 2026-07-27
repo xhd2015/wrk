@@ -20,7 +20,8 @@ wrk --propagate-tags + peer mode flag -> non-zero, mutually exclusive
 - Same exclusive-mode family as `--projects` / `--projects-dep-graph`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Leaves pair --propagate-tags with one peer exclusive mode flag.
 	propTagsEnsureHelpersUsed()
 	return nil

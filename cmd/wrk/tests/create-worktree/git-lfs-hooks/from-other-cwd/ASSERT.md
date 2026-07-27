@@ -1,3 +1,8 @@
+---
+label: e2e
+explanation: product binary CLI integration (process boundary)
+---
+
 ## Expected
 
 - Non-zero exit when cwd differs from the source repo and `PATH` is stripped (same as `wrk $X/agent-pro` with missing `git-lfs` on `PATH`).
@@ -10,7 +15,13 @@
 - 1
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+import (
+	"github.com/xhd2015/doctest/session"
+	"strings"
+)
+
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	if resp.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit from foreign cwd with stripped PATH, got 0 stdout=%q", resp.Stdout)

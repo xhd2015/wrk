@@ -17,7 +17,8 @@ linked-wt (ahead) + ACTION=run-merge-back + DRY_RUN=1
 3. Run bare `wrk` from linked worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupDashboardLinkedAhead(t, req)
 	setDashboardAction(t, req, "run-merge-back", true /* dryRun */)
 	req.Args = nil

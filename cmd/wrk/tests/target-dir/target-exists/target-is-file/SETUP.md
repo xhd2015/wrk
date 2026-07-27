@@ -17,9 +17,12 @@ myrepo (main) -> wrk myrepo {WorkRoot}/target -> non-zero, not a directory / can
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	target := filepath.Join(req.WorkRoot, "target")
 	writeFile(t, target, "i-am-a-file")
 	req.SpawnDir = target

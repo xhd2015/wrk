@@ -11,7 +11,9 @@ workspace/ -> wrk --exec -> non-zero; requires command; no worktree created
 1. Run `wrk --exec` with no trailing tokens from WorkRoot.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.RepoDir = req.WorkRoot
 	req.Args = []string{"--exec"}
 	return nil

@@ -18,7 +18,14 @@ checkout directory exists but its `.git` file still references the pre-move main
 4. Record and run `wrk --projects` (pipe mode, no `--color`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureDetailedStatusHelpersUsed()
 	origin := setupBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupTrackedMainRepo(t, req.WorkRoot, "new-main", origin, "main after move")

@@ -38,7 +38,8 @@ WRK_DASHBOARD_ACTION=cancel|run-done|run-merge-back
 - RUN leaves use `WRK_DASHBOARD_DRY_RUN=1` for hermetic zero-mutation compose.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	req.Args = nil
 	req.TargetDir = ""

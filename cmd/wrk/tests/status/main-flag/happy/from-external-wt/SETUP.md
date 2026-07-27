@@ -26,7 +26,8 @@ external wt cwd + --main --status -> main content; Dir labels vs external cwd
 - Stdout is **not** required to be byte-equal to `(cd main && wrk --status)`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo, wtDir, branch := setupExternalMainFlagFixture(t, req)
 	req.MainRepo = mainRepo
 	req.WtDir = wtDir

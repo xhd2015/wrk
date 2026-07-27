@@ -18,7 +18,14 @@ mod/ -> wrk --reinstall-local --dry-run
 4. Assert last `events.jsonl` event (do not re-invoke wrk before read).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	writeGoMod(t, req.ModuleRoot, "example.com/cli-events-dry")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "missing"))
 	// skip-only plan: no GOBIN stub — keeps dry-run fast and exit 0

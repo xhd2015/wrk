@@ -14,7 +14,9 @@ wrk --add -> wrk --rm -> wrk --rm again -> exit 0, empty stdout
 4. Run `wrk --rm <mainRepo>` (test invocation).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := initProjectsRepo(t, req.WorkRoot, "myrepo")
 	recordProjectViaAdd(t, req, mainRepo)
 	runWrkWithArgs(t, req, req.WorkRoot, "--rm", mainRepo)

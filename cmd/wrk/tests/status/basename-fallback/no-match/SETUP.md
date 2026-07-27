@@ -11,7 +11,8 @@ neutral cwd, no ./basename, no projects.json match -> wrk <basename> --status ->
 - Descendants run `wrk <basename> --status` with no local entry and no matching saved project.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureStatusBasenameFallbackHelpersUsed()
 	return nil
 }

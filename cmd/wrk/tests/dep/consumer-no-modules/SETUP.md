@@ -20,7 +20,14 @@ consumer (git, no go.mod anywhere) + dep (valid go.mod) -> wrk --dep -> error
 3. Run `wrk --dep <dep>` from the consumer.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := filepath.Join(req.WorkRoot, "consumer")
 	initGitRepoOnMain(t, consumer)
 	// NO go.mod at repo root. No go.mod in any subdirectory.
@@ -28,16 +35,16 @@ func Setup(t *testing.T, req *Request) error {
 	runGitIsolated(t, consumer, "add", "README.md")
 	runGitIsolated(t, consumer, "commit", "-m", "init consumer")
 
-	dep := initDepRepo(t, req.WorkRoot, "mydep", true)
+	depPath := initDepRepo(t, req.WorkRoot, "mydep", true)
 
 	consumer, err := filepath.EvalSymlinks(consumer)
 	if err != nil {
 		t.Fatalf("eval symlinks %s: %v", consumer, err)
 	}
 	req.RepoDir = consumer
-	req.DepPath = dep
+	req.DepPath = depPath
 	req.ConsumerTop = consumer
-	req.Args = []string{"--dep", dep}
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

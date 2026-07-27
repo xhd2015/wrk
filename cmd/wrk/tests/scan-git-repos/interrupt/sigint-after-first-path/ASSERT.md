@@ -31,9 +31,10 @@ import (
 	"strings"
 
 	"github.com/xhd2015/doctest/assert"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	// Root Run completes a normal scan; interrupt contract is validated via probe.
 	_ = resp

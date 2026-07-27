@@ -12,7 +12,9 @@ wrk --projects --list -> non-zero exit, stderr mentions mutual exclusion
 2. Run `wrk --projects --list`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := initProjectsRepo(t, req.WorkRoot, "myrepo")
 	req.RepoDir = mainRepo
 	req.Args = []string{"--projects", "--list"}

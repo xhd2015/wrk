@@ -16,9 +16,14 @@ myrepo + myrepo/tools/child -> wrk --status -> neither block has Master:
 4. Run `wrk --status` from `{WorkRoot}/myrepo`.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureMasterFieldHelpersUsed()
 	repo := filepath.Join(req.WorkRoot, "myrepo")
 	child := filepath.Join(repo, "tools", "child")

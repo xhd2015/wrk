@@ -13,7 +13,9 @@ non-TTY wrk --cd myrepo -> non-zero; lists both candidates
 2. Run `wrk --cd myrepo` without basename confirm env.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	skipIfNoGit(t)
 	repoA := initSavedGitRepo(t, req.WorkRoot, "aaa", cdBasename)
 	repoZ := initSavedGitRepo(t, req.WorkRoot, "zzz", cdBasename)

@@ -12,7 +12,7 @@ wrk skill --list | -l -> stdout wrk\n
 - Descendants run `wrk skill --list` or `wrk skill -l`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	ensureSkillHelpersUsed()
 	return nil
 }

@@ -13,7 +13,9 @@ wrk --add linked-wt -> stdout myrepo main path (not worktree path)
 3. Run `wrk --add <linkedWt>`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := initProjectsRepo(t, req.WorkRoot, "myrepo")
 	linkedWT := setupLinkedWorktree(t, mainRepo, "linked-wt", "linked-side")
 	req.MainRepo = mainRepo

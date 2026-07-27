@@ -13,7 +13,9 @@ wrk --set-config --create --new-window --new-terminal --open-in-agent
 2. Run full-on set-config flags.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = setConfigArgs("--create", "--new-window", "--new-terminal", "--open-in-agent")
 	return nil
 }

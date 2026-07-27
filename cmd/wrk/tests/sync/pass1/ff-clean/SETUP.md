@@ -17,7 +17,9 @@ myrepo + wt/feature-login -> wrk --sync
 3. Record pre-run main/wt SHAs; run `wrk --sync` from main.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, wtPath := initMainWithLinkedBranch(t, req, "feature-login", "wt-feature-login")
 
 	commitFile(t, wtPath, "a.txt", "one\n", "feat: one")

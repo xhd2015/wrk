@@ -14,7 +14,9 @@ myrepo + wt -> commit on wt -> wrk --done -> ff-merge + remove
 3. Run bare `wrk --done` without `--confirm` / `-y`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	_, wtDir, _ := setupWrkWorktreeFromMain(t, req)
 
 	commitAheadOnWorktree(t, wtDir, "feature-work", "ahead of main")

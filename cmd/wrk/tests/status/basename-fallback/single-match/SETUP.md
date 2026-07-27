@@ -13,7 +13,8 @@ neutral cwd -> wrk myrepo --status -> status blocks for saved project root
 - Run `wrk <basename> --status` from a cwd without a local `./<basename>` entry.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureStatusBasenameFallbackHelpersUsed()
 	return nil
 }

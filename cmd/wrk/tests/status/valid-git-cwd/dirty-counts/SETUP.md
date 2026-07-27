@@ -21,9 +21,12 @@ dirty myrepo -> wrk --status -> dirty (1 added, 1 changed, 1 renamed, 1 deleted)
 import (
 	"os"
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repo := filepath.Join(req.WorkRoot, "myrepo")
 	statusInitRepoWithSubject(t, repo, "dirty base")
 

@@ -15,7 +15,9 @@ myrepo + wrk external wt -> wrk --status
 2. Run `wrk --status` from main root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, _, _ := setupWrkWorktreeFromMain(t, req)
 	req.RepoDir = mainRepo
 	return nil

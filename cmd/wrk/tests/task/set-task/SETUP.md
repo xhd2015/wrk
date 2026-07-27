@@ -31,7 +31,8 @@ wrk --set-task "new desc" -> parse wrk-shaped {branchBase}-{YYYY-MM-DD}[-slug][-
 - Non-TTY environment → error; TTY → confirm then move.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

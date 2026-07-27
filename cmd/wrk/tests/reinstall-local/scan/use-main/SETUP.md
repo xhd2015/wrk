@@ -26,7 +26,8 @@ workDir + useMain=true
   path), even when module trees look similar.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.UseMain = true
 	req.WantError = false
 	req.WantErrSubstrs = []string{}

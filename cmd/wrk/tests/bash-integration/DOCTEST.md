@@ -26,6 +26,10 @@ exclusion with normal wrk commands.
 - **path-like cur** — current word starting with `/`, `./`, or `../`. Go `Complete` returns no
   candidates (empty stdout, exit 0) so custom basenames/flags are not invented. Bash `_wrk`
   yields filename completion via `compopt -o default` and compspec `-o default`.
+- **Request.InProcess** — when true, root `Run` uses `wrkcli.Capture` (L2 short path) for a
+  pure single CLI flag invocation (no product binary). Prefer for mutual-exclusion / early
+  reject leaves. Leave false (default) for install/uninstall/status/complete lifecycle and
+  multi-step flows (`PreInstall`, `CompleteCases`, `RunTwice`).
 
 ## Tree Overview
 
@@ -82,10 +86,59 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/wrk/wrkcli"
 )
+
+// harnessDoctest holds inject fields from d (no os.Setenv — Parallel-safe).
+var (
+	harnessMu          sync.Mutex
+	harnessSessionID   string
+	harnessDoctestRoot string
+)
+
+func adoptDoctestContext(d *session.Doctest) {
+	if d == nil {
+		return
+	}
+	harnessMu.Lock()
+	defer harnessMu.Unlock()
+	if d.DOCTEST_SESSION_ID != "" {
+		harnessSessionID = d.DOCTEST_SESSION_ID
+	}
+	if d.DOCTEST_ROOT != "" {
+		harnessDoctestRoot = d.DOCTEST_ROOT
+	}
+}
+
+func doctestSessionID(t *testing.T) string {
+	t.Helper()
+	harnessMu.Lock()
+	sid := harnessSessionID
+	harnessMu.Unlock()
+	if sid == "" {
+		sid = os.Getenv("DOCTEST_SESSION_ID")
+	}
+	if sid == "" {
+		t.Fatal("DOCTEST_SESSION_ID not set (expected d *session.Doctest in Setup)")
+	}
+	return sid
+}
+
+func doctestRootPath() string {
+	harnessMu.Lock()
+	root := harnessDoctestRoot
+	harnessMu.Unlock()
+	if root == "" {
+		root = os.Getenv("DOCTEST_ROOT")
+	}
+	return root
+}
 
 type CompleteCase struct {
 	Name  string
@@ -115,6 +168,10 @@ type Request struct {
 	PreExistingBashProfile string
 	PreExistingBashRC      string
 	PreExistingBashSh      string
+
+	// InProcess runs via wrkcli.Capture (L2 short path) instead of the product binary.
+	// Prefer for mutual-exclusion / early reject leaves. Leave false for lifecycle e2e.
+	InProcess bool
 }
 
 type Response struct {
@@ -138,7 +195,8 @@ type Response struct {
 	CompleteStdout map[string]string
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
+	adoptDoctestContext(d)
 	if req.WorkRoot == "" || req.WrkHome == "" || req.FakeHome == "" {
 		return nil, fmt.Errorf("Setup must initialize WorkRoot, WrkHome, and FakeHome")
 	}
@@ -152,14 +210,6 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 		}
 	}
 
-	bin := getWrkBin(t)
-
-	if req.PreInstall {
-		if _, _, _, err := runWrkOnce(t, req, bin, buildBashIntegrationArgs("install", false)); err != nil {
-			return nil, fmt.Errorf("pre-install: %w", err)
-		}
-	}
-
 	resp := &Response{
 		Home:           req.FakeHome,
 		WrkHome:        req.WrkHome,
@@ -168,6 +218,36 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 		BashRCPath:     filepath.Join(req.FakeHome, ".bashrc"),
 		EventsPath:     filepath.Join(req.WrkHome, "events.jsonl"),
 		CompleteStdout: make(map[string]string),
+	}
+
+	// L2 short path: pure single CLI flag invocation via wrkcli.Capture.
+	// Not used for PreInstall / CompleteCases / RunTwice multi-step flows.
+	if req.InProcess {
+		if req.PreInstall || req.RunTwice || len(req.CompleteCases) > 0 {
+			return nil, fmt.Errorf("InProcess does not support PreInstall, RunTwice, or CompleteCases")
+		}
+		args := req.CLIArgs
+		if args == nil {
+			args = buildArgsFromMode(req)
+		}
+		res := wrkcli.Capture(wrkcli.CaptureOpts{
+			Args: args,
+			Dir:  req.RepoDir,
+			Env:  bashIntegrationCaptureEnv(req),
+		})
+		resp.Stdout = res.Stdout
+		resp.Stderr = res.Stderr
+		resp.ExitCode = res.ExitCode
+		captureFilesystemState(resp)
+		return resp, nil
+	}
+
+	bin := getWrkBin(t)
+
+	if req.PreInstall {
+		if _, _, _, err := runWrkOnce(t, req, bin, buildBashIntegrationArgs("install", false)); err != nil {
+			return nil, fmt.Errorf("pre-install: %w", err)
+		}
 	}
 
 	if len(req.CompleteCases) > 0 {
@@ -211,6 +291,13 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 
 	captureFilesystemState(resp)
 	return resp, nil
+}
+
+func bashIntegrationCaptureEnv(req *Request) []string {
+	return []string{
+		"HOME=" + req.FakeHome,
+		"WRK_HOME=" + req.WrkHome,
+	}
 }
 
 func buildArgsFromMode(req *Request) []string {
@@ -311,7 +398,7 @@ func getWrkBin(t *testing.T) string {
 		}
 		base = filepath.Join(home, "Library", "Caches", "doctest", "fixtures")
 	}
-	sessionRoot := filepath.Join(base, DOCTEST_SESSION_ID)
+	sessionRoot := filepath.Join(base, doctestSessionID(t))
 	bin := filepath.Join(sessionRoot, "bin", "wrk")
 	if _, err := os.Stat(bin); err == nil {
 		return bin
@@ -321,7 +408,7 @@ func getWrkBin(t *testing.T) string {
 		if _, err := os.Stat(bin); err == nil {
 			return
 		}
-		modRoot := findModuleRoot(DOCTEST_ROOT)
+		modRoot := findModuleRoot(doctestRootPath())
 		if modRoot == "" {
 			t.Fatal("find module root: no go.mod in ancestors")
 		}

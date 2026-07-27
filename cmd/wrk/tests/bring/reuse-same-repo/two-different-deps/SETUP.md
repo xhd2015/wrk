@@ -17,7 +17,14 @@ consumer (require dep1+dep2)
 3. Run `wrk --bring mydep2` via `Run`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureBringReuseHelpersUsed()
 
 	consumer := filepath.Join(req.WorkRoot, "consumer")

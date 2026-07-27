@@ -16,7 +16,8 @@ main-repo
 2. Bare `wrk`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	main := setupDashboardMainRepo(t, req)
 	req.RepoDir = main
 	req.Args = nil

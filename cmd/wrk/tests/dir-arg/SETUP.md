@@ -20,7 +20,8 @@ wrk <nonexistent> -> non-zero, directory does not exist
 - Remaining flags pass through `req.Args` unchanged.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

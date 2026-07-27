@@ -50,15 +50,62 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"strings"
 	"syscall"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 
 	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 	"github.com/xhd2015/gitops/git"
 	"github.com/xhd2015/gitops/git/git_isolated"
 )
+
+// harnessDoctest holds inject fields from d (no os.Setenv — Parallel-safe).
+var (
+	harnessMu          sync.Mutex
+	harnessSessionID   string
+	harnessDoctestRoot string
+)
+
+func adoptDoctestContext(d *session.Doctest) {
+	if d == nil {
+		return
+	}
+	harnessMu.Lock()
+	defer harnessMu.Unlock()
+	if d.DOCTEST_SESSION_ID != "" {
+		harnessSessionID = d.DOCTEST_SESSION_ID
+	}
+	if d.DOCTEST_ROOT != "" {
+		harnessDoctestRoot = d.DOCTEST_ROOT
+	}
+}
+
+func doctestSessionID(t *testing.T) string {
+	t.Helper()
+	harnessMu.Lock()
+	sid := harnessSessionID
+	harnessMu.Unlock()
+	if sid == "" {
+		sid = os.Getenv("DOCTEST_SESSION_ID")
+	}
+	if sid == "" {
+		t.Fatal("DOCTEST_SESSION_ID not set (expected d *session.Doctest in Setup)")
+	}
+	return sid
+}
+
+func doctestRootPath() string {
+	harnessMu.Lock()
+	root := harnessDoctestRoot
+	harnessMu.Unlock()
+	if root == "" {
+		root = os.Getenv("DOCTEST_ROOT")
+	}
+	return root
+}
 
 const wrkDate = "2026-06-30"
 
@@ -90,7 +137,7 @@ func fixtureCacheBase(t *testing.T) string {
 
 func fixtureSessionRoot(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(fixtureCacheBase(t), DOCTEST_SESSION_ID)
+	return filepath.Join(fixtureCacheBase(t), doctestSessionID(t))
 }
 
 func sessionWrkBin(t *testing.T) string {
@@ -126,7 +173,7 @@ func getWrkBin(t *testing.T) string {
 		if _, err := os.Stat(bin); err == nil {
 			return
 		}
-		modRoot := findModuleRoot(DOCTEST_ROOT)
+		modRoot := findModuleRoot(doctestRootPath())
 		if modRoot == "" {
 			t.Fatal("find module root: no go.mod in ancestors")
 		}
@@ -140,7 +187,8 @@ func getWrkBin(t *testing.T) string {
 	return bin
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	adoptDoctestContext(d)
 	skipIfNoGit(t)
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {

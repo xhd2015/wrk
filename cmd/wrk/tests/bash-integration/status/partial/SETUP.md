@@ -12,7 +12,8 @@ wrk --bash-integration --status -> partial, exit 1
 1. Descendants pre-seed script-only or marker-only state.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "status")
 	return nil
 }

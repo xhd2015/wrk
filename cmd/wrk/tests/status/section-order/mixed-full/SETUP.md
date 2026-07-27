@@ -22,7 +22,9 @@ wrk --status
 4. Run `wrk --status` from main root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, _, _ := setupWrkWorktreeFromMain(t, req)
 	inTree := addInTreeLinkedWorktree(t, mainRepo, "wt-linked", "wt-side")
 	ensureToolsGitignore(t, mainRepo, "tools/")

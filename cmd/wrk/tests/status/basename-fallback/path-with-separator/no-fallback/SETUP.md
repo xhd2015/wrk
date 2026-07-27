@@ -12,7 +12,9 @@ saved/myrepo recorded; workspace/ cwd -> wrk saved/myrepo --status -> does not e
 2. Run `wrk saved/myrepo --status` from neutral cwd (no local `saved/myrepo`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	savedRepo := initSavedGitRepo(t, req.WorkRoot, "saved", "myrepo")
 	recordSavedProject(t, req, savedRepo)
 	req.MainRepo = savedRepo

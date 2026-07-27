@@ -12,7 +12,9 @@ workspace/ -> wrk --projects-dep-graph --projects
 1. Run both exclusive project-related flags together.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--projects-dep-graph", "--projects"}
 	return nil
 }

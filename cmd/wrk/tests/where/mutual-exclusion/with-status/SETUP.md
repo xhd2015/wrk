@@ -13,7 +13,9 @@ workspace/ -> wrk --where spl --status -> non-zero, mutually exclusive
 2. Run `wrk --where spl --status` from neutral cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	savedRepo := initSavedGitRepo(t, req.WorkRoot, "saved", whereBasename)
 	recordSavedProject(t, req, savedRepo)
 	req.MainRepo = savedRepo

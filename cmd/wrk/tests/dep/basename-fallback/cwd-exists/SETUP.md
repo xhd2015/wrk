@@ -14,7 +14,12 @@ saved/<basename> recorded -> wrk --dep <basename> -> use local path, no projects
 - Run `wrk --dep <basename>` from consumer cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureDepBasenameFallbackHelpersUsed()
 	return nil
 }

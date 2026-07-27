@@ -22,7 +22,8 @@ wrk --done <mainRepo> -> non-zero, not a linked worktree
 - For confirmation tests, `req.StdinInput` and `"--confirm-from-stdin"` follow the same pattern as existing done tests.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

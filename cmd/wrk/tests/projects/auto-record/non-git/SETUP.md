@@ -12,7 +12,9 @@ non-git cwd -> wrk --list -> error; no projects.json created
 2. Run `wrk --list` from `{WorkRoot}`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.RepoDir = req.WorkRoot
 	return nil
 }

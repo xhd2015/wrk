@@ -15,7 +15,9 @@ myrepo (origin) + wt (feature-work)
 2. Run `wrk --push --done -y` from the worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDonePushWithOrigin(t, req)
 	req.Args = []string{"--push", "--done", "-y"}
 	return nil

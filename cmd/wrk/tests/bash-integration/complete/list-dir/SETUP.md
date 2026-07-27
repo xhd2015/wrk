@@ -12,7 +12,9 @@ wrk --bash-integration --complete -- wrk -l al 2 -> alpha, alphalong
 2. Complete value position after `-l` with prefix `al`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	req.InProcess = true
+	_ = d
 	seedStandardProjects(req)
 	req.CompleteWords = []string{"wrk", "-l", "al"}
 	req.CompleteCWord = 2

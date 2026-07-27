@@ -11,7 +11,8 @@ create -> [window] -> [terminal ± agent follow-up | agent-in-process]
 - Subtrees split flags-driven vs config-driven effective UX.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

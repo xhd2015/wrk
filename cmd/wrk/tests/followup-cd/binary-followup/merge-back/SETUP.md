@@ -12,7 +12,8 @@ wrk --merge-back -> success possible; follow-up empty
 1. Descendants set --merge-back args.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "binary")
 	return nil
 }

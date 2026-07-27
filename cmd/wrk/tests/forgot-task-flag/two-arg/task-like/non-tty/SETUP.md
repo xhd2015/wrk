@@ -14,7 +14,8 @@ pipe stdin (non-TTY) + wrk <dir> <task-like>
 - Leaves vary task-like reason (spaces / >120 / >255).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.UseScriptTTY = false
 	return nil
 }

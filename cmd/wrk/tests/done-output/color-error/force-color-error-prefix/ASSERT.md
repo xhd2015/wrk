@@ -10,9 +10,13 @@
 - Non-zero
 
 ```go
-import "strings"
+import (
+	"strings"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	if resp.ExitCode == 0 {
 		t.Fatalf("force-color Error: leaf needs hard error (dirty cascade); got exit 0 stdout=%q stderr=%q",

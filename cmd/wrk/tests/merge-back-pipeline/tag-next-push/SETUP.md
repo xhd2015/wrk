@@ -21,7 +21,9 @@ myrepo (origin, v0.0.1) + wt (feature-work)
 2. Run `wrk --merge-back -y --tag-next --push` from the worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupMergeBackPipelineWithOrigin(t, req)
 	req.Args = []string{"--merge-back", "-y", "--tag-next", "--push"}
 	return nil

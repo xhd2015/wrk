@@ -14,7 +14,8 @@ wrk -t <task>      -> create (no --new required)
 - Grouping only skips if git is missing; leaves set TargetDir or TaskDesc.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	// Must not inject --new: these leaves prove create without --new still works.
 	req.Args = nil

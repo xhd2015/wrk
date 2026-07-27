@@ -13,7 +13,9 @@ workspace/ -> wrk --where spl -> non-zero, stderr no-match, empty stdout
 2. Run `wrk --where spl`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.RepoDir = initNeutralCwd(t, req.WorkRoot, "workspace")
 	req.Args = whereArgs(whereBasename)
 	return nil

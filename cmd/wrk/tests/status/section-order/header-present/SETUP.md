@@ -18,9 +18,14 @@ myrepo + tools/child -> wrk --status
 4. Run `wrk --status` from main root.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	statusInitRepoWithSubject(t, mainRepo, "root status repo")
 	ensureToolsGitignore(t, mainRepo, "tools/")

@@ -23,11 +23,13 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
 const execDepModulePath = "example.com/dep"
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf("go not found in PATH: %w", err)
 	}

@@ -11,7 +11,7 @@ wrk --version + another mode flag -> non-zero, mutually exclusive
 - Descendants combine `--version` with another wrk mode flag.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	ensureVersionHelpersUsed()
 	return nil
 }

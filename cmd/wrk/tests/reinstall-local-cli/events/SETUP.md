@@ -31,7 +31,8 @@ mod/ + gobin/ -> wrk [--main] --reinstall-local [--dry-run]
 - Help skips events; these leaves are success paths that must append.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: events.jsonl command identity for reinstall-local.
 	ensureReinstallLocalCLIHelpersUsed()
 	return nil

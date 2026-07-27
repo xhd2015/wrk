@@ -12,7 +12,9 @@ wrk --cd /jumpto --list -> non-zero; mutually exclusive
 2. Args = `--cd`, path, `--list`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--cd", req.MainRepo, "--list"}
 	return nil
 }

@@ -14,7 +14,8 @@ WRK_TASK_LIKE_CONFIRM=1 + stdin "n\n"
 - Use a moderate multi-word path whose parent exists so target-dir create can succeed.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.ExtraEnv = append(req.ExtraEnv, envTaskLikeConfirm)
 	return nil
 }

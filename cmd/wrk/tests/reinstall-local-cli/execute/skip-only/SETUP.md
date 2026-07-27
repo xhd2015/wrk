@@ -18,7 +18,14 @@ mod/ -> wrk --reinstall-local
 4. Run `wrk --reinstall-local` (no `--dry-run`) from module root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	writeGoMod(t, req.ModuleRoot, "example.com/cli-exec-skip")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "cmd", "missing"))
 	// intentionally no touchBin for "missing"

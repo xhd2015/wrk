@@ -14,7 +14,9 @@ external wt (broken) + --color -> red error: value on appended block
 3. Run `wrk --status --color` from the main repo root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, wtDir, _ := createExternalWrkWorktree(t, req)
 	breakWorktreeGitMetadata(t, req, wtDir)
 	req.RepoDir = mainRepo

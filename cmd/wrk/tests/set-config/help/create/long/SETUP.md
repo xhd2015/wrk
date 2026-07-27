@@ -12,7 +12,9 @@ workspace/ -> wrk --set-config --create --help
 1. Run `wrk --set-config --create --help` (no UX write flags).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = setConfigArgs("--create", "--help")
 	return nil
 }

@@ -53,6 +53,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"github.com/xhd2015/doctest/session"
 )
 
 // scanInterruptResult is the outcome of a mid-scan SIGINT probe.
@@ -62,7 +63,8 @@ type scanInterruptResult struct {
 	ExitCode int
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureScanGitReposHelpersUsed()
 	ensureScanInterruptHelpersUsed()
 	return nil

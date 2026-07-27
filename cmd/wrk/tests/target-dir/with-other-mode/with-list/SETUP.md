@@ -17,9 +17,12 @@ myrepo (main) -> wrk myrepo <target-dir> --list -> non-zero, wrk: unexpected arg
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.SpawnDir = filepath.Join(req.WorkRoot, "wt")
 	req.Args = []string{"--list"}
 	return nil

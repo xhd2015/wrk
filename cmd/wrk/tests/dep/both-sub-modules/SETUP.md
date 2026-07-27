@@ -21,24 +21,30 @@ consumer (go-pkgs/ requires dep/sub) + dep (sub/ has go.mod) -> wrk --dep -> ext
 3. Run `wrk --dep <dep>` from the consumer repo root.
 
 ```go
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
 import "path/filepath"
 
 const depSubModulePath = "example.com/dep/sub"
 
 func initDepRepoWithSubBoth(t *testing.T, workRoot, name string) string {
 	t.Helper()
-	dep := filepath.Join(workRoot, name)
-	initGitRepoOnMain(t, dep)
-	subDir := filepath.Join(dep, "sub")
+	depPath := filepath.Join(workRoot, name)
+	initGitRepoOnMain(t, depPath)
+	subDir := filepath.Join(depPath, "sub")
 	mkdirAll(t, subDir)
 	writeFile(t, filepath.Join(subDir, "go.mod"), "module "+depSubModulePath+"\n\ngo 1.22\n")
 	writeFile(t, filepath.Join(subDir, "sub.go"), "package sub\n")
-	runGitIsolated(t, dep, "add", ".")
-	runGitIsolated(t, dep, "commit", "-m", "add sub module")
-	return dep
+	runGitIsolated(t, depPath, "add", ".")
+	runGitIsolated(t, depPath, "commit", "-m", "add sub module")
+	return depPath
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := filepath.Join(req.WorkRoot, "consumer")
 	initGitRepoOnMain(t, consumer)
 	modDir := filepath.Join(consumer, "go-pkgs")
@@ -48,18 +54,18 @@ func Setup(t *testing.T, req *Request) error {
 	runGitIsolated(t, consumer, "add", ".")
 	runGitIsolated(t, consumer, "commit", "-m", "add sub-module")
 
-	dep := initDepRepoWithSubBoth(t, req.WorkRoot, "mydep")
+	depPath := initDepRepoWithSubBoth(t, req.WorkRoot, "mydep")
 
 	consumer, err := filepath.EvalSymlinks(consumer)
 	if err != nil {
 		t.Fatalf("eval symlinks %s: %v", consumer, err)
 	}
 	req.RepoDir = consumer
-	req.DepPath = dep
+	req.DepPath = depPath
 	req.ConsumerTop = consumer
 	req.ConsumerModDir = modDir
 	req.DepModulePath = depSubModulePath
-	req.Args = []string{"--dep", dep}
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

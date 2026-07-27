@@ -14,7 +14,9 @@ main and linked wt diverged -> wrk --status --color -> Master: <red>diverged(N c
 4. Run `wrk --status --color` from the main repo root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureColorStatusHelpersUsed()
 	withStatusColor(req)
 	mainRepo := setupColorStatusMainRepo(t, req.WorkRoot, "myrepo", "status main root")

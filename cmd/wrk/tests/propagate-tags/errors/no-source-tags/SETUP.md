@@ -16,9 +16,14 @@ cwd=lib -> wrk --propagate-tags --dry-run
 3. Expect hard failure because source has no usable release tags.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	libPath := filepath.Join(req.WorkRoot, "repos", "lib")
 	initSingleModuleRepo(t, libPath, "example.com/lib", nil)
 	// Intentionally no tagRepo.

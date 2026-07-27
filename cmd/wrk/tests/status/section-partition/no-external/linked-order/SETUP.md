@@ -16,7 +16,8 @@ PartitionStatusPaths(main, [main], [wtLate, wtEarly])
 3. Expect primary to preserve Late-before-Early (not lexicographic).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	main := pathMain()
 	late := pathLinkedLate()   // .../zzz-late  (sorts after)
 	early := pathLinkedEarly() // .../aaa-early (sorts before)

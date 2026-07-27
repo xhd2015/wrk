@@ -13,9 +13,14 @@ main ahead of origin/main -> wrk --projects --color -> orange needs push(...)
 3. Record and run `wrk --projects --color`.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureColorOutputHelpersUsed()
 	withProjectsColor(req)
 	origin := setupColorBareOrigin(t, req.WorkRoot, "origin")

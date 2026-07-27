@@ -15,7 +15,9 @@ wrk --done <wtB> --force-cd -> B removed; follow-up: cd <main-abs>
 3. Run `wrk --done <wtB> --force-cd` with process cwd = wtA and follow-up env set.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := setupMainRepo(t, req)
 	wtA := runWrkWithArgs(t, req, mainRepo)
 	wtB := runWrkWithArgs(t, req, mainRepo)

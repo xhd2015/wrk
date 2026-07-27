@@ -39,11 +39,13 @@ mutually exclusive with other modes; no extra positionals
 import (
 	"path/filepath"
 	"sort"
+	"github.com/xhd2015/doctest/session"
 )
 
 const whereBasename = "spl"
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureWhereHelpersUsed()
 	return nil
 }

@@ -16,7 +16,8 @@ non-git cwd / missing <dir> -> no projects.json entry
 - Most scenarios use `wrk --list` to trigger auto-record without worktree side effects.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureProjectsHelpersUsed()
 	req.Args = []string{"--list"}
 	return nil

@@ -15,11 +15,8 @@ wrk --version + other mode flag -> non-zero, mutually exclusive
 
 ## Preconditions
 
-- The wrk Go module is at `go-pkgs/cmd/wrk/` (three levels above this tree root).
-- Go toolchain is available on PATH.
-- Session wrk binary is built once per doctest run to
-  `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/wrk`.
-- Embedded version lives in `wrkcli/VERSION.txt` (compiled into the binary).
+- In-process L2 via `wrkcli.Capture` (no product binary rebuild).
+- Embedded version lives in `wrkcli/VERSION.txt` (compiled into the package under test).
 
 ## Steps
 
@@ -29,103 +26,27 @@ wrk --version + other mode flag -> non-zero, mutually exclusive
 ## Context
 
 - Version commands do not require a git repository; cwd is a neutral empty dir.
-- Only `WRK_HOME` is passed via `versionWrkEnv`; no other wrk env overrides.
+- Only `WRK_HOME` is passed via Capture env; no other wrk env overrides.
 - Stdout assertions use `assert.Output` v2 full-match templates where output is
   bounded; help uses substring checks for `--version`.
 - Printed version string is exactly `v0.0.1` (file content `0.0.1` plus `v` prefix).
+- Layer: **L2 in-process CLI** (short path) — not binary e2e.
 
 ```go
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/xhd2015/doctest/assert"
+	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/wrk/wrkcli"
 )
 
-func findModuleRoot(dir string) string {
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
-func fixtureCacheBase(t *testing.T) string {
-	t.Helper()
-	base := os.Getenv("DOCTEST_FIXTURE_ROOT")
-	if base != "" {
-		return base
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return filepath.Join(home, "Library", "Caches", "doctest", "fixtures")
-}
-
-func fixtureSessionRoot(t *testing.T) string {
-	t.Helper()
-	return filepath.Join(fixtureCacheBase(t), DOCTEST_SESSION_ID)
-}
-
-func sessionWrkBin(t *testing.T) string {
-	t.Helper()
-	return filepath.Join(fixtureSessionRoot(t), "bin", "wrk")
-}
-
-func withFlock(t *testing.T, lockPath string, fn func()) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
-		t.Fatalf("mkdir lock dir: %v", err)
-	}
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		t.Fatalf("open lock %s: %v", lockPath, err)
-	}
-	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatalf("flock %s: %v", lockPath, err)
-	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
-	fn()
-}
-
-func getWrkBin(t *testing.T) string {
-	t.Helper()
-	bin := sessionWrkBin(t)
-	if _, err := os.Stat(bin); err == nil {
-		return bin
-	}
-	lockPath := filepath.Join(fixtureSessionRoot(t), "bin", ".lock")
-	withFlock(t, lockPath, func() {
-		if _, err := os.Stat(bin); err == nil {
-			return
-		}
-		modRoot := findModuleRoot(DOCTEST_ROOT)
-		if modRoot == "" {
-			t.Fatal("find module root: no go.mod in ancestors")
-		}
-		cmd := exec.Command("go", "build", "-o", bin, "./cmd/wrk")
-		cmd.Dir = modRoot
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("build wrk: %v\n%s", err, out)
-		}
-	})
-	return bin
-}
-
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		return fmt.Errorf("resolve work root: %w", err)
@@ -142,8 +63,8 @@ func Setup(t *testing.T, req *Request) error {
 	return nil
 }
 
-func versionWrkEnv(req *Request) []string {
-	return append(os.Environ(), "WRK_HOME="+req.WrkHome)
+func versionCaptureEnv(req *Request) []string {
+	return []string{"WRK_HOME=" + req.WrkHome}
 }
 
 func initNeutralCwd(t *testing.T, workRoot, name string) string {
@@ -213,5 +134,6 @@ mutually exclusive
 func ensureVersionHelpersUsed() {
 	_ = eventsJSONLPath
 	_ = assertVersionMutualExclusion
+	_ = wrkcli.Version
 }
 ```

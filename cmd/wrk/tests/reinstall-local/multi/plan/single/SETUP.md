@@ -23,7 +23,8 @@
 - Caller order is irrelevant with one root; ModuleRoot must be absolute.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: single-module multi API branch.
 	if req.ModuleRoots == nil {
 		req.ModuleRoots = []string{}

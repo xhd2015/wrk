@@ -13,7 +13,8 @@ wrk --sync --list|--status -> error before sync body
 - Descendants combine `--sync` with a non-composable mode flag (`--list`, `--status`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	syncEnsureHelpersUsed()
 	return nil
 }

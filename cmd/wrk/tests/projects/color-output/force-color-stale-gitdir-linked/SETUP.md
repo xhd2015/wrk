@@ -15,7 +15,14 @@ wrk --projects --color -> red on "1 error" and per-path "error: ..." values
 4. Record and run `wrk --projects --color`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureColorOutputHelpersUsed()
 	withProjectsColor(req)
 	origin := setupColorBareOrigin(t, req.WorkRoot, "origin")

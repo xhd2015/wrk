@@ -12,7 +12,9 @@ saved/foo recorded; workspace/ cwd -> wrk sub/foo -> does not exist (no fallback
 2. Run `wrk sub/foo` from neutral cwd (no local `sub/foo`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	savedRepo := initSavedGitRepo(t, req.WorkRoot, "saved", "foo")
 	recordSavedProject(t, req, savedRepo)
 	req.MainRepo = savedRepo

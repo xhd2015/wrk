@@ -1,10 +1,12 @@
 # wrk --version — embedded build version
 
 ## Version
-0.0.2
+0.0.3
 
 Decision tree for root-level `wrk --version`: prints the embedded version from
 `wrkcli/VERSION.txt` via `go:embed`. No git checkout is required.
+
+**Layer:** L2 in-process CLI via `wrkcli.Capture` (short path — not binary e2e).
 
 # DSN (Domain Specific Notion)
 
@@ -20,6 +22,8 @@ Decision tree for root-level `wrk --version`: prints the embedded version from
   exclusion or unexpected arguments; stdout empty.
 - **WRK_HOME** — isolated per test at `{WorkRoot}/.wrk`; version action does
   not write events.
+- **Run** — `wrkcli.Capture` with `Dir=RepoDir` and `WRK_HOME` env only (mutex
+  serializes Capture within this suite).
 
 ## Tree Overview
 
@@ -28,34 +32,24 @@ version/
 ├── basic/
 │   └── prints-version/           # wrk --version → stdout v0.0.1\n
 ├── help/
-│   └── mentions-flag/            # wrk -h contains --version
+│   └── mentions-flag/            # wrk -h mentions --version
 └── mutual-exclusion/
-    └── with-list/                # wrk --version --list → error
+    └── with-list/                # wrk --version --list → non-zero
 ```
-
-## Test Case Index
-
-| # | Leaf | Description |
-|---|------|-------------|
-| V1 | basic/prints-version | `wrk --version` → exit 0; stdout `v0.0.1\n`; no events.jsonl |
-| V2 | help/mentions-flag | `wrk -h` → exit 0; help mentions `--version` |
-| V3 | mutual-exclusion/with-list | `wrk --version --list` → exit ≠0; mutually exclusive |
 
 ## How to Run
 
 ```sh
 doctest vet ./cmd/wrk/tests/version
 doctest test ./cmd/wrk/tests/version
-doctest test ./cmd/wrk/tests/version/basic/prints-version
-doctest test ./cmd/wrk/tests/version/help/mentions-flag
-doctest test ./cmd/wrk/tests/version/mutual-exclusion/with-list
 ```
 
 ```go
 import (
-	"bytes"
-	"os/exec"
 	"testing"
+
+	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/wrk/wrkcli"
 )
 
 type Request struct {
@@ -71,32 +65,17 @@ type Response struct {
 	ExitCode int
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
-	bin := getWrkBin(t)
-
-	args := append([]string(nil), req.Args...)
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	cmd.Env = versionWrkEnv(req)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode()
-		} else {
-			return nil, err
-		}
-	}
-
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
+	_ = d // inject context available; Capture uses explicit Dir/Env only
+	res := wrkcli.Capture(wrkcli.CaptureOpts{
+		Args: append([]string(nil), req.Args...),
+		Dir:  req.RepoDir,
+		Env:  versionCaptureEnv(req),
+	})
 	return &Response{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		ExitCode: exitCode,
+		Stdout:   res.Stdout,
+		Stderr:   res.Stderr,
+		ExitCode: res.ExitCode,
 	}, nil
 }
 ```

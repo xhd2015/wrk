@@ -1,3 +1,4 @@
+
 ## Expected
 
 - Exit 0; stdout absolute path of relative target + `\n`.
@@ -8,9 +9,12 @@
 - 0
 
 ```go
-import "github.com/xhd2015/doctest/assert"
+import (
+	"github.com/xhd2015/doctest/assert"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)

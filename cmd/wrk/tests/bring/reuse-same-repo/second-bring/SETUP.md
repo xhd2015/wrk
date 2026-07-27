@@ -19,7 +19,9 @@ consumer -> wrk --bring mydep (2nd)
 3. Run `wrk --bring <dep>` again via doctest `Run` (second invocation).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureBringReuseHelpersUsed()
 
 	consumer := initBringConsumerRepo(t, req.WorkRoot, true)

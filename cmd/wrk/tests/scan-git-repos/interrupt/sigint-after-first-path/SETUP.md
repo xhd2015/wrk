@@ -32,9 +32,12 @@ root-first/main-first + root-later/[pads…]/zzz-main
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureScanInterruptHelpersUsed()
 
 	rootFirst := filepath.Join(req.WorkRoot, "root-first")

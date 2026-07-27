@@ -17,7 +17,8 @@ wrk --tag-next [--propagate-tags] -> event logged under WRK_HOME
 - Descendants run a successful `--tag-next` (optionally with `--propagate-tags`) and assert the last event.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	tagNextEnsureHelpersUsed()
 	return nil

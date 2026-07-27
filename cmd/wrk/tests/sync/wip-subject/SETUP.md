@@ -22,7 +22,8 @@ subject string -> IsWipSubject -> bool
 2. Leaves set `req.Subject` to the commit subject under test.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.WipProbe = true
 	return nil
 }

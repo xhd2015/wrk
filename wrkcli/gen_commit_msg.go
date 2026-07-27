@@ -197,6 +197,29 @@ func withStashedStagedForDryPlan(workDir string, fn func() error) error {
 	return nil
 }
 
+// genCommitMsgHelpText mirrors agent-pro commit_msg help. Printed from wrk
+// when -h/--help is requested so wrkcli.Capture (L2) does not hit the library
+// less-gen path that calls os.Exit(0).
+const genCommitMsgHelpText = `Usage: gen-commit-msg [options]
+
+Generate a commit message for the currently staged changes using AI.
+Logs are printed to stderr; the resulting commit message is printed to stdout.
+
+Options:
+  --dir DIR    Git directory to use (defaults to current directory)
+  --model MODEL
+              Model to use for generation
+  --agent-runner RUNNER
+              Agent runner to use (opencode|commandcode, default: opencode)
+  --agent-runner-binary PATH
+              Override the agent runner executable path
+  --add-all    Stage all changes (git add -A) before generate; dry-run prints would: git add -A
+  --commit     Run git commit with the generated message after printing it
+  --no-verify  Skip git commit hooks (requires --commit)
+  --dry-run    Pure plan: inspect staged set, print mock message; no agent, no unstage, no commit
+  -h, --help   Show this help message
+`
+
 // runGenCommitMsg handles bare wrk --gen-commit-msg [...] (no primary).
 // Remaining flags are forwarded to agent-pro commit_msg.RunGenCommitMsg.
 func runGenCommitMsg(args []string, ctx *invocationContext) error {
@@ -233,5 +256,19 @@ func runGenCommitMsg(args []string, ctx *invocationContext) error {
 
 	ctx.skipEvent = true
 	ctx.command = "gen-commit-msg"
+
+	// Library RunGenCommitMsg uses less-gen Help without HelpNoExit, so -h/--help
+	// would call os.Exit(0) and panic under testing.T / wrkcli.Capture. Handle
+	// help here and return nil (exit 0) instead.
+	for _, arg := range forwarded {
+		if arg == "-h" || arg == "--help" {
+			fmt.Print(genCommitMsgHelpText)
+			if !strings.HasSuffix(genCommitMsgHelpText, "\n") {
+				fmt.Println()
+			}
+			return nil
+		}
+	}
+
 	return commit_msg.RunGenCommitMsg(forwarded)
 }

@@ -14,7 +14,9 @@ consumer (requires dep1, dep2) + projects.json (mydep1 only) -> wrk --all-deps -
 3. Run `wrk --all-deps` from the consumer.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	allDepsEnsureHelpersUsed()
 
 	dep1 := allDepsDepDir(req.WorkRoot, "mydep1")

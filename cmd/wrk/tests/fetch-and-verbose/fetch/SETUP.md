@@ -15,7 +15,8 @@ wrk --projects [--fetch] -> Remote: from local refs or post-fetch
 - Descendants set `req.Args` for `--fetch` combined with `--projects` or `--status`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureFetchVerboseHelpersUsed()
 	return nil
 }

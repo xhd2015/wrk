@@ -12,9 +12,14 @@ wrk --main --status --fetch -> exit 0; status of main (may show (no upstream))
 2. cwd = main; Args = `--main`, `--status`, `--fetch`.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
 	statusInitRepoWithSubject(t, mainRepo, "main status with fetch")
 	req.MainRepo = mainRepo

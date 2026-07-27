@@ -16,9 +16,12 @@ myrepo (main) -> wrk myrepo {WorkRoot}/missing-parent/wt -> non-zero, parent doe
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.SpawnDir = filepath.Join(req.WorkRoot, "missing-parent", "wt")
 	return nil
 }

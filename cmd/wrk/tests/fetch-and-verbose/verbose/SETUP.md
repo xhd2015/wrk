@@ -13,7 +13,8 @@ stdout content unchanged vs non-verbose run
 - Descendants set `req.Args` with `-v` or `--verbose` as required.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureFetchVerboseHelpersUsed()
 	return nil
 }

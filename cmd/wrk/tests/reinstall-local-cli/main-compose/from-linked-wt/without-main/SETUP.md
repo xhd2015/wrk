@@ -16,7 +16,9 @@ linked-wt -> wrk --reinstall-local --dry-run
 3. Expect single-module dry-run for worktree module.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--reinstall-local", "--dry-run"}
 	return nil
 }

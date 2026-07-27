@@ -14,7 +14,9 @@ wrk foo -> single stderr line only
 3. Run `wrk foo` from workspace.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	cwd := initNeutralCwd(t, req.WorkRoot, "workspace")
 	initBasenameFile(t, cwd, "foo", "")
 	req.RepoDir = cwd

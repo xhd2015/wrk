@@ -20,9 +20,11 @@ wrk --done (no TTY, no -y) -> error; external wt + commits preserved (no force-r
 ```go
 import (
 	"os/exec"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go not available")

@@ -43,9 +43,11 @@ import (
 	"github.com/xhd2015/gitops/git"
 	"github.com/xhd2015/gitops/git/git_isolated"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	req.Args = []string{"--projects"}
 	req.RepoDir = req.WorkRoot

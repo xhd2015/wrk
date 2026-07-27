@@ -17,7 +17,8 @@ PartitionStatusPaths(main, [main, tools, external, taskHub], [])
 3. Expect external sorted by normalized absolute path.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	main := pathMain()
 	// Path sort order among these three:
 	//   external/child  <  task-hub  <  tools/child

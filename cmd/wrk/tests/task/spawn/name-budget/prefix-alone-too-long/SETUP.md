@@ -15,7 +15,9 @@ repo basename 240×'r' (basename-main-date already > 252 budget)
 3. Expect non-zero with budget/name error (not a successful create with truncated basename).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	req.InProcess = true
+	_ = d
 	_, _ = initLongBasenameRepo(t, req, overBudgetBasenameLen)
 	// No TaskDesc — create via --new (bare no-args is dashboard).
 	req.Args = []string{"--new"}

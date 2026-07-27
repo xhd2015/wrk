@@ -17,7 +17,9 @@ wrk --status from main -> primary: main, wt1, wt2
 3. Run `wrk --status` from the main repo root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, _, _ := createExternalWrkWorktree(t, req)
 	createSecondExternalWrkWorktree(t, req, mainRepo)
 	req.RepoDir = mainRepo

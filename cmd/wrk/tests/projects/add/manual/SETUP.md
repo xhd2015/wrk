@@ -11,7 +11,8 @@ wrk --add <dir> -> projects.json + stdout resolved main repo path
 - Descendants vary whether `<dir>` is main repo or linked worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureProjectsHelpersUsed()
 	return nil
 }

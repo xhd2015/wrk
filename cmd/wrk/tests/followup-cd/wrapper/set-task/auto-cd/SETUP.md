@@ -13,7 +13,8 @@ wt with "original task"; source bash.sh; wrk --set-task "new task"
 2. Run wrapper `--set-task "new task"` with `WRK_SET_TASK_CONFIRM=1`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	wtDir := runWrkWithArgs(t, req, mainRepo, "--task", "original task")
 	req.WtDir = wtDir

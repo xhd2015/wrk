@@ -13,7 +13,9 @@ wt already-included; wrk --merge-back -y + WRK_FOLLOWUP_FILE
 2. Run `wrk --merge-back -y` with follow-up env (wt remains).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, wtDir, branch := setupWrkWorktreeFromMain(t, req)
 	commitAheadOnWorktree(t, wtDir, "feature-work", "merged")
 	runGitIsolated(t, mainRepo, "merge", "--ff-only", branch)

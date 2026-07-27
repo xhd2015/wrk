@@ -16,7 +16,13 @@ PlanLocalReinstalls
 4. Expect one go-run-install item with BinName `demo`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	writeGoMod(t, req.ModuleRoot, "example.com/demo")
 	writePackageMain(t, filepath.Join(req.ModuleRoot, "script", "install"))
 	touchBin(t, req.BinDir, "demo")

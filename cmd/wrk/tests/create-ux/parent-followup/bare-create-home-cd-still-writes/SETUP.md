@@ -16,7 +16,8 @@ wrk <mainRepo>
 2. Run bare create (no UX flags).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupCreateUXFromFakeHome(t, req)
 	req.Args = nil
 	return nil

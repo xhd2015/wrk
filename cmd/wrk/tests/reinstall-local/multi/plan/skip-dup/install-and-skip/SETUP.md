@@ -27,7 +27,13 @@ PlanLocalReinstallsMulti([mod-b, mod-a], binDir)
   do not hard-error”. install×install is covered under `error/install-install`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	modA := filepath.Join(req.WorkRoot, "mod-a")
 	modB := filepath.Join(req.WorkRoot, "mod-b")
 

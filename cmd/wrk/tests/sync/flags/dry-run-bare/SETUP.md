@@ -13,7 +13,9 @@ wrk --dry-run -> validation error before any mode body
 2. Run `wrk --dry-run` without any dry-run host mode.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	initMainOnlyRepo(t, req)
 	req.Args = []string{"--dry-run"}
 	return nil

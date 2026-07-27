@@ -29,7 +29,9 @@ clean consumer linked wt + dirty foreign sibling
 2. Run `wrk --done --dry-run`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupCascadeScanForeignIsolation(t, req)
 	req.Args = []string{"--done", "--dry-run"}
 	return nil

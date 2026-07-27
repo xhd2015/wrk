@@ -102,6 +102,10 @@ with `--no-cd`.
   cwd for create success leaves that expect a home-gated follow-up write
   (`RepoDir`/`StartDir` = FakeHome + positional main-repo arg).
 - **WRK_DATE** — fixed to `2026-06-30` for deterministic worktree naming.
+- **Request.InProcess** — when true, root `Run` uses `wrkcli.Capture` (L2 short path)
+  for pure binary-mode CLI flag invocations (no product binary). Prefer for mutual-
+  exclusion / early reject leaves. Leave false (default) for script-surface, wrapper,
+  and full binary follow-up e2e (create/done/set-task land paths).
 
 ## Tree Overview
 
@@ -261,10 +265,59 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/wrk/wrkcli"
 )
+
+// harnessDoctest holds inject fields from d (no os.Setenv — Parallel-safe).
+var (
+	harnessMu          sync.Mutex
+	harnessSessionID   string
+	harnessDoctestRoot string
+)
+
+func adoptDoctestContext(d *session.Doctest) {
+	if d == nil {
+		return
+	}
+	harnessMu.Lock()
+	defer harnessMu.Unlock()
+	if d.DOCTEST_SESSION_ID != "" {
+		harnessSessionID = d.DOCTEST_SESSION_ID
+	}
+	if d.DOCTEST_ROOT != "" {
+		harnessDoctestRoot = d.DOCTEST_ROOT
+	}
+}
+
+func doctestSessionID(t *testing.T) string {
+	t.Helper()
+	harnessMu.Lock()
+	sid := harnessSessionID
+	harnessMu.Unlock()
+	if sid == "" {
+		sid = os.Getenv("DOCTEST_SESSION_ID")
+	}
+	if sid == "" {
+		t.Fatal("DOCTEST_SESSION_ID not set (expected d *session.Doctest in Setup)")
+	}
+	return sid
+}
+
+func doctestRootPath() string {
+	harnessMu.Lock()
+	root := harnessDoctestRoot
+	harnessMu.Unlock()
+	if root == "" {
+		root = os.Getenv("DOCTEST_ROOT")
+	}
+	return root
+}
 
 type Request struct {
 	WorkRoot string
@@ -302,6 +355,10 @@ type Request struct {
 	FakeShellLog  string // path where fake bash records cwd/args
 	FakeShellExit int    // exit code of fake bash (default 0)
 	ShellEnv      string // when set, export SHELL=<value> for detect.Shell
+
+	// InProcess runs via wrkcli.Capture (L2 short path) instead of the product binary.
+	// Prefer for mutual-exclusion / early reject leaves. Leave false for wrapper/e2e.
+	InProcess bool
 }
 
 type Response struct {
@@ -321,7 +378,7 @@ type Response struct {
 	FinalPWD string
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
 	if req.WorkRoot == "" || req.WrkHome == "" || req.FakeHome == "" {
 		return nil, fmt.Errorf("Setup must initialize WorkRoot, WrkHome, and FakeHome")
 	}
@@ -330,12 +387,40 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 		return nil, err
 	}
 
-	bin := getWrkBin(t)
 	resp := &Response{
 		Home:       req.FakeHome,
 		WrkHome:    req.WrkHome,
 		BashShPath: bashShPath(req.WrkHome),
 	}
+
+	// L2 short path for pure binary-mode CLI flag invocations (mutual-exclusion etc.).
+	// Wrapper / install / multi-step land paths keep the product binary.
+	if req.InProcess {
+		if req.Mode != "binary" {
+			return nil, fmt.Errorf("InProcess only supports Mode=binary (got %q)", req.Mode)
+		}
+		if err := prepareFollowupFile(req); err != nil {
+			return nil, err
+		}
+		args := buildBinaryArgs(req)
+		followEnv := ""
+		if req.UseFollowupEnv {
+			if req.FollowupFile == "" {
+				return nil, fmt.Errorf("UseFollowupEnv requires FollowupFile")
+			}
+			followEnv = req.FollowupFile
+		}
+		res := wrkcli.Capture(wrkcli.CaptureOpts{
+			Args: args,
+			Dir:  req.RepoDir,
+			Env:  followupBinaryCaptureEnv(req, followEnv),
+		})
+		resp.Stdout, resp.Stderr, resp.ExitCode = res.Stdout, res.Stderr, res.ExitCode
+		captureFollowup(resp, req.FollowupFile)
+		return resp, nil
+	}
+
+	bin := getWrkBin(t)
 
 	switch req.Mode {
 	case "print":
@@ -388,6 +473,33 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 		return nil, fmt.Errorf("unknown Mode %q", req.Mode)
 	}
 	return resp, nil
+}
+
+func followupBinaryCaptureEnv(req *Request, followupFile string) []string {
+	env := []string{
+		"HOME=" + req.FakeHome,
+		"WRK_HOME=" + req.WrkHome,
+		"WRK_DATE=" + wrkDate,
+	}
+	if followupFile != "" {
+		env = append(env, "WRK_FOLLOWUP_FILE="+followupFile)
+	}
+	if req.SetTaskEnv != "" {
+		env = append(env, req.SetTaskEnv)
+	}
+	if req.AutoCD != "" {
+		env = append(env, "WRK_AUTO_CD="+req.AutoCD)
+	}
+	if req.ShellEnv != "" {
+		env = append(env, "SHELL="+req.ShellEnv)
+	}
+	if req.FakeShellLog != "" {
+		env = append(env, "WRK_FAKE_SHELL_LOG="+req.FakeShellLog)
+	}
+	if req.FakeShellExit != 0 {
+		env = append(env, fmt.Sprintf("WRK_FAKE_SHELL_EXIT=%d", req.FakeShellExit))
+	}
+	return env
 }
 
 func buildBinaryArgs(req *Request) []string {
@@ -661,7 +773,7 @@ func getWrkBin(t *testing.T) string {
 		}
 		base = filepath.Join(home, "Library", "Caches", "doctest", "fixtures")
 	}
-	sessionRoot := filepath.Join(base, DOCTEST_SESSION_ID)
+	sessionRoot := filepath.Join(base, doctestSessionID(t))
 	bin := filepath.Join(sessionRoot, "bin", "wrk")
 	if _, err := os.Stat(bin); err == nil {
 		return bin
@@ -671,7 +783,7 @@ func getWrkBin(t *testing.T) string {
 		if _, err := os.Stat(bin); err == nil {
 			return
 		}
-		modRoot := findModuleRoot(DOCTEST_ROOT)
+		modRoot := findModuleRoot(doctestRootPath())
 		if modRoot == "" {
 			t.Fatal("find module root: no go.mod in ancestors")
 		}

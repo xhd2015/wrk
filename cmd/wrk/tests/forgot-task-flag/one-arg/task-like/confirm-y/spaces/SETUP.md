@@ -14,7 +14,8 @@ WRK_TASK_LIKE_CONFIRM=1 + "y\n"
 2. Stdin `y`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupOneArg(t, req, taskLikeSpaces)
 	req.StdinInput = "y\n"
 	return nil

@@ -13,7 +13,8 @@ wrk myrepo -t 'desc' -> guided stderr with saved path hint; no worktree
 - Run create-mode `wrk <basename>` with flags preserved in the hint.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureCwdFileExistsHelpersUsed()
 	return nil
 }

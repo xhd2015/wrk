@@ -15,7 +15,9 @@ wrk --no-cd <mainRepo> -> worktree created; follow-up file empty
 3. Run `wrk --no-cd <mainRepo>` with follow-up env set (`--no-cd` independent of home gate).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := setupMainRepo(t, req)
 	req.RepoDir = req.FakeHome
 	req.UseFollowupEnv = true

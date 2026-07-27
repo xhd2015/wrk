@@ -18,7 +18,8 @@ linked-wt (ahead, dirty untracked) + ACTION=run-done + DRY_RUN=1
 4. Run bare `wrk` from linked worktree.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	linked := setupDashboardLinkedAhead(t, req)
 	markDashboardDirtyUntracked(t, linked)
 	setDashboardAction(t, req, "run-done", true /* dryRun */)

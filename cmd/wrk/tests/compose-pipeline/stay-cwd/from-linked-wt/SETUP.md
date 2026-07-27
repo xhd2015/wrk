@@ -15,7 +15,8 @@ linked wt -> wrk … --tag-next … (no --done/--merge-back)
 - Grouping only.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping node: git required for descendant compose fixtures.
 	skipIfNoGit(t)
 	return nil

@@ -13,9 +13,14 @@ myrepo + linked wt (dirty) -> wrk --done -> error but project already recorded
 3. Run `wrk --done` from the dirty worktree.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, wtDir, _ := setupWrkWorktreeFromMain(t, req)
 	writeFile(t, filepath.Join(wtDir, "dirty-file"), "uncommitted")
 	req.MainRepo = mainRepo

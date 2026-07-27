@@ -1,3 +1,4 @@
+
 ## Expected Output
 
 ```
@@ -22,7 +23,13 @@ would: reinstall 0 binaries (1 skipped)
 - 0
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+import (
+	"github.com/xhd2015/doctest/session"
+	"fmt"
+)
+
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
 	want := fmt.Sprintf("skip: missing (not in %s)\nwould: reinstall 0 binaries (1 skipped)\n", req.BinDir)

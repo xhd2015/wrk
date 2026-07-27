@@ -1,3 +1,8 @@
+---
+label: e2e
+explanation: product binary CLI integration (process boundary)
+---
+
 ## Expected
 
 - Root probe performed HTTP GET `/mockup/repo-view`.
@@ -16,9 +21,10 @@
 ```go
 import (
 	"strings"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	assertErrIsNil(t, err)
 	if resp.HTTPStatus != 200 {
 		t.Fatalf("GET /mockup/repo-view expected 200, got %d body=%q stdout=%q stderr=%q",

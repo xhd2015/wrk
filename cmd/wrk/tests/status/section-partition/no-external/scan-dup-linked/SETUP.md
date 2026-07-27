@@ -14,7 +14,8 @@ PartitionStatusPaths(main, [main, inTree], [inTree])
 2. Expect a single primary occurrence after main; external empty.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	main := pathMain()
 	inTree := pathLinkedInTree()
 	req.MainRoot = main

@@ -15,9 +15,12 @@ wrk <myrepo> <121 x 'a'> (non-TTY)
 ```go
 import (
 	"strings"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	arg := strings.Repeat("a", 121)
 	setupTwoArg(t, req, arg)
 	// Stash expected prose path rejection via SpawnDir value.

@@ -17,9 +17,13 @@ ResolveSourceReleases
 3. Expect root in Releases; sub module path in Missing; overall err nil.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	src := filepath.Join(req.WorkRoot, "repos", "src")
 	initRootAndSubModuleRepo(t, src, "example.com/src")
 	tagRepo(t, src, "v1.0.0")

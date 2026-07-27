@@ -26,7 +26,8 @@ staged + fake-opencode
 - Mock title/description match agent-pro `commit-with-fake-opencode/succeeds`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: generate leaves share fake-opencode helpers.
 	ensureGenCommitMsgHelpersUsed()
 	return nil

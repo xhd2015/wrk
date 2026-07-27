@@ -16,7 +16,14 @@ myrepo (main only) -> wrk myrepo {WorkRoot}/target -> {WorkRoot}/target/myrepo-m
 4. Run `wrk myrepo <target>` via `Run`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureNamedBringReuseHelpersUsed()
 	target := filepath.Join(req.WorkRoot, "target")
 	mkdirAll(t, target)

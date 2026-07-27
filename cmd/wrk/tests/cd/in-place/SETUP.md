@@ -25,7 +25,8 @@ wrk --cd <resolved-abs> -> empty stdout; file: cd /abs\n; exit 0; no LoginIntera
 - Follow-up always uses expanded absolute path.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	enableInPlaceChannel(t, req)
 	if req.RepoDir == "" {
 		req.RepoDir = initNeutralCwd(t, req.WorkRoot, "workspace")

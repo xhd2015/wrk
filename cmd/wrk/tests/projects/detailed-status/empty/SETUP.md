@@ -11,7 +11,9 @@
 1. Run `wrk --projects` with empty `projects.json` (file absent).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureDetailedStatusHelpersUsed()
 	assertNoProjectsFile(t, req.WrkHome)
 	return nil

@@ -13,7 +13,9 @@ myrepo (main only) -> wrk --status -> root block without Master:
 2. Run `wrk --status` from the main repo root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureMasterFieldHelpersUsed()
 	mainRepo := setupMainRepoWithSubject(t, req.WorkRoot, "myrepo", "status main root")
 

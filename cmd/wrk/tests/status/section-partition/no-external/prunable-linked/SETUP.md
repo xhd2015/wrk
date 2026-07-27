@@ -15,7 +15,8 @@ PartitionStatusPaths(main, [main], [dead, wtEarly])
 3. Expect both in primary after main, preserving linked order.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	main := pathMain()
 	dead := pathDeadLinked()
 	early := pathLinkedEarly()

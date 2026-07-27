@@ -13,7 +13,8 @@ wrk foo -> single-line stderr: file exists; no registry block or hint
 - Run create-mode `wrk <basename>`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureCwdFileExistsHelpersUsed()
 	return nil
 }

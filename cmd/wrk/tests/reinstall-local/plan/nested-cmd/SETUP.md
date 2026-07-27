@@ -22,7 +22,8 @@
 - Intermediate directories need not be package main.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	if req.WantItems == nil {
 		req.WantItems = []WantPlanItem{}
 	}

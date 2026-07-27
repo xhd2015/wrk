@@ -15,7 +15,9 @@ wrk <mainRepo> -> stdout worktree path; pre-created followup.txt stays empty
 3. Run `wrk <mainRepo>` from FakeHome (home would open the gate if env were set).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := setupMainRepo(t, req)
 	req.RepoDir = req.FakeHome
 	req.UseFollowupEnv = false

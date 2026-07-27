@@ -13,7 +13,8 @@ wt already-included; source bash.sh; wrk --done
 2. Run `wrk --done` via wrapper from worktree cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo, wtDir, branch := setupWrkWorktreeFromMain(t, req)
 	commitAheadOnWorktree(t, wtDir, "feature-work", "already merged")
 	runGitIsolated(t, mainRepo, "merge", "--ff-only", branch)

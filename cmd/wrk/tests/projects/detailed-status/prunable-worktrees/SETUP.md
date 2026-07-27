@@ -15,7 +15,9 @@ wrk --projects -> exit 0; Worktrees: 0 total, 0 dirty, 1 prune; no per-path prun
 4. Record and run `wrk --projects` (pipe mode, no `--color`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureDetailedStatusHelpersUsed()
 	origin := setupBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupTrackedMainRepo(t, req.WorkRoot, "prune-main", origin, "prunable worktrees")

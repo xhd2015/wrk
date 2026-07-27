@@ -20,9 +20,12 @@ wrk <mainRepo> <target> -> worktree exactly at <target>; follow-up empty
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := setupMainRepo(t, req)
 	// Absolute target: missing path whose parent (WorkRoot) exists.
 	target := filepath.Join(req.WorkRoot, "wt")

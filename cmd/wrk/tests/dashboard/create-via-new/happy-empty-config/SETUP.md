@@ -15,7 +15,8 @@ myrepo (main) + empty config
 2. Run `wrk --new` with no other flags.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Args = []string{"--new"}
 	return nil
 }

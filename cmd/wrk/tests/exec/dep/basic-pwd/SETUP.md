@@ -15,7 +15,9 @@ consumer + mydep -> wrk --dep mydep --exec pwd
 3. Run `wrk --dep <dep> --exec pwd` from consumer.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := initExecConsumer(t, req.WorkRoot)
 	dep := initExecDepRepo(t, req.WorkRoot, "mydep")
 

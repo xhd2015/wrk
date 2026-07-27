@@ -12,7 +12,8 @@ wrk --set-config --create --no-open-in-agent | --no-new-window
 - Leaves seed enabled config then run negative set-config.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	if req.RepoDir == "" {
 		req.RepoDir = req.WorkRoot
 	}

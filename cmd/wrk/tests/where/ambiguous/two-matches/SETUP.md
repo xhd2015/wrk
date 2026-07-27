@@ -13,7 +13,9 @@ workspace/ -> wrk --where spl -> both abs paths sorted, one per line
 2. Run `wrk --where spl` from neutral cwd.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repoA := initSavedGitRepo(t, req.WorkRoot, "aaa", whereBasename)
 	repoZ := initSavedGitRepo(t, req.WorkRoot, "zzz", whereBasename)
 	recordSavedProject(t, req, repoA)

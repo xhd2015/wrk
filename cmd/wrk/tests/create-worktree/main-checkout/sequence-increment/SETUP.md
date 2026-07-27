@@ -16,7 +16,9 @@ myrepo (main) -> wrk -> myrepo-main-2026-06-30-1
 3. Run `wrk` again via the doctest `Run` function (second invocation).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	initGitRepoOnMain(t, req.RepoDir)
 	firstPath := runWrkFrom(t, req, req.RepoDir)
 	wantFirst := worktreePath(req.WrkHome, "myrepo", "main", wrkDate, 0)

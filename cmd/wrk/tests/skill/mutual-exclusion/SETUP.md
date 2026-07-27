@@ -11,7 +11,7 @@ wrk skill <action flags> + another mode flag -> non-zero, mutually exclusive
 - Descendants combine skill action flags with another wrk mode flag.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	ensureSkillHelpersUsed()
 	return nil
 }

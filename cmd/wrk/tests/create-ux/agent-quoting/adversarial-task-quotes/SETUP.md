@@ -13,7 +13,8 @@ wrk -t 'fix "quoted" task' --open-in-agent
 2. Run `--open-in-agent` only (argv path, not shell string).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.TaskDesc = `fix "quoted" task`
 	req.TaskFlag = "-t"
 	req.Args = []string{"--open-in-agent"}

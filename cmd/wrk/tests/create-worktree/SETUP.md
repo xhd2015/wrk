@@ -18,7 +18,8 @@ wrk --new -> git worktree add -> stdout prints target path
 - Stdout must contain only the absolute worktree path (one line).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	// P1: bare no-args is dashboard; create uses --new.
 	req.Args = []string{"--new"}

@@ -20,7 +20,9 @@ myrepo (v0.0.1) + wtA + wtB (feature-stays)
 2. Run `wrk --done -y --sync --tag-next` from wtA.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDonePipelineSync(t, req)
 	req.Args = []string{"--done", "-y", "--sync", "--tag-next"}
 	return nil

@@ -13,7 +13,8 @@ wrk -t 'ship feature' --open-in-agent
 1. Run with task + `--open-in-agent`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.TaskDesc = "ship feature"
 	req.TaskFlag = "-t"
 	req.Args = []string{"--open-in-agent"}

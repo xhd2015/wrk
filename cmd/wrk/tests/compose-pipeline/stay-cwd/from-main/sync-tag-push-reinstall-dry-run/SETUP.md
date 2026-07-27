@@ -17,7 +17,9 @@ myrepo (main)
 2. Run multi-stage dry-run (no done).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupAPMainOnOrigin(t, req)
 	_ = seedAPReinstallPresent(t, req)
 	// Re-push tip after present commit so origin baseline matches (optional for dry-run).

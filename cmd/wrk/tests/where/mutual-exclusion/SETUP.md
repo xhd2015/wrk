@@ -11,7 +11,8 @@ wrk --where spl + another mode flag -> non-zero, mutually exclusive
 - Descendants combine `--where` with another wrk mode flag.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureWhereHelpersUsed()
 	return nil
 }```

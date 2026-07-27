@@ -14,7 +14,9 @@ myrepo (feature/foo) -> wrk -> path myrepo-feature-foo-2026-06-30, branch featur
 3. Run `wrk` from `myrepo`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	initGitRepoOnMain(t, req.RepoDir)
 	runGitIsolated(t, req.RepoDir, "checkout", "-b", "feature/foo")
 	return nil

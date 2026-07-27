@@ -15,9 +15,12 @@ wrk -> non-zero; follow-up file empty
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	plain := filepath.Join(req.WorkRoot, "plain")
 	mkdirAll(t, plain)
 	req.RepoDir = plain

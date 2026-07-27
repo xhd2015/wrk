@@ -22,9 +22,14 @@ seed (quiet) → cache + projects
 2. Set Args to `wrk --scan-git-repos -v <scan-root>` (second run).
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	forceScanDebugEnvOff(req)
 	scanRoot := filepath.Join(req.WorkRoot, "scan-root")
 	// -v after mode flag is fine; both -v and --verbose are accepted globally.

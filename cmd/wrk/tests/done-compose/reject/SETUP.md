@@ -26,7 +26,8 @@ wrk --gen-commit-msg --commit --dir DIR --done
 - Leaves set the illegal combo and assert non-zero + stderr policy.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: illegal combos still run from a git main repo when useful.
 	skipIfNoGit(t)
 	return nil

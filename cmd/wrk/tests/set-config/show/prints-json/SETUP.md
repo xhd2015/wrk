@@ -13,7 +13,9 @@ seed create UX -> wrk --set-config --show
 2. Run `--set-config --show`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	writeSetConfigRaw(t, req.WrkHome, `{
   "version": 1,
   "create": {

@@ -13,7 +13,8 @@ main + feature-login + feature-api -> wrk --sync -> both directions
 - Descendants build the two-worktree fixture.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

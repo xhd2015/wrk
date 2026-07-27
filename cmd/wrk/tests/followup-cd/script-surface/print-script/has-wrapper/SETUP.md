@@ -14,7 +14,8 @@ wrk --bash-integration
 1. Run print-script with default isolated env.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "print")
 	return nil
 }

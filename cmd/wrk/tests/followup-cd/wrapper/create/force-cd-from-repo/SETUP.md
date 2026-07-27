@@ -14,7 +14,8 @@ wrk --force-cd -> worktree created; stderr "cd <wt>"; FinalPWD = worktree
 2. Invoke `wrk --force-cd` via installed wrapper (auto-cd on; binary bypasses home gate).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	req.RepoDir = mainRepo
 	req.StartDir = mainRepo

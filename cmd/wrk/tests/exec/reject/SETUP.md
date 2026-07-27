@@ -17,7 +17,8 @@ wrk --status --exec true  -> non-zero; same class of error
 - Leaves set disallowed mode + `--exec` and assert non-zero + stderr.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

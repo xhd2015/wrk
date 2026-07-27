@@ -12,7 +12,8 @@ cwd (main or subdir) -> wrk --list -> projects.json
 - Descendants set `req.RepoDir` to main repo root or a nested subpath.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureProjectsHelpersUsed()
 	return nil
 }

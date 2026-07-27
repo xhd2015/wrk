@@ -18,7 +18,8 @@ wrk --dry-run (alone) -> error
 - Descendants set `req.Args` for the invalid combination under test.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	tagNextEnsureHelpersUsed()
 	return nil

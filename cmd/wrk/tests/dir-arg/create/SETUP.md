@@ -17,7 +17,8 @@ wrk <repoDir> -> same stdout + side effects as wrk from <repoDir>
 - `req.TargetDir` points at the git repo; `req.RepoDir` stays `{WorkRoot}`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

@@ -7,9 +7,14 @@ plain main repo (no tracking remote) -> wrk --status -> root Remote: (no upstrea
 ```
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	repo := filepath.Join(req.WorkRoot, "no-upstream")
 	initFetchVerboseRepo(t, repo, "no upstream base")
 	req.MainRepo = repo

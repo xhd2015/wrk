@@ -20,7 +20,9 @@ myrepo (v0.0.1) + wt (feature-work) + gobin/present
 4. Run `wrk --done --dry-run --reinstall-local` (no `-y`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDonePipelineLocal(t, req)
 	_ = seedDonePipelineReinstallPresent(t, req)
 	recordComposeDryRunBaseline(t, req)

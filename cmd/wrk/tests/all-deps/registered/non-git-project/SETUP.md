@@ -14,7 +14,14 @@ consumer (requires dep1) + projects.json (non-git dir) -> wrked 0 deps
 3. Run `wrk --all-deps` from the consumer.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	allDepsEnsureHelpersUsed()
 
 	nongit := filepath.Join(req.WorkRoot, "plain-dir")

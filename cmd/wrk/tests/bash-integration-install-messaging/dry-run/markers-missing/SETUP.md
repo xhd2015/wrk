@@ -17,7 +17,9 @@ wrk --bash-integration --install --dry-run
 3. Run install dry-run.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	requireMode(t, req, "install")
 	if !req.DryRun {
 		t.Fatalf("expected dry-run install")

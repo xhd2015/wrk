@@ -12,7 +12,9 @@ myrepo -> wrk --repos -> "."
 2. Run `wrk --repos` from `{WorkRoot}`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	reposInitRepo(t, req.WorkRoot)
 	req.RepoDir = req.WorkRoot
 	return nil

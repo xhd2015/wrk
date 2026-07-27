@@ -16,7 +16,9 @@ myrepo (origin, v0.0.1) + wtA + wtB
 2. Run `wrk --done -y --sync --tag-next --push` from wtA.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDonePipelineSyncWithOrigin(t, req)
 	req.Args = []string{"--done", "-y", "--sync", "--tag-next", "--push"}
 	return nil

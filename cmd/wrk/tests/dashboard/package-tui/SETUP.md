@@ -47,6 +47,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 )
 
 const wrkcliTuiImportPath = "github.com/xhd2015/wrk/wrkcli/tui"
@@ -56,7 +57,7 @@ const wrkcliParentImportPath = "github.com/xhd2015/wrk/wrkcli"
 
 func moduleRootFromDoctest(t *testing.T) string {
 	t.Helper()
-	root := findModuleRoot(DOCTEST_ROOT)
+	root := findModuleRoot(d.DOCTEST_ROOT)
 	if root == "" {
 		t.Fatal("find module root: no go.mod in ancestors of DOCTEST_ROOT")
 	}
@@ -101,7 +102,8 @@ func assertPackageListed(t *testing.T, importPath string) {
 	}
 }
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Package-boundary leaves: no git fixture; cheap wrk -h satisfies root Run.
 	req.RepoDir = req.WorkRoot
 	req.Args = []string{"-h"}

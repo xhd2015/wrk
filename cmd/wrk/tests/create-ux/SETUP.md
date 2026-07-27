@@ -54,6 +54,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 
 	"github.com/xhd2015/doctest/assert"
 )
@@ -69,7 +70,8 @@ const (
 	fakeAgentRunName    = "agent-run"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	ensureCreateUXHelpersUsed()
 	return nil
@@ -94,7 +96,7 @@ func uxAgentRunCwdPath(req *Request) string {
 func setupMainRepoForCreateUX(t *testing.T, req *Request) string {
 	t.Helper()
 	mainRepo := filepath.Join(req.WorkRoot, "myrepo")
-	cloneRepoFromSeed(t, fixtureSeedMainGoMod, buildSeedMainGoMod, mainRepo)
+	cloneMainGoModFromSeed(t, mainRepo)
 	req.MainRepo = mainRepo
 	req.RepoDir = mainRepo
 	return mainRepo

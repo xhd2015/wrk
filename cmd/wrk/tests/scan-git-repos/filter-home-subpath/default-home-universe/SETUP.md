@@ -23,7 +23,9 @@ HOME=FakeHome
 2. Force `WRK_SCAN_DEBUG=` so ambient host debug does not pollute.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--scan-git-repos"}
 	req.ExtraEnv = append(req.ExtraEnv, "WRK_SCAN_DEBUG=")
 	return nil

@@ -14,7 +14,8 @@ WRK_TASK_LIKE_CONFIRM=1 + stdin y/Y/empty
 - Leaves set the task-like arg2 text.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.ExtraEnv = append(req.ExtraEnv, envTaskLikeConfirm)
 	return nil
 }

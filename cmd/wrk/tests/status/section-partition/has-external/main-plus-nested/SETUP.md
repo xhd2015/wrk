@@ -15,7 +15,8 @@ PartitionStatusPaths(main, [main, nested], [])
 3. Expect primary=`[main]`, external=`[nested]`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	main := pathMain()
 	nested := pathNestedTaskHub()
 	req.MainRoot = main

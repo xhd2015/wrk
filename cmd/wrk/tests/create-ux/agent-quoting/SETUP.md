@@ -12,7 +12,8 @@ wrk -t 'fix "quoted" task' --open-in-agent
 - Leaves use quoted task text with agent paths.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	setupMainRepoForCreateUX(t, req)
 	installCreateUXMocks(t, req, "darwin")
 	return nil

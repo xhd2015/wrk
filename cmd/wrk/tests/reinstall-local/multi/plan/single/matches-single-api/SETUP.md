@@ -20,7 +20,13 @@ PlanLocalReinstallsMulti([mod], binDir)
    single-module `PlanLocalReinstalls` item set.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	modRoot := filepath.Join(req.WorkRoot, "mod")
 	writeGoMod(t, modRoot, "example.com/multi-single")
 	writePackageMain(t, filepath.Join(modRoot, "cmd", "present"))

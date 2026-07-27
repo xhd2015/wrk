@@ -1,3 +1,8 @@
+---
+label: e2e
+explanation: product binary CLI integration (process boundary)
+---
+
 ## Expected
 
 - If exit **0**: compose argv log present for DONE recipe with **`--dry-run`**, **without** `--add-all`.
@@ -13,7 +18,13 @@
 - 0 preferred (ignore illegal toggle); non-zero gate error also acceptable if no `--add-all`.
 
 ```go
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+import (
+	"github.com/xhd2015/doctest/session"
+	"strings"
+)
+
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	assertLinkedWorktreeStillPresent(t, req)
 

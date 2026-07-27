@@ -14,7 +14,8 @@ wrk <abs-myrepo> from WorkRoot
 3. Shell cwd = WorkRoot.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := initMyrepoForForgotTask(t, req)
 	req.RepoDir = req.WorkRoot
 	req.TargetDir = mainRepo

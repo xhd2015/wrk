@@ -40,9 +40,13 @@ wrk -h  -> documents --web and --port
 - Empty projects API always returns JSON array (never null): `{"projects":[]}`.
 
 ```go
-import "strconv"
+import (
+	"strconv"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// --web does not require a git checkout; isolate under WorkRoot.
 	req.RepoDir = req.WorkRoot
 	return nil

@@ -13,7 +13,8 @@ wrk --set-config --create -h|--help
 - Leaves set `--create` plus help form (any order); optional co-present UX flags still show help only.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	if req.RepoDir == "" {
 		req.RepoDir = req.WorkRoot
 	}

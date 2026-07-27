@@ -26,7 +26,8 @@ staged + fake-opencode
 - `commit/no-verify` uses failing pre-commit + mock title `feat: skip hooks`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: commit leaves share fake-opencode helpers.
 	ensureGenCommitMsgHelpersUsed()
 	return nil

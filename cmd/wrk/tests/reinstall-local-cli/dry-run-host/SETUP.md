@@ -12,7 +12,8 @@ wrk --dry-run -> error
 - Descendants run bare `--dry-run` without `--reinstall-local` (or other hosts).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: bare dry-run host-list errors.
 	ensureReinstallLocalCLIHelpersUsed()
 	return nil

@@ -20,7 +20,9 @@ myrepo (v0.0.1) + wtA + wtB (feature-stays)
 2. Run `wrk --merge-back -y --sync --tag-next` from wtA.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupMergeBackPipelineSync(t, req)
 	req.Args = []string{"--merge-back", "-y", "--sync", "--tag-next"}
 	return nil

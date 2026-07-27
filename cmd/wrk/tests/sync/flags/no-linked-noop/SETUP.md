@@ -13,7 +13,9 @@ myrepo (main only) -> wrk --sync -> exit 0, synced: 0 into main, 0 into worktree
 2. Run `wrk --sync` from the main repo.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	initMainOnlyRepo(t, req)
 	req.Args = []string{"--sync"}
 	return nil

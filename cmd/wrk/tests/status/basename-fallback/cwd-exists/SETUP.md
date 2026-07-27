@@ -12,7 +12,8 @@ cwd/myrepo (non-git) + saved myrepo elsewhere -> wrk myrepo --status -> git erro
 - Descendants create a non-git `./<basename>` in cwd and a saved project with the same basename elsewhere.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureStatusBasenameFallbackHelpersUsed()
 	return nil
 }

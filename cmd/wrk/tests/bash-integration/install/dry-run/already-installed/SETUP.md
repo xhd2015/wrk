@@ -14,7 +14,8 @@ wrk --bash-integration --install --dry-run -> is up to date, no changes
 3. Run install dry-run.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 // Markers + unrelated profile content; PreInstall writes current bash.sh
 // and ensures markers exist (append is a no-op if already present).
 req.PreExistingBashProfile = preInstalledProfileContent()

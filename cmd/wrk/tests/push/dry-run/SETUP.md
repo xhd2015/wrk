@@ -19,9 +19,12 @@ myrepo (main) + origin
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupPushMainWithOrigin(t, req)
 	// Snapshot origin tip via WorkRoot file for Assert.
 	sha := revParseRef(t, req.OriginBare, "refs/heads/main")

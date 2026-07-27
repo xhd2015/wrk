@@ -19,9 +19,14 @@ myrepo + wrk external + myrepo/aaa (nested main)
 4. Run `wrk --status` from main root.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo, _, _ := setupWrkWorktreeFromMain(t, req)
 	// Nested independent repo under a path that sorts before typical scan relatives.
 	ensureToolsGitignore(t, mainRepo, "aaa/")

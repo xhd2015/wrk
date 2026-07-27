@@ -12,7 +12,9 @@ wrk --add myrepo -> stdout myrepo main path; projects.json source manual
 2. Run `wrk --add <mainRepo>`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := initProjectsRepo(t, req.WorkRoot, "myrepo")
 	req.MainRepo = mainRepo
 	req.Args = []string{"--add", mainRepo}

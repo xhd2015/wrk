@@ -16,7 +16,8 @@ PartitionStatusPaths(main, [main], [])
 4. Expect primary=`[main]`, external=`[]`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	main := pathMain()
 	req.MainRoot = main
 	req.ScanPaths = []string{main}

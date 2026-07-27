@@ -17,7 +17,8 @@ WRK_HOME -> wrk --projects-dep-graph -> event logged
 - Descendants run a successful `--projects-dep-graph` and assert the last event.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	depGraphEnsureHelpersUsed()
 	return nil
 }

@@ -13,7 +13,9 @@ seed agent on -> wrk --set-config --create --no-open-in-agent
 2. Run `--no-open-in-agent`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	writeSetConfigRaw(t, req.WrkHome, `{
   "version": 1,
   "create": {

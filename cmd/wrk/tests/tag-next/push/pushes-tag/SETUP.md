@@ -18,7 +18,9 @@ git repo + bare origin
 2. Run `wrk --tag-next --push`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupPushRepo(t, req)
 	// Advance local main after origin was seeded so tags-only push cannot
 	// accidentally satisfy "branch tip on origin" (origin lags local HEAD).

@@ -22,7 +22,14 @@
 3. Run `wrk --dep <dep>` from the consumer repo root (not from go-pkgs/).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := filepath.Join(req.WorkRoot, "consumer")
 	initGitRepoOnMain(t, consumer)
 	// NO go.mod at repo root. Module lives in go-pkgs/.
@@ -33,7 +40,7 @@ func Setup(t *testing.T, req *Request) error {
 	runGitIsolated(t, consumer, "add", ".")
 	runGitIsolated(t, consumer, "commit", "-m", "add sub-module")
 
-	dep := initDepRepo(t, req.WorkRoot, "mydep", true)
+	depPath := initDepRepo(t, req.WorkRoot, "mydep", true)
 
 	// cwd is the consumer repo root (NOT go-pkgs/)
 	consumer, err := filepath.EvalSymlinks(consumer)
@@ -41,11 +48,11 @@ func Setup(t *testing.T, req *Request) error {
 		t.Fatalf("eval symlinks %s: %v", consumer, err)
 	}
 	req.RepoDir = consumer
-	req.DepPath = dep
+	req.DepPath = depPath
 	req.ConsumerTop = consumer
 	req.ConsumerModDir = modDir
 	req.DepModulePath = depModulePath
-	req.Args = []string{"--dep", dep}
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

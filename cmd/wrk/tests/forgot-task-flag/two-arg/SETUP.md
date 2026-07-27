@@ -14,7 +14,8 @@ wrk <dir> <arg2> -> classify arg2 (task-like vs path-like vs short token)
 - Do not set `TaskDesc` unless testing explicit `-t` coexistence.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Repo assembled per-leaf via setupTwoArg / initMyrepoForForgotTask.
 	skipIfNoGit(t)
 	return nil

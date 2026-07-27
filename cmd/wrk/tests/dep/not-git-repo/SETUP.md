@@ -13,15 +13,22 @@
 3. Run `wrk --dep`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	consumer := initConsumerRepo(t, req.WorkRoot, true)
-	dep := filepath.Join(req.WorkRoot, "not-git")
-	mkdirAll(t, dep)
-	writeFile(t, filepath.Join(dep, "go.mod"), "module "+depModulePath+"\n\ngo 1.22\n")
+	depPath := filepath.Join(req.WorkRoot, "not-git")
+	mkdirAll(t, depPath)
+	writeFile(t, filepath.Join(depPath, "go.mod"), "module "+depModulePath+"\n\ngo 1.22\n")
 
 	req.RepoDir = consumer
-	req.DepPath = dep
-	req.Args = []string{"--dep", dep}
+	req.DepPath = depPath
+	req.Args = []string{"--dep", depPath}
 	return nil
 }
 ```

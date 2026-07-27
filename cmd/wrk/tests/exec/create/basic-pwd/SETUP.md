@@ -14,7 +14,9 @@ myrepo (main) -> wrk --exec pwd
 2. Run `wrk --exec pwd` from the main checkout.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	initGitRepoOnMain(t, req.RepoDir)
 	req.Args = []string{"--exec", "pwd"}
 	return nil

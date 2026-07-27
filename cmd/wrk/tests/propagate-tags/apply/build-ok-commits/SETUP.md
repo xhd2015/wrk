@@ -23,9 +23,14 @@ cwd=lib -> wrk --propagate-tags
 4. Register both; run apply from lib; snapshot go.mod/tags/HEAD first.
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	libPath := filepath.Join(req.WorkRoot, "repos", "lib")
 	appPath := filepath.Join(req.WorkRoot, "repos", "app")
 

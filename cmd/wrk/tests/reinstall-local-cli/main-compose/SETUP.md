@@ -52,7 +52,8 @@
   mutual-exclusion error (mirrors `--main --status --list`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: --main + --reinstall-local compose (P4 CLI).
 	ensureReinstallLocalCLIHelpersUsed()
 	return nil

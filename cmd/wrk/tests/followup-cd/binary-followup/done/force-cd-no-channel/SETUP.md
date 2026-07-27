@@ -16,7 +16,8 @@ wrk --done <wtB> --force-cd
 2. Run `--done <wtB> --force-cd` with cwd = wtA and no follow-up env.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	wtA := runWrkWithArgs(t, req, mainRepo)
 	wtB := runWrkWithArgs(t, req, mainRepo)

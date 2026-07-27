@@ -14,7 +14,8 @@ WRK_AUTO_CD=0; source bash.sh; wrk <mainRepo>
 2. Run wrapper create with `WRK_AUTO_CD=0`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	req.RepoDir = mainRepo
 	req.StartDir = req.FakeHome

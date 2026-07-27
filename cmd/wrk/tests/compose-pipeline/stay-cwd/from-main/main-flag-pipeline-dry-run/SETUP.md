@@ -17,7 +17,9 @@ myrepo (main)
 2. Run multi-stage dry-run with redundant `--main`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupAPMainOnOrigin(t, req)
 	_ = seedAPReinstallPresent(t, req)
 	recordAPDryRunBaseline(t, req)

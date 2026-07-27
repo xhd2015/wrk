@@ -21,7 +21,9 @@ staged -> wrk --gen-commit-msg --dry-run --commit --no-verify
 3. Run `wrk --gen-commit-msg --dry-run --commit --no-verify`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	stageOneTextFile(t, req)
 	req.HEADSubject = gitHEADSubject(t, req.RepoDir)
 	req.Args = []string{"--gen-commit-msg", "--dry-run", "--commit", "--no-verify"}

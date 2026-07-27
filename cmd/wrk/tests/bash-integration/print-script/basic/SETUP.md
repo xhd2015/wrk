@@ -14,7 +14,9 @@ wrk --bash-integration -> script references:
 1. Run `wrk --bash-integration` with default isolated env.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	requireMode(t, req, "print")
 	requireNoPreseed(t, req)
 	return nil

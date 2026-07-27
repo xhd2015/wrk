@@ -25,7 +25,8 @@ wrk --scan-git-repos  (HOME missing or not a directory)
 - Descendants set `FakeHome`, optional fixtures under home, and `Args: --scan-git-repos` with no roots.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: bare-flag default-root leaves share scan helpers.
 	ensureScanGitReposHelpersUsed()
 	return nil

@@ -18,7 +18,8 @@ wrk --dry-run -> error (host list: done|merge-back|all-deps|tag-next|propagate-t
 - Descendants invoke `wrk --dry-run` without `--all-deps` and assert stderr.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	allDepsEnsureHelpersUsed()
 	return nil
 }

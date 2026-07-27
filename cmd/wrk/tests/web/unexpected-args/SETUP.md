@@ -14,7 +14,9 @@ wrk --web some-dir
 1. Run `wrk --web some-dir` from isolated WorkRoot.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--web", "some-dir"}
 	return nil
 }

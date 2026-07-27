@@ -12,7 +12,9 @@ wrk --new --status -> non-zero; mutually exclusive; no worktree created
 2. Run `wrk --new --status`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = []string{"--new", "--status"}
 	return nil
 }

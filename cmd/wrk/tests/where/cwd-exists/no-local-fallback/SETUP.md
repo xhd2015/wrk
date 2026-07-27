@@ -15,7 +15,9 @@ WorkRoot -> wrk --where spl -> stdout = saved path only
 3. Run `wrk --where spl` from `{WorkRoot}`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	localSpl := initNonGitBasenameInDir(t, req.WorkRoot, whereBasename)
 	savedRepo := initSavedGitRepo(t, req.WorkRoot, "saved", whereBasename)
 	recordSavedProject(t, req, savedRepo)

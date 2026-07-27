@@ -23,7 +23,8 @@
 - Modules sorted lex by absolute ModuleRoot path regardless of ModuleRoots order.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: multi-module distinct-bins success branch.
 	if req.ModuleRoots == nil {
 		req.ModuleRoots = []string{}

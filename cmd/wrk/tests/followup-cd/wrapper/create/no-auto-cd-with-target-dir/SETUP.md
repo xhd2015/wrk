@@ -19,9 +19,11 @@ source bash.sh; wrk <mainRepo> <target>
 ```go
 import (
 	"path/filepath"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	target := filepath.Join(req.WorkRoot, "wt")
 	req.RepoDir = mainRepo

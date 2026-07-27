@@ -20,7 +20,9 @@ myrepo (origin, v0.0.1) + wtA + wtB
 3. Run full combo with `--dry-run` and **without** `-y`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupDonePipelineSyncWithOrigin(t, req)
 	recordComposeDryRunBaseline(t, req)
 	// Flag order free; no -y — dry-run must not prompt.

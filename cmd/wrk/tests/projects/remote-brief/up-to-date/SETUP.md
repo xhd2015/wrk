@@ -12,7 +12,9 @@ main tracked to origin/main at same commit -> Remote: identical
 2. Record and run `wrk --projects`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureRemoteBriefHelpersUsed()
 	origin := setupRemoteBriefBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupRemoteBriefTrackedRepo(t, req.WorkRoot, "synced", origin, "synced base")

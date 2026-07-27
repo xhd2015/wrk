@@ -19,7 +19,8 @@ wrk --sync [--dry-run] | invalid combos -> summary or flag error
 - Descendants set `req.RepoDir` / `req.Args` for the scenario under test.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	syncEnsureHelpersUsed()
 	return nil

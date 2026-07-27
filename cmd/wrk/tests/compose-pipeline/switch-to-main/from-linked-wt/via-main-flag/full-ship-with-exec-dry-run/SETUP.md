@@ -17,7 +17,9 @@ linked wt
 2. Run `--main` multi-stage with `--exec true` and `--dry-run`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupAPLinkedAheadOrigin(t, req)
 	_ = seedAPReinstallPresent(t, req)
 	recordAPDryRunBaseline(t, req)

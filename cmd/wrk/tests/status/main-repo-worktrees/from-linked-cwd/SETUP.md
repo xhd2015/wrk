@@ -13,7 +13,9 @@ external wt cwd -> wrk --status -> scan only, no appended section
 2. Run `wrk --status` with cwd set to the external worktree root.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	_, wtDir, branch := createExternalWrkWorktree(t, req)
 	req.RepoDir = wtDir
 	req.WtBranch = branch

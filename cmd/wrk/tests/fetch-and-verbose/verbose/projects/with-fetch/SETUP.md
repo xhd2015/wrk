@@ -7,7 +7,9 @@ tracked repo with upstream -> --projects --fetch -v -> stderr fetch line
 ```
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	origin := setupFetchVerboseBareOrigin(t, req.WorkRoot, "origin")
 	repo := setupFetchVerboseTrackedRepo(t, req.WorkRoot, "proj-v-fetch", origin, "proj v fetch")
 	recordFetchVerboseProject(t, req, repo)

@@ -19,7 +19,9 @@ linked wt
 2. Run `--main` multi-stage dry-run from linked wt cwd (no `-y`).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupAPSyncWithOrigin(t, req)
 	_ = seedAPReinstallPresent(t, req)
 	recordAPDryRunBaseline(t, req)

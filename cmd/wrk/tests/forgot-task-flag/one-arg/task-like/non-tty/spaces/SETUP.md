@@ -13,7 +13,9 @@
 2. TargetDir (first positional) = multi-word task text.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupOneArg(t, req, taskLikeSpaces)
 	return nil
 }

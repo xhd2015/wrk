@@ -12,7 +12,8 @@ source bash.sh from old wt; wrk --set-task "new"
 1. Descendants create task worktree and set --set-task args.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "wrapper")
 	return nil
 }

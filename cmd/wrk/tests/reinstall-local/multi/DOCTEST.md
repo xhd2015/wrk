@@ -114,6 +114,7 @@ Compile failure or assert failure both count as RED.
 ```go
 import (
 	"testing"
+	"github.com/xhd2015/doctest/session"
 
 	"github.com/xhd2015/wrk/wrkcli"
 )
@@ -163,7 +164,8 @@ type Response struct {
 	Modules []WantModulePlan
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
+	_ = d
 	// Classic TDD: PlanLocalReinstallsMulti / MultiLocalReinstallPlan are the
 	// production API under design. RED (compile or assert) until implementer lands them.
 	plan, err := wrkcli.PlanLocalReinstallsMulti(req.ModuleRoots, req.BinDir)

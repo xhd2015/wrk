@@ -11,7 +11,8 @@ IsWipSubject("feat: done") -> false
 1. Set subject to `feat: done`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	req.Subject = "feat: done"
 	return nil
 }

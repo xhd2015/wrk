@@ -16,7 +16,9 @@ seed projects.json with main (legacy source=scan)
 3. Run `wrk --scan-git-repos <scan-root>`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	scanRoot := makeScanRoot(t, req.WorkRoot)
 	mainRepo := initScanMainRepo(t, scanRoot, "myrepo")
 	seedScanProject(t, req.WrkHome, mainRepo)

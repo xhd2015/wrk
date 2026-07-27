@@ -9,9 +9,14 @@ linked wt cwd + --status --fetch -> no Remote; Master ok; Dir . for linked path
 
 
 ```go
-import "path/filepath"
+import (
+	"path/filepath"
+	"github.com/xhd2015/doctest/session"
+)
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := filepath.Join(req.WorkRoot, "linked-main")
 	initFetchVerboseRepo(t, mainRepo, "linked main base")
 	wtDir := addLinkedWorktreeInRepo(t, mainRepo, "wt-linked", "wt-branch")

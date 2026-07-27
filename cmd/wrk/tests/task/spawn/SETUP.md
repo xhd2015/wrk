@@ -18,7 +18,8 @@ wrk --task "fix login bug" -> git worktree add -b {branch}-{date}-{slug} {path}
 - `WRK_HOME` and `WRK_DATE` are set by the test harness.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	skipIfNoGit(t)
 	return nil
 }

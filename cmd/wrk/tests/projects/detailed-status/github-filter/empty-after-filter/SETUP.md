@@ -12,7 +12,9 @@ local bare origin only -> wrk --projects --github -> exit 0, empty stdout
 2. Run `wrk --projects --github`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	ensureGitHubFilterHelpersUsed()
 	origin := setupBareOrigin(t, req.WorkRoot, "origin-only-local")
 	repo := setupTrackedMainRepo(t, req.WorkRoot, "local-only", origin, "local only")

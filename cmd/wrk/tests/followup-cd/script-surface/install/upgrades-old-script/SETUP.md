@@ -14,7 +14,8 @@ wrk --bash-integration --install
 2. Run install.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "install")
 	req.PreExistingBashSh = minimalCompletionOnlyBashSh()
 	return nil

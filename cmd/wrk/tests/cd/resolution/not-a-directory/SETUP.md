@@ -13,7 +13,14 @@ wrk --cd workspace/notdir (abs) -> non-zero; not a directory (or similar)
 2. `wrk --cd <file-abs>`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+import (
+	"github.com/xhd2015/doctest/session"
+	"path/filepath"
+)
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	filePath := filepath.Join(req.WorkRoot, "notdir")
 	writeFile(t, filePath, "not a directory\n")
 	req.MainRepo = resolvePath(t, filePath)

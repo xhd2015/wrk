@@ -35,7 +35,7 @@ import (
 // Run executes wrk logic with args. The first positional argument,
 // if present, is the source directory for all modes.
 func Run(args []string) error {
-	origWd, err := os.Getwd()
+	origWd, err := processCwd()
 	if err != nil {
 		return fmt.Errorf("get cwd: %w", err)
 	}
@@ -1210,7 +1210,7 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 
 	// Resolve home for default root and two-base mapping. Default root requires
 	// home to exist as a directory; mapping uses home only when available.
-	home, homeErr := os.UserHomeDir()
+	home, homeErr := userHomeDir()
 	if len(roots) == 0 {
 		if homeErr != nil || home == "" {
 			return fmt.Errorf("wrk: --scan-git-repos requires a home directory to use as default root")
@@ -1302,9 +1302,16 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 		return nil
 	}
 
+	// Explicit CacheRoot from resolved home so Capture FakeHome (captureUserHome)
+	// does not need process Setenv("HOME") for scan_repo's default cache path.
+	cacheRoot := ""
+	if !noCache && homeErr == nil && home != "" {
+		cacheRoot = filepath.Join(home, ".cache", "git-repo-scan")
+	}
 	opts := scan_repo.Options{
 		Roots:           filterRoots,
 		NoCache:         noCache,
+		CacheRoot:       cacheRoot,
 		Debug:           debug,
 		Stderr:          os.Stderr,
 		OnRepo:          onRepo,
@@ -1647,7 +1654,7 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool) error {
 	// Shell process cwd (inherited from interactive shell), not merely workDir.
 	// Used after remove to decide whether auto-cd is needed.
-	shellCwd, _ := os.Getwd()
+	shellCwd, _ := processCwd()
 
 	// Own merge-back: default auto-yes unless --confirm ( -y still auto-yes).
 	// Cascade not-included: default auto-yes does NOT apply; only -y/--yes (D3).
@@ -3076,10 +3083,14 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 }
 
 func resolveWrkHome() (string, error) {
+	// Capture injects WRK_HOME via captureWrkHome (no process Setenv).
+	if captureWrkHome != "" {
+		return filepath.Abs(pathfmt.Expand(captureWrkHome))
+	}
 	if v := os.Getenv("WRK_HOME"); v != "" {
 		return filepath.Abs(pathfmt.Expand(v))
 	}
-	home, err := os.UserHomeDir()
+	home, err := userHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
@@ -3087,6 +3098,9 @@ func resolveWrkHome() (string, error) {
 }
 
 func resolveWrkDate() string {
+	if captureWrkDate != "" {
+		return captureWrkDate
+	}
 	if v := os.Getenv("WRK_DATE"); v != "" {
 		return v
 	}
@@ -3241,7 +3255,7 @@ func runSetTask(workDir string, taskDesc string, assumeYes, noCd, forceCd bool, 
 
 	// Shell process cwd (inherited from interactive shell), not merely workDir.
 	// Used after move to decide whether auto-cd is needed.
-	shellCwd, _ := os.Getwd()
+	shellCwd, _ := processCwd()
 
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {

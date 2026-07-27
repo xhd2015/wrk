@@ -13,7 +13,9 @@ WorkRoot -> wrk linked-wt --list -> projects.json records myrepo main (not workt
 3. Run `wrk <linkedWt> --list` from `{WorkRoot}`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	mainRepo := initProjectsRepo(t, req.WorkRoot, "myrepo")
 	linkedWT := setupLinkedWorktree(t, mainRepo, "linked-wt", "linked-side")
 	req.MainRepo = mainRepo

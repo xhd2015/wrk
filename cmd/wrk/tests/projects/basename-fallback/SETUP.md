@@ -38,9 +38,11 @@ wrk <basename> (create mode) -> stat(cwd/<basename>) fails -> match saved projec
 import (
 	"path/filepath"
 	"sort"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	ensureBasenameFallbackHelpersUsed()
 	return nil
 }

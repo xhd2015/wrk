@@ -12,7 +12,9 @@ external wt cwd -> wrk --main --status -> status of main
 2. Args = `--main`, `--status`.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setMainStatusArgs(req, "--main", "--status")
 	return nil
 }

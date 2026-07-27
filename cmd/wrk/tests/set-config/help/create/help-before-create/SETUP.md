@@ -13,7 +13,9 @@ workspace/ -> wrk --set-config --help --create
 1. Run `wrk --set-config --help --create` (help token before action).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	req.Args = setConfigArgs("--help", "--create")
 	return nil
 }

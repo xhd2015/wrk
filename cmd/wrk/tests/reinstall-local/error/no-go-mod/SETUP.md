@@ -13,7 +13,8 @@ PlanLocalReinstalls(moduleRoot, binDir) -> error
 2. Expect non-nil error from Run.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// ModuleRoot exists but has no go.mod — S9.
 	req.WantError = true
 	return nil

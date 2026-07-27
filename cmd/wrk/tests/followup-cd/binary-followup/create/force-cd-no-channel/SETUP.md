@@ -17,7 +17,8 @@ wrk --force-cd
 2. Run `wrk --force-cd` with process cwd = main repo and **no** follow-up env.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	mainRepo := setupMainRepo(t, req)
 	req.RepoDir = mainRepo
 	req.UseFollowupEnv = false

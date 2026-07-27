@@ -36,7 +36,9 @@ consumer wt + deps/foo linked (clean, already-included on dep)
    already-included removes without merge).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupCascadeScanInnerWorktree(t, req)
 	req.Args = []string{"--done", "--confirm-from-stdin"}
 	req.StdinInput = "\n"

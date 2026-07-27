@@ -26,7 +26,8 @@ wrk --gen-commit-msg --sync -> NOT mutually exclusive
 - Leaves set mode pairs (list exclusives stay RED-on-regression; pipeline pairs assert allow).
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	// Grouping: regression exclusives need a valid git cwd for mode flags.
 	skipIfNoGit(t)
 	return nil

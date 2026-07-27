@@ -15,7 +15,9 @@ linked wt -> wrk --sync --tag-next --push
 2. Run multi-stage including tag-next without done.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	req.InProcess = true
 	setupAPLinkedAheadOrigin(t, req)
 	req.Args = []string{"--sync", "--tag-next", "--push"}
 	return nil

@@ -25,7 +25,8 @@ source bash.sh; wrk --force-cd -> stderr "cd <wt>"; FinalPWD = worktree
 2. Target-dir leaf passes a second absolute positional path; shell stays put.
 
 ```go
-func Setup(t *testing.T, req *Request) error {
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
 	requireMode(t, req, "wrapper")
 	return nil
 }

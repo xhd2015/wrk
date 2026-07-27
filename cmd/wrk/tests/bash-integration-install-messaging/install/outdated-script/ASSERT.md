@@ -1,3 +1,4 @@
+
 ## Expected Output
 
 ```
@@ -29,9 +30,11 @@ bashrc: {HOME}/.bashrc (marker is up to date)
 import (
 	"strings"
 	"testing"
+	"github.com/xhd2015/doctest/session"
 )
 
-func Assert(t *testing.T, req *Request, resp *Response, err error) {
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertExit0(t, resp, err)
 	assertInstallReport(t, resp, "updated", "updated", "is up to date", "is up to date")
 	if strings.Contains(resp.BashShContent, "pre-seeded outdated wrk bash integration") {
