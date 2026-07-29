@@ -127,6 +127,7 @@ var wrkCompletionFlags = []string{
 	"--dep",
 	"--bring",
 	"--all-deps",
+	"--no-dep",
 	"--tag-next",
 	"--propagate-tags",
 	"--sync",
@@ -164,7 +165,7 @@ var bashIntegrationDisallowedFlags = []string{
 	"--fetch", "--github", "-v", "--verbose", "--color", "--add", "--rm", "--where",
 	"--cd",
 	"--main",
-	"--dep", "--bring", "--all-deps", "--tag-next", "--propagate-tags", "--sync", "-t", "--task", "--set-task", "-y", "--yes",
+	"--dep", "--bring", "--all-deps", "--no-dep", "--tag-next", "--propagate-tags", "--sync", "-t", "--task", "--set-task", "-y", "--yes",
 	"--confirm", "--confirm-from-stdin", "--no-in-module-replace",
 }
 

@@ -15,7 +15,7 @@ var setConfigDisallowedFlags = []string{
 	"--done", "--merge-back", "-l", "--list", "--status", "--repos", "--projects", "--projects-dep-graph",
 	"--scan-git-repos", "--no-cache", "--include-worktrees",
 	"--fetch", "--github", "--add", "--rm", "--where", "--cd", "--main",
-	"--dep", "--bring", "--all-deps", "--tag-next", "--propagate-tags", "--sync", "--dry-run",
+	"--dep", "--bring", "--all-deps", "--no-dep", "--tag-next", "--propagate-tags", "--sync", "--dry-run",
 	"-t", "--task", "--set-task",
 	"--new",
 	"--exec",

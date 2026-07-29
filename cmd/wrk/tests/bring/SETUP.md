@@ -6,10 +6,12 @@
 # like --dep: external/{basename}-{token}-{date} under consumer; branch {token}-{date}[-N] on dep repo
 # unlike --dep: soft SKIP (exit 0) when not a go module / consumer has no modules / not a dependency
 # always: worktree + /external gitignore + abs path on stdout when git/worktree succeeds
-consumer (git) + dep path -> wrk --bring <dep>
+# --no-dep: worktree + gitignore only; skip module match scan + replace + go mod tidy
+# -v: log major git + go mod tidy pre-line; stream worktree add + tidy child to stderr
+consumer (git) + dep path -> wrk --bring <dep> [--no-dep] [-v]
   -> external worktree under consumer/external/
-  -> optional replace+tidy on module match
-  -> SKIP local dep replacement: <reason> on stderr when soft-fail
+  -> optional replace+tidy on module match (skipped with --no-dep)
+  -> SKIP local dep replacement: <reason> on stderr when soft-fail (not with --no-dep)
   -> stdout: <external-abs>\n
 ```
 
@@ -19,12 +21,13 @@ consumer (git) + dep path -> wrk --bring <dep>
 - Consumer cwd must be inside a usable git work tree (main or linked).
 - Dep path must resolve to a usable git repo for worktree create (hard error otherwise).
 - Module analyse/replace is best-effort only for `--bring` (strict hard errors remain for `--dep`).
+- `--no-dep` is long-only and valid only with `--bring` / `--dep` / `--all-deps`.
 
 ## Steps
 
 - Leaves build isolated consumer + dep repos under `req.WorkRoot`.
 - `req.RepoDir` is the consumer cwd for `wrk --bring`.
-- `req.Args = []string{"--bring", depPath}` (plus optional `--exec …`).
+- `req.Args = []string{"--bring", depPath}` (plus optional `--exec …`, `--no-dep`, `-v`).
 - Shared helpers mirror `dep/` fixture patterns (`initConsumerRepo`, `initDepRepo`, `externalWorktreePath`, …).
 
 ## Context
@@ -35,6 +38,7 @@ consumer (git) + dep path -> wrk --bring <dep>
   - `SKIP local dep replacement: <depPath> is not a dependency of any consumer module`
 - Mutually exclusive with `--dep` (and the same exclusive mode set as `--dep`).
 - `--exec` after successful `--bring` (including SKIP) runs in the external worktree.
+- See `no-dep/`, `verbose/`, and `help-mentions-no-dep/` for flag-specific leaves.
 
 ```go
 import (

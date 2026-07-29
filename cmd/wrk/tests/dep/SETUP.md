@@ -4,7 +4,8 @@
 
 ```
 # consumer requires dep; wrk --dep <dep-repo> -> external/<name> worktree + replace + tidy + gitignore
-consumer (go.mod + git) + dep repo -> wrk --dep -> stdout external path
+# --no-dep: strict pre-checks still apply; then worktree + gitignore only (no replace/tidy)
+consumer (go.mod + git) + dep repo -> wrk --dep [--no-dep] -> stdout external path
 # path: external/{depBasename}-{token}-{date}[-N]
 # branch: {token}-{date}[-N]  (NO dep basename; always worktree add -b)
 ```
@@ -20,12 +21,14 @@ consumer (go.mod + git) + dep repo -> wrk --dep -> stdout external path
 - Git and Go must be available.
 - Consumer cwd must be inside a git work tree with a `go.mod`.
 - Dep path must be a git repo with a valid Go module listed in consumer go.mod.
+- `--no-dep` long-only; valid with `--dep` / `--bring` / `--all-deps` only.
 
 ## Steps
 
 - Tests build isolated consumer + dep repos under `req.WorkRoot`.
 - `req.RepoDir` is the consumer cwd for `wrk --dep`.
-- `req.Args = []string{"--dep", depPath}`.
+- `req.Args = []string{"--dep", depPath}` (plus optional `--no-dep`).
+- See `no-dep/` for worktree-only and strict not-a-dependency leaves.
 
 ```go
 import (

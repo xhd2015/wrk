@@ -146,6 +146,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	var depPath string
 	var bringPath string
 	var allDeps bool
+	var noDep bool
 	var reinstallLocal bool
 	var tagNext bool
 	var propagateTags bool
@@ -229,6 +230,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		Bool("--no-config", &noConfig).
 		String("--dep", &depPath).
 		String("--bring", &bringPath).
+		Bool("--no-dep", &noDep).
 		String("-t,--task", &taskDesc).
 		String("--set-task", &setTaskDesc).
 		String("--where", &wherePath).
@@ -292,6 +294,10 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// --include-worktrees is only valid with --scan-git-repos.
 	if includeWorktrees && !scanGitRepos {
 		return fmt.Errorf("wrk: --include-worktrees is only valid with --scan-git-repos")
+	}
+	// --no-dep is only valid with --dep, --bring, or --all-deps.
+	if noDep && depPath == "" && bringPath == "" && !allDeps {
+		return fmt.Errorf("wrk: --no-dep is only valid with --dep, --bring, or --all-deps")
 	}
 
 	if fetchFlag && !projects && !status && !webFlag {
@@ -843,13 +849,13 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runRepos(workDir)
 	}
 	if depPath != "" {
-		return runDep(workDir, depPath, wrkHome, args, execArgs)
+		return runDep(workDir, depPath, wrkHome, args, execArgs, noDep)
 	}
 	if bringPath != "" {
-		return runBring(workDir, bringPath, wrkHome, args, execArgs)
+		return runBring(workDir, bringPath, wrkHome, args, execArgs, noDep)
 	}
 	if allDeps {
-		return runAllDeps(workDir, dryRun)
+		return runAllDeps(workDir, dryRun, noDep)
 	}
 	if list {
 		return runList(workDir)
@@ -1043,7 +1049,7 @@ Flags:
   --include-worktrees             with --scan-git-repos: also list linked worktrees
   --github                        with --projects: only show projects whose origin is github.com
   --fetch                         with --projects or --status: fetch upstream before Remote: compare
-  -v, --verbose                   log major git commands to stderr
+  -v, --verbose                   log major git commands and go mod tidy to stderr
   --add <dir>                     manually record a main repository path
   --rm <dir>                      remove a recorded main repository path
   --where <basename>              look up saved project path(s) by basename
@@ -1055,6 +1061,7 @@ Flags:
   --dep <path>                    spawn a dependency worktree under ./external
   --bring <path>                  like --dep, but soft-skip go.mod replace when not a module dep
   --all-deps                      link every required dep from registered projects
+  --no-dep                        with --dep/--bring/--all-deps: worktree only; skip replace and tidy
   --reinstall-local [--dry-run]   reinstall local module binaries already in GOBIN/GOPATH/bin
                                   (with --main: scan main repository modules for this checkout;
                                    also: after successful --done / --merge-back, scan main tip)
@@ -2094,21 +2101,24 @@ func mergeBackExternalWorktree(externalPath string, confirmFromStdin, assumeYes,
 	return nil
 }
 
-func runDep(workDir string, depArg string, wrkHome string, rawArgs []string, execArgs []string) error {
-	return runDepLike(workDir, depArg, wrkHome, rawArgs, execArgs, false)
+func runDep(workDir string, depArg string, wrkHome string, rawArgs []string, execArgs []string, noDep bool) error {
+	return runDepLike(workDir, depArg, wrkHome, rawArgs, execArgs, false, noDep)
 }
 
 // runBring is like runDep but always materializes the external worktree and
 // best-effort applies go.mod replace (soft SKIP notices on stderr, exit 0).
-func runBring(workDir string, bringArg string, wrkHome string, rawArgs []string, execArgs []string) error {
-	return runDepLike(workDir, bringArg, wrkHome, rawArgs, execArgs, true)
+func runBring(workDir string, bringArg string, wrkHome string, rawArgs []string, execArgs []string, noDep bool) error {
+	return runDepLike(workDir, bringArg, wrkHome, rawArgs, execArgs, true, noDep)
 }
 
 // runDepLike implements --dep (strict) and --bring (best-effort).
 // When bestEffort is false: hard-error if dep is not a go module or not a dependency,
 // then create worktree + replace. When true: always create worktree + gitignore first,
 // then soft-skip replace with stderr notices when analyse fails.
-func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string, execArgs []string, bestEffort bool) error {
+// When noDep is true: still materialize/reuse external worktree + gitignore, but skip
+// all replace/tidy. For --bring, also skip module analyse/match (no SKIP messages).
+// For --dep, keep strict analyse first (hard errors before worktree).
+func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string, execArgs []string, bestEffort bool, noDep bool) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -2164,6 +2174,11 @@ func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string,
 		return err
 	}
 
+	// --no-dep: worktree only; skip replace + tidy (and bring analyse/match).
+	if noDep {
+		return finishDepLike(externalPath, execArgs)
+	}
+
 	if bestEffort {
 		// Soft-skip replace with notices; worktree already exists.
 		depModules, err := scan.Scan(depPath, scan.Options{})
@@ -2201,7 +2216,7 @@ func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string,
 		if _, _, err := replace.ReplaceIn(m.dir, replaceDir); err != nil {
 			return err
 		}
-		if err := commands.GoModTidy(&commands.GoModEditOptions{Dir: m.dir, Stderr: false, Stdout: false}); err != nil {
+		if err := goModTidy(m.dir); err != nil {
 			return err
 		}
 	}
@@ -2529,7 +2544,7 @@ func createExternalWorktreeForRepo(consumerTop, depPath string) (externalPath st
 	return externalPath, nil
 }
 
-func runAllDeps(workDir string, dryRun bool) error {
+func runAllDeps(workDir string, dryRun bool, noDep bool) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -2666,25 +2681,28 @@ func runAllDeps(workDir string, dryRun bool) error {
 			if m.Dir != "." {
 				target = filepath.Join(externalPath, filepath.FromSlash(m.Dir))
 			}
-			// Replace in every consumer module that requires this dep.
-			for _, cm := range consumerMods {
-				if !cm.required[m.Path] || cm.alreadyReplaced[m.Path] {
-					continue
+			// --no-dep: link worktree only; skip replace + tidy.
+			if !noDep {
+				// Replace in every consumer module that requires this dep.
+				for _, cm := range consumerMods {
+					if !cm.required[m.Path] || cm.alreadyReplaced[m.Path] {
+						continue
+					}
+					opts := &commands.GoModEditOptions{Dir: cm.dir, Stderr: false, Stdout: false}
+					if err := commands.GoModEditReplace(m.Path, target, opts); err != nil {
+						return err
+					}
+					tidied[cm.dir] = true
 				}
-				opts := &commands.GoModEditOptions{Dir: cm.dir, Stderr: false, Stdout: false}
-				if err := commands.GoModEditReplace(m.Path, target, opts); err != nil {
-					return err
-				}
-				tidied[cm.dir] = true
 			}
 			seen[m.Path] = true
 			linked = append(linked, linkedDep{modulePath: m.Path, externalPath: target})
 		}
 	}
 
-	if !dryRun {
+	if !dryRun && !noDep {
 		for dir := range tidied {
-			if err := commands.GoModTidy(&commands.GoModEditOptions{Dir: dir, Stderr: false, Stdout: false}); err != nil {
+			if err := goModTidy(dir); err != nil {
 				return err
 			}
 		}
@@ -2724,11 +2742,9 @@ func createExternalWorktree(depMain, depPath, externalPath, branch string) error
 
 	// Always create a new branch from the dep's current tip. Callers must have
 	// already walked to a free branch name (externalCandidateBlocked).
+	// Use runGitWorktreeAdd so -v streams Preparing worktree / HEAD is now at.
 	cmd := gitCommand("-C", depMain, "worktree", "add", "-b", branch, externalPath, depBranch)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git worktree add: %w\n%s", err, out)
-	}
-	return nil
+	return runGitWorktreeAdd(cmd)
 }
 
 func ensureGitignoreExternal(top string) error {

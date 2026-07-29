@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,6 +24,40 @@ func logGitCommand(args []string) {
 	}
 	ts := time.Now().Format("2006-01-02 15:04:05")
 	fmt.Fprintf(os.Stderr, "[%s] $ git %s\n", ts, strings.Join(args, " "))
+}
+
+// logGoCommand logs a major go invocation under -v in the same timestamp style
+// as logGitCommand, e.g. `[YYYY-MM-DD HH:MM:SS] $ go -C <dir> mod tidy`.
+func logGoCommand(args []string) {
+	if !invocationVerbose {
+		return
+	}
+	ts := time.Now().Format("2006-01-02 15:04:05")
+	fmt.Fprintf(os.Stderr, "[%s] $ go %s\n", ts, strings.Join(args, " "))
+}
+
+// goModTidy runs `go mod tidy` in dir. Under -v: timestamped pre-line on stderr
+// then streams child stdout+stderr to process stderr (so wrk stdout stays clean).
+// Without -v: silent (no pre-line, discard child streams).
+func goModTidy(dir string) error {
+	absDir := dir
+	if abs, err := filepath.Abs(dir); err == nil {
+		absDir = abs
+	}
+	if invocationVerbose {
+		logGoCommand([]string{"-C", absDir, "mod", "tidy"})
+	}
+	cmd := exec.Command("go", "mod", "tidy")
+	cmd.Dir = absDir
+	if invocationVerbose {
+		// Route both streams to process stderr so path-only stdout stays clean.
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to execute go mod tidy: %w", err)
+	}
+	return nil
 }
 
 func isMajorGitCommand(args []string) bool {
