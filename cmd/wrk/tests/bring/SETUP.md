@@ -3,14 +3,16 @@
 **Feature**: wrk --bring always materializes external dep worktree; Go replace is best-effort
 
 ```
-# like --dep: external/{basename}-{token}-{date} under consumer; branch {token}-{date}[-N] on dep repo
-# unlike --dep: soft SKIP (exit 0) when not a go module / consumer has no modules / not a dependency
-# always: worktree + /external gitignore + abs path on stdout when git/worktree succeeds
-# --no-dep: worktree + gitignore only; skip module match scan + replace + go mod tidy
+# like --dep: external/{basename}-{token}-{date} under parent; branch {token}-{date}[-N] on dep repo
+# parent = git toplevel when cwd is git; parent = abs(cwd) when cwd is plain non-git
+# unlike --dep: soft SKIP (exit 0) when not a go module / no modules / not a dep / non-git cwd
+# git consumer: worktree + /external gitignore + abs path when worktree succeeds
+# non-git cwd: worktree under {cwd}/external/; soft-skip replace; skip ensureGitignoreExternal
+# --no-dep: worktree (+ gitignore when git parent) only; skip module analyse (no SKIP)
 # -v: log major git + go mod tidy pre-line; stream worktree add + tidy child to stderr
-consumer (git) + dep path -> wrk --bring <dep> [--no-dep] [-v]
-  -> external worktree under consumer/external/
-  -> optional replace+tidy on module match (skipped with --no-dep)
+consumer (git or plain non-git) + dep path -> wrk --bring <dep> [--no-dep] [-v]
+  -> external worktree under {parent}/external/
+  -> optional replace+tidy on module match (skipped with --no-dep or non-git)
   -> SKIP local dep replacement: <reason> on stderr when soft-fail (not with --no-dep)
   -> stdout: <external-abs>\n
 ```
@@ -18,17 +20,18 @@ consumer (git) + dep path -> wrk --bring <dep> [--no-dep] [-v]
 ## Preconditions
 
 - Git and Go must be available.
-- Consumer cwd must be inside a usable git work tree (main or linked).
 - Dep path must resolve to a usable git repo for worktree create (hard error otherwise).
-- Module analyse/replace is best-effort only for `--bring` (strict hard errors remain for `--dep`).
+- **`--bring` does not require consumer git**: non-git cwd still materializes under `{abs(cwd)}/external/` and soft-skips replace + gitignore.
+- When cwd **is** git, parent remains the consumer git toplevel (main or linked) as for `--dep`.
+- Module analyse/replace is best-effort only for `--bring` (strict hard errors remain for `--dep` / `--all-deps` on non-git cwd).
 - `--no-dep` is long-only and valid only with `--bring` / `--dep` / `--all-deps`.
 
 ## Steps
 
-- Leaves build isolated consumer + dep repos under `req.WorkRoot`.
-- `req.RepoDir` is the consumer cwd for `wrk --bring`.
+- Leaves build isolated consumer (git or plain) + dep repos under `req.WorkRoot`.
+- `req.RepoDir` is the consumer cwd for `wrk --bring`; `req.ConsumerTop` is the external parent (git toplevel or abs plain cwd).
 - `req.Args = []string{"--bring", depPath}` (plus optional `--exec …`, `--no-dep`, `-v`).
-- Shared helpers mirror `dep/` fixture patterns (`initConsumerRepo`, `initDepRepo`, `externalWorktreePath`, …).
+- Shared helpers mirror `dep/` fixture patterns (`initConsumerRepo`, `initDepRepo`, `externalWorktreePath`, …); see `not-git-cwd/` for plain-cwd fixtures.
 
 ## Context
 
@@ -36,9 +39,11 @@ consumer (git) + dep path -> wrk --bring <dep> [--no-dep] [-v]
   - `SKIP local dep replacement: <depPath> is not a go module`
   - `SKIP local dep replacement: consumer has no Go modules`
   - `SKIP local dep replacement: <depPath> is not a dependency of any consumer module`
+  - `SKIP local dep replacement: <abs-cwd> is not a git repository` (non-git consumer cwd; soft for `--bring` only)
 - Mutually exclusive with `--dep` (and the same exclusive mode set as `--dep`).
 - `--exec` after successful `--bring` (including SKIP) runs in the external worktree.
-- See `no-dep/`, `verbose/`, and `help-mentions-no-dep/` for flag-specific leaves.
+- See `not-git-cwd/`, `no-dep/`, `verbose/`, and `help-mentions-no-dep/` for flag/cwd-specific leaves.
+- `--dep` / `--all-deps` non-git hard-error remains covered under `dep/not-git-repo/` and `all-deps/not-git-cwd/` (not retested here).
 
 ```go
 import (

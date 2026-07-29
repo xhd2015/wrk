@@ -2113,24 +2113,35 @@ func runBring(workDir string, bringArg string, wrkHome string, rawArgs []string,
 
 // runDepLike implements --dep (strict) and --bring (best-effort).
 // When bestEffort is false: hard-error if dep is not a go module or not a dependency,
-// then create worktree + replace. When true: always create worktree + gitignore first,
-// then soft-skip replace with stderr notices when analyse fails.
-// When noDep is true: still materialize/reuse external worktree + gitignore, but skip
-// all replace/tidy. For --bring, also skip module analyse/match (no SKIP messages).
-// For --dep, keep strict analyse first (hard errors before worktree).
+// then create worktree + replace. When true: always create worktree first (gitignore
+// only when consumer is git), then soft-skip replace with stderr notices when analyse fails.
+// When noDep is true: still materialize/reuse external worktree, but skip all replace/tidy.
+// For --bring, also skip module analyse/match (no SKIP messages). For --dep, keep strict
+// analyse first (hard errors before worktree).
+//
+// Non-git consumer cwd: --dep hard-errors; --bring uses abs(cwd) as the external parent,
+// skips ensureGitignoreExternal, and soft-skips replace/tidy with
+// "SKIP local dep replacement: <abs-cwd> is not a git repository" (unless noDep).
 func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string, execArgs []string, bestEffort bool, noDep bool) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
 	}
 
-	if !worktree.IsInsideWorkTree(cwd) {
+	insideWorkTree := worktree.IsInsideWorkTree(cwd)
+	if !insideWorkTree && !bestEffort {
 		return fmt.Errorf("%s is not a git repository", cwd)
 	}
 
-	consumerTop, err := worktree.ShowToplevel(cwd)
-	if err != nil {
-		return err
+	var consumerTop string
+	if insideWorkTree {
+		consumerTop, err = worktree.ShowToplevel(cwd)
+		if err != nil {
+			return err
+		}
+	} else {
+		// --bring from non-git cwd: parent for external/ is abs(cwd).
+		consumerTop = cwd
 	}
 	depPath, err := resolveDirArg(depArg, true, wrkHome, &DirHintOptions{
 		RawArgs: rawArgs,
@@ -2167,8 +2178,9 @@ func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string,
 		}
 	}
 
-	// Create external worktree + /external gitignore (always for both modes once
-	// analyse passed for --dep; always for --bring after path/git resolve).
+	// Create external worktree (+ /external gitignore only when consumer is git).
+	// Always for both modes once analyse passed for --dep; always for --bring
+	// after path/git resolve.
 	externalPath, err := createExternalWorktreeForRepo(consumerTop, depPath)
 	if err != nil {
 		return err
@@ -2180,6 +2192,12 @@ func runDepLike(workDir string, depArg string, wrkHome string, rawArgs []string,
 	}
 
 	if bestEffort {
+		// Non-git consumer: soft-skip replace/tidy without module analyse.
+		if !insideWorkTree {
+			fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a git repository\n", cwd)
+			return finishDepLike(externalPath, execArgs)
+		}
+
 		// Soft-skip replace with notices; worktree already exists.
 		depModules, err := scan.Scan(depPath, scan.Options{})
 		if err != nil {
@@ -2484,12 +2502,15 @@ func planExternalWorktreePath(consumerTop, depPath string) (externalPath string,
 // createExternalWorktreeForRepo materializes the external worktree for the dep
 // repo resolved from depPath under {consumerTop}/external/ and returns its path.
 // It plans the path via planExternalWorktreePath (so dry-run and real runs
-// agree on naming), then creates the external dir, ensures .gitignore, and adds
-// the worktree. It does NOT add a replace directive or run tidy. Used by
-// runAllDeps (one worktree per repo, with per-module replaces added separately).
+// agree on naming), then creates the external dir, ensures .gitignore when the
+// consumer parent is a git repo, and adds the worktree. It does NOT add a
+// replace directive or run tidy. Used by runAllDeps (one worktree per repo,
+// with per-module replaces added separately).
 //
 // Policy A: when planExternalWorktreePath reuses an existing external path, this
-// still ensures /external gitignore but does not create a new worktree/branch.
+// still ensures /external gitignore (git parents only) but does not create a new
+// worktree/branch. Non-git consumerTop (e.g. --bring from a plain dir) skips
+// ensureGitignoreExternal entirely.
 func createExternalWorktreeForRepo(consumerTop, depPath string) (externalPath string, err error) {
 	externalPath, err = planExternalWorktreePath(consumerTop, depPath)
 	if err != nil {
@@ -2500,8 +2521,12 @@ func createExternalWorktreeForRepo(consumerTop, depPath string) (externalPath st
 	if err := os.MkdirAll(externalDir, 0o755); err != nil {
 		return "", fmt.Errorf("create external dir: %w", err)
 	}
-	if err := ensureGitignoreExternal(consumerTop); err != nil {
-		return "", err
+	// Only write /external into .gitignore when the parent is a git repository.
+	// --bring from a non-git cwd must not create a .gitignore there.
+	if worktree.IsInsideWorkTree(consumerTop) {
+		if err := ensureGitignoreExternal(consumerTop); err != nil {
+			return "", err
+		}
 	}
 
 	// Reuse path: already on disk as a live linked worktree — no git worktree add.
