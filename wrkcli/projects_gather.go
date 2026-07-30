@@ -169,6 +169,20 @@ func startRemoteCompareAsync(mainRepoPath string, fetchCh chan fetchAsyncResult,
 func gatherProjectStatus(mainRepoPath string, colorEnabled bool, fetchEnabled bool) (projectStatusData, error) {
 	mainRepoPath = storage.NormalizePath(mainRepoPath)
 
+	// Fast path for recorded paths that are no longer a main git checkout
+	// (e.g. .git removed). Must not call worktree.List/ListLinked: go-pkgs
+	// v0.0.94 delegates those to gitops, whose xgocmd.Output defaults stderr to
+	// os.Stderr and would leak "fatal: not a git repository" onto process
+	// stderr — --projects contracts empty stderr for inline broken-repo blocks.
+	if !worktree.IsMainRepo(mainRepoPath) {
+		data := projectStatusData{mainRepoPath: mainRepoPath}
+		data.mainRepoError = gitCombinedOutputError(mainRepoPath, "status", "--porcelain")
+		if data.mainRepoError == "" {
+			data.mainRepoError = mainRepoPath + " is not a git repository"
+		}
+		return data, nil
+	}
+
 	type linkedResult struct {
 		entries []worktree.Entry
 		err     error
