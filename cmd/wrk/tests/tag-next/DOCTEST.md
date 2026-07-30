@@ -11,59 +11,59 @@ flag validation, mutual exclusion, events.jsonl, and non-git cwd errors.
 # DSN (Domain Specific Notion)
 
 - **wrk CLI** — mode `--tag-next`; invocation
-  `wrk --tag-next [--dry-run] [--push] [--json] [<dir>]`. Effective cwd is
-  optional `<dir>` or process cwd. May **compose** with primary `--done` /
-  `--merge-back` (see `cmd/wrk/tests/done-compose/`). Still mutually exclusive
-  with `--list`, `--status`, `--all-deps`, create, and other non-composed modes.
+ `wrk --tag-next [--dry-run] [--push] [--json] [<dir>]`. Effective cwd is
+ optional `<dir>` or process cwd. May **compose** with primary `--done` /
+ `--merge-back` (see `cmd/wrk/tests/done-compose/`). Still mutually exclusive
+ with `--list`, `--status`, create, and other non-composed modes.
 - **tagscope (dot-pkgs)** — `Plan(repoRoot, headRef)` runs Collect +
-  LoadOwnedTrees + Evaluate; `Apply(repoRoot, plan, opts)` creates lightweight
-  tags (`git tag <name> <head>`). Standalone `wrk --tag-next --push` targets
-  **branch + tags** via `runPushMain` (not tags-only): human tag-next block,
-  blank line, then `pushed <branch> → origin/<branch>`. Dry-run plans tags and
-  `would: git push` for branch and each planned tag.
+ LoadOwnedTrees + Evaluate; `Apply(repoRoot, plan, opts)` creates lightweight
+ tags (`git tag <name> <head>`). Standalone `wrk --tag-next --push` targets
+ **branch + tags** via `runPushMain` (not tags-only): human tag-next block,
+ blank line, then `pushed <branch> → origin/<branch>`. Dry-run plans tags and
+ `would: git push` for branch and each planned tag.
 - **Scope decisions** — per collected scope: skip (`-> skip` with reason) or
-  plan next tag (`owned changed -> <next>`). Skip reasons include
-  `prerelease-head`, `same-commit`, `no-changes`. Child scopes (e.g. `sub/`)
-  evaluate independently; root skips when only child-owned paths changed.
+ plan next tag (`owned changed -> <next>`). Skip reasons include
+ `prerelease-head`, `same-commit`, `no-changes`. Child scopes (e.g. `sub/`)
+ evaluate independently; root skips when only child-owned paths changed.
 - **Human stdout** — one line per scope decision, then apply adds
-  `tagged <name> @ <short-hash>` lines; footer `N tag planned` (dry-run) or
-  `N tag created` (apply). Colors when TTY/`--color` (doctest uses pipes → plain).
+ `tagged <name> @ <short-hash>` lines; footer `N tag planned` (dry-run) or
+ `N tag created` (apply). Colors when TTY/`--color` (doctest uses pipes → plain).
 - **JSON stdout** — `--json` emits machine-readable plan/result on stdout (no ANSI).
-- **--dry-run validation** — valid with `--all-deps`, `--tag-next`,
-  `--propagate-tags`, `--sync`, and primary composition (`--done` /
-  `--merge-back`); bare `wrk --dry-run` → non-zero, stderr lists those hosts.
-  Primary + `--dry-run` multi-stage plans live under monotree
-  `done-pipeline/dry-run/` and `merge-back-pipeline/dry-run/`.
+- **--dry-run validation** — valid with `--tag-next`,
+ `--propagate-tags`, `--sync`, and primary composition (`--done` /
+ `--merge-back`); bare `wrk --dry-run` → non-zero, stderr lists those hosts.
+ Primary + `--dry-run` multi-stage plans live under monotree
+ `done-pipeline/dry-run/` and `merge-back-pipeline/dry-run/`.
 - **WRK_HOME** — isolated per test at `{WorkRoot}/.wrk`; auto-record + events on
-  every invocation.
+ every invocation.
 - **events.jsonl** — successful `--tag-next` appends `command: "tag-next"`;
-  composed `--tag-next --propagate-tags` still records primary `tag-next`.
+ composed `--tag-next --propagate-tags` still records primary `tag-next`.
 - **Git fixtures** — isolated repos via `git_isolated`; `initTaggedRepo` seeds
-  tags at commits and optional post-tag commits.
+ tags at commits and optional post-tag commits.
 
 ## Tree Overview
 
 ```
 tag-next/
-├── dry-run/                      # --tag-next --dry-run (plan only, no git tag)
-│   ├── root-bump/                # v0.0.1 tagged, root file changed → plans v0.0.2
-│   └── no-change/                # HEAD at release tag → all skip, 0 tag planned
-├── apply/                        # --tag-next (create lightweight tags)
-│   ├── root-bump/                # creates v0.0.2 at HEAD
-│   └── skip-prerelease/          # newest v0.0.3-alpha → skip, 0 tag created
+├── dry-run/ # --tag-next --dry-run (plan only, no git tag)
+│ ├── root-bump/ # v0.0.1 tagged, root file changed → plans v0.0.2
+│ └── no-change/ # HEAD at release tag → all skip, 0 tag planned
+├── apply/ # --tag-next (create lightweight tags)
+│ ├── root-bump/ # creates v0.0.2 at HEAD
+│ └── skip-prerelease/ # newest v0.0.3-alpha → skip, 0 tag created
 ├── exclude/
-│   └── sub-scope-only/           # change in sub/ only → sub/ bumps, root skips
+│ └── sub-scope-only/ # change in sub/ only → sub/ bumps, root skips
 ├── json/
-│   └── dry-run-root-bump/        # --tag-next --dry-run --json → JSON plan, no tag
+│ └── dry-run-root-bump/ # --tag-next --dry-run --json → JSON plan, no tag
 ├── push/
-│   ├── pushes-tag/               # bare origin + --push → branch tip + tag + confirm line
-│   └── dry-run/                  # --tag-next --push --dry-run → plan + would: branch/tag pushes
+│ ├── pushes-tag/ # bare origin + --push → branch tip + tag + confirm line
+│ └── dry-run/ # --tag-next --push --dry-run → plan + would: branch/tag pushes
 ├── flags/
-│   └── dry-run-without-tag-next/ # wrk --dry-run alone → error (hosts incl. propagate-tags)
+│ └── dry-run-without-tag-next/ # wrk --dry-run alone → error (hosts incl. propagate-tags)
 ├── events/
-│   ├── command-tag-next/                 # events.jsonl command=tag-next (bare)
-│   └── command-tag-next-with-propagate/  # --tag-next --propagate-tags → still tag-next
-└── not-git-cwd/                  # cwd not a git repo → error
+│ ├── command-tag-next/ # events.jsonl command=tag-next (bare)
+│ └── command-tag-next-with-propagate/ # --tag-next --propagate-tags → still tag-next
+└── not-git-cwd/ # cwd not a git repo → error
 ```
 
 Note: `--tag-next` + `--done`/`--merge-back` composition flag matrix lives under
@@ -106,13 +106,13 @@ import (
 )
 
 type Request struct {
-	WorkRoot   string
-	WrkHome    string
-	RepoDir    string   // process cwd when running wrk
-	TargetDir  string   // optional first positional <dir>
-	Args       []string // CLI args (e.g. --tag-next, --dry-run)
-	MainRepo   string   // git repo under test (absolute)
-	OriginBare string   // bare origin path for push tests
+	WorkRoot string
+	WrkHome string
+	RepoDir string // process cwd when running wrk
+	TargetDir string // optional first positional <dir>
+	Args []string // CLI args (e.g. --tag-next, --dry-run)
+	MainRepo string // git repo under test (absolute)
+	OriginBare string // bare origin path for push tests
 
 	// InProcess runs via wrkcli.Capture (L2 short path) instead of the product binary.
 	// Prefer for flag validation / early reject leaves that do not need a process boundary.
@@ -121,8 +121,8 @@ type Request struct {
 }
 
 type Response struct {
-	Stdout   string
-	Stderr   string
+	Stdout string
+	Stderr string
 	ExitCode int
 }
 
@@ -133,12 +133,12 @@ func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
 	if req.InProcess {
 		res := wrkcli.Capture(wrkcli.CaptureOpts{
 			Args: args,
-			Dir:  req.RepoDir,
-			Env:  tagNextWrkEnv(req),
+			Dir: req.RepoDir,
+			Env: tagNextWrkEnv(req),
 		})
 		return &Response{
-			Stdout:   res.Stdout,
-			Stderr:   res.Stderr,
+			Stdout: res.Stdout,
+			Stderr: res.Stderr,
 			ExitCode: res.ExitCode,
 		}, nil
 	}
@@ -164,8 +164,8 @@ func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
 	}
 
 	return &Response{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
+		Stdout: stdout.String(),
+		Stderr: stderr.String(),
 		ExitCode: exitCode,
 	}, nil
 }

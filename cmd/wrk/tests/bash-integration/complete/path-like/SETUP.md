@@ -21,7 +21,7 @@ wrk --bash-integration --complete -- <words> <cword> -> empty stdout (exit 0)
 ## Context
 
 - Empty custom list is intentional: compspec `-o default` / `compopt -o default` then supply filenames.
-- Non-path-like regression lives under complete/basenames, complete/flags, complete/dep.
+- Non-path-like regression lives under complete/basenames, complete/flags, complete/bring.
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {

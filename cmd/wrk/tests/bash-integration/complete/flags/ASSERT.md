@@ -3,7 +3,7 @@
 
 - Exit code 0.
 - Stdout contains multiple flag candidates; each line starts with `-`.
-- Stdout includes key flags from usage: `--list`, `-l`, `--status`, `--dep`, `--where`, `--add`, `--rm`, `--bash-integration`.
+- Stdout includes key flags from usage: `--list`, `-l`, `--status`, `--bring`, `--where`, `--add`, `--rm`, `--bash-integration`.
 
 ## Side Effects
 
@@ -15,6 +15,7 @@
 
 ```go
 import (
+	"strings"
 	"testing"
 	"github.com/xhd2015/doctest/session"
 )
@@ -30,12 +31,20 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		"--list",
 		"-l",
 		"--status",
-		"--dep",
+		"--bring",
 		"--where",
 		"--add",
 		"--rm",
 		"--bash-integration",
 	)
+	// Removed flags must not appear as completion candidates.
+	for _, bad := range []string{"--dep", "--all-deps"} {
+		for _, line := range strings.Split(resp.Stdout, "\n") {
+			if strings.TrimSpace(line) == bad {
+				t.Fatalf("completion must not offer %s; stdout=%q", bad, resp.Stdout)
+			}
+		}
+	}
 	assertNoEventsJSONL(t, resp)
 }
 ```

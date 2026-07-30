@@ -1,6 +1,6 @@
 ## Expected
 
-- Exit code 0 (soft skip — unlike strict `--dep`).
+- Exit code 0 (soft skip when modules do not match).
 - Stdout equals abs external path under `consumer/external/`.
 - External worktree exists and is owned by the dep repo.
 - Consumer `.gitignore` contains `/external`.

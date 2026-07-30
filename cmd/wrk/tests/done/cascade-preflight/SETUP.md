@@ -13,7 +13,7 @@
 ## Preconditions
 
 - Classic TDD: behaviors not fully implemented — leaves expect **RED** until implementer lands.
-- Git + Go available for consumer/`--dep` fixtures.
+- Git + Go available for consumer/`--bring` fixtures.
 - Prefer this grouping over rewriting sealed siblings that still document current
   warn+skip nested-main or cascade default auto-yes.
 
@@ -68,7 +68,7 @@ func setupCascadePreflightCleanContained(t *testing.T, req *Request) {
 	runGitIsolated(t, depRepo, "add", "go.mod", "dep.go")
 	runGitIsolated(t, depRepo, "commit", "-m", "add module")
 
-	externalPath := runWrkWithArgs(t, req, wtDir, "--dep", depRepo)
+	externalPath := runWrkWithArgs(t, req, wtDir, "--bring", depRepo)
 	externalPath = compositionResolvePath(t, externalPath)
 	req.ExternalWtDir = externalPath
 

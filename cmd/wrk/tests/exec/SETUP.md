@@ -10,7 +10,7 @@ wrk --exec pwd
   -> create wt; print wt path; run pwd in wt (stdout path then pwd)
 
 wrk --cd <dir> --exec pwd          # follow-up still written; exec output on stdout
-wrk --dep <dep> --exec pwd         # external wt path then pwd there
+wrk --bring <dep> --exec pwd         # external wt path then pwd there
 wrk --set-task <slug> --exec pwd   # rename; print new path then pwd
 wrk --done -y --exec pwd           # merge-back --rm; exec in main repo (not removed wt)
 
@@ -22,7 +22,7 @@ wrk --exec=pwd                     # non-zero; equals form rejected
 
 ## Preconditions
 
-- Git (and Go for dep leaves) available; session `wrk` binary via root harness.
+- Git (and Go for bring leaves) available; session `wrk` binary via root harness.
 - Isolated `WRK_HOME` at `{WorkRoot}/.wrk`; `WRK_DATE=2026-06-30`.
 - Leaves put mode flags in `req.Args` (and `SetTaskDesc` / follow-up fields as needed); `--exec` and its command tokens are always last.
 
@@ -33,9 +33,9 @@ wrk --exec=pwd                     # non-zero; equals form rejected
 
 ## Context
 
-- Allowed modes: create (native), `--cd`, `--dep`, `--set-task`, `--done`.
+- Allowed modes: create (native), `--cd`, `--bring`, `--set-task`, `--done`.
 - Rejected with `--exec`: `--list`, `--status`, and other non-allowed modes.
-- Mode path lines (create/dep/set-task/done messages) print **before** the child command's stdout.
+- Mode path lines (create/bring/set-task/done messages) print **before** the child command's stdout.
 
 ```go
 import (
@@ -54,7 +54,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 }
 
 // assertPathThenChildStdout expects mode path line(s) then a final exact child line.
-// For create/dep/set-task happy path with `pwd`, wantPath appears twice (path print + pwd).
+// For create/bring/set-task happy path with `pwd`, wantPath appears twice (path print + pwd).
 func assertPathThenChildStdout(t *testing.T, stdout, wantPath, childLine string) {
 	t.Helper()
 	body := wantPath + "\n" + childLine

@@ -10,6 +10,10 @@
 - Non-zero
 
 ```go
+import (
+	"strings"
+)
+
 func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	_ = d
 	assertErrIsNil(t, err)
@@ -24,5 +28,9 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertContains(t, resp.Stderr, "--dry-run is only valid with")
 	assertContains(t, resp.Stderr, "--tag-next")
 	assertContains(t, resp.Stderr, "--push")
+	// End-state: --all-deps is not a dry-run host (RED until implementer removes it).
+	if strings.Contains(resp.Stderr, "--all-deps") {
+		t.Fatalf("stderr host list must not include --all-deps; got %q", resp.Stderr)
+	}
 }
 ```

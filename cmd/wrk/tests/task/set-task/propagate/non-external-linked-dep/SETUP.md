@@ -15,7 +15,7 @@ wrk --set-task "new slug" (WRK_SET_TASK_CONFIRM=1, from consumer wt with deps/fo
 1. Create consumer main repo with go.mod.
 2. Create dep main repo.
 3. Spawn consumer linked worktree with `--task "old slug"`.
-4. Run `git -C <depMain> worktree add -b <branch> {consumerWt}/deps/foo` (manual linked wt, NOT via `--dep`).
+4. Run `git -C <depMain> worktree add -b <branch> {consumerWt}/deps/foo` (manual linked wt, NOT via `--bring`).
 5. Store old gitdir for deps/foo.
 6. Run `wrk --set-task "new slug"` with `WRK_SET_TASK_CONFIRM=1`.
 7. Verify dep's gitdir in dep main repo now points to new path.

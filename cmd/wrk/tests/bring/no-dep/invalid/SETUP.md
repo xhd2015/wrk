@@ -1,10 +1,10 @@
 # Scenario
 
-**Feature**: --no-dep is rejected unless combined with --dep / --bring / --all-deps
+**Feature**: --no-dep is rejected unless combined with --bring
 
 ```
 # bare --no-dep or --no-dep with other modes -> non-zero
-# stderr: --no-dep is only valid with --dep, --bring, or --all-deps
+# stderr: --no-dep is only valid with --bring
 wrk --no-dep [other non-host mode]
   -> exit non-zero
   -> only-valid-with message

@@ -56,7 +56,7 @@ func (ctx *invocationContext) autoRecord() error {
 	return nil
 }
 
-func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack bool, depPath, bringPath string, allDeps, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, cd, mainFlag bool) string {
+func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack bool, bringPath string, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, cd, mainFlag bool) string {
 	switch {
 	case setTaskFlagSet:
 		return "set-task"
@@ -88,12 +88,8 @@ func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTa
 		return "cd"
 	case repos:
 		return "repos"
-	case depPath != "":
-		return "dep"
 	case bringPath != "":
 		return "bring"
-	case allDeps:
-		return "all-deps"
 	case list:
 		return "list"
 	case tagNext:
@@ -112,7 +108,6 @@ func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTa
 }
 
 var flagValueArgs = map[string]struct{}{
-	"--dep":      {},
 	"--bring":    {},
 	"-t":         {},
 	"--task":     {},

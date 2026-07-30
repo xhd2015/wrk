@@ -3,7 +3,7 @@
 **Feature**: wrk --done cascade removes an external dep worktree without crashing on merge-base
 
 ```
-# wrk --dep spawns external dep wt as a worktree of the CONSUMER repo, its branch
+# wrk --bring spawns external dep wt as a worktree of the CONSUMER repo, its branch
 # a fetched dep commit. --done cascades MergeBack over external/* — that must
 # remove the dep wt, not crash comparing unrelated histories.
 consumer wt + external/dep wt -> wrk --done -> cascade removes dep wt (no merge-base error)
@@ -13,7 +13,7 @@ consumer wt + external/dep wt -> wrk --done -> cascade removes dep wt (no merge-
 
 1. Create consumer main repo on `main` with `go.mod` requiring `example.com/dep`.
 2. `wrk` creates the consumer linked worktree.
-3. `wrk --dep <depRepo>` spawns `external/mydep-main-{date}` (a worktree of the
+3. `wrk --bring <depRepo>` spawns `external/mydep-main-{date}` (a worktree of the
    consumer repo whose branch is a fetched dep commit).
 4. Drop the consumer's `replace => ./external/...` so the local-replace guard is
    NOT the thing under test — the cascade is the only moving part.
@@ -74,7 +74,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	runGitIsolated(t, depRepo, "add", "go.mod", "dep.go")
 	runGitIsolated(t, depRepo, "commit", "-m", "add module")
 
-	externalPath := runWrkWithArgs(t, req, wtDir, "--dep", depRepo)
+	externalPath := runWrkWithArgs(t, req, wtDir, "--bring", depRepo)
 	req.ExternalWtDir = externalPath
 
 	// Drop the consumer's local replace so the local-replace guard is not what

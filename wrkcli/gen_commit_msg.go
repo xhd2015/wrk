@@ -19,7 +19,7 @@ var genCommitMsgDisallowedFlags = []string{
 	"--projects-dep-graph",
 	"--scan-git-repos", "--no-cache", "--include-worktrees",
 	"--fetch", "--github", "--add", "--rm", "--where", "--cd", "--main",
-	"--dep", "--bring", "--all-deps", "--no-dep", "--reinstall-local", "--tag-next",
+	"--bring", "--no-dep", "--reinstall-local", "--tag-next",
 	"--propagate-tags", "--sync",
 	"-t", "--task", "--set-task",
 	"--exec",
@@ -58,10 +58,10 @@ func hasGenCommitComposePartner(args []string) bool {
 // genCommitMsgValueFlags are library flags that take a value (separate arg or =form).
 // --dry-run is intentionally not peeled: it is a shared wrk primary modifier.
 var genCommitMsgValueFlags = map[string]struct{}{
-	"--dir":                  {},
-	"--model":                {},
-	"--agent-runner":         {},
-	"--agent-runner-binary":  {},
+	"--dir":                 {},
+	"--model":               {},
+	"--agent-runner":        {},
+	"--agent-runner-binary": {},
 }
 
 // genCommitMsgBoolFlags are library bool flags peeled when composing with a primary.

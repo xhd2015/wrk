@@ -16,7 +16,7 @@ consumer + external/mydep-…
 ## Steps
 
 1. Consumer main with go.mod requiring `example.com/dep`.
-2. `wrk` → consumer linked worktree; `wrk --dep` → external dep worktree.
+2. `wrk` → consumer linked worktree; `wrk --bring` → external dep worktree.
 3. Drop consumer replace so local-replace guard does not block primary planning.
 4. Commit clean ignore for `external/`.
 5. Snapshot baseline; run `wrk --done --dry-run` (no `-y`).
@@ -59,7 +59,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	runGitIsolated(t, depRepo, "add", "go.mod", "dep.go")
 	runGitIsolated(t, depRepo, "commit", "-m", "add module")
 
-	externalPath := runWrkWithArgs(t, req, wtDir, "--dep", depRepo)
+	externalPath := runWrkWithArgs(t, req, wtDir, "--bring", depRepo)
 	externalPath = compositionResolvePath(t, externalPath)
 	req.ExternalWtDir = externalPath
 

@@ -4,7 +4,7 @@
 
 ```
 wrk --list --no-dep -> non-zero
-  stderr: --no-dep is only valid with --dep, --bring, or --all-deps
+  stderr: --no-dep is only valid with --bring
 ```
 
 ## Steps

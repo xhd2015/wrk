@@ -10,7 +10,7 @@ wrk --dry-run -> validation error before tagscope
 ## Steps
 
 1. `setupRootBumpRepo` (valid git cwd).
-2. Run `wrk --dry-run` without any host (`--done` / `--merge-back` / `--all-deps` / `--tag-next` / `--propagate-tags` / `--sync`).
+2. Run `wrk --dry-run` without any host (`--done` / `--merge-back` / `--tag-next` / `--propagate-tags` / `--sync`).
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {

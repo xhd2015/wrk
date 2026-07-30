@@ -52,7 +52,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	runGitIsolated(t, depRepo, "add", "go.mod", "dep.go")
 	runGitIsolated(t, depRepo, "commit", "-m", "add module")
 
-	externalPath := runWrkWithArgs(t, req, wtDir, "--dep", depRepo)
+	externalPath := runWrkWithArgs(t, req, wtDir, "--bring", depRepo)
 	externalPath = compositionResolvePath(t, externalPath)
 	req.ExternalWtDir = externalPath
 

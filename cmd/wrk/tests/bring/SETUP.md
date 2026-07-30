@@ -3,9 +3,9 @@
 **Feature**: wrk --bring always materializes external dep worktree; Go replace is best-effort
 
 ```
-# like --dep: external/{basename}-{token}-{date} under parent; branch {token}-{date}[-N] on dep repo
+# sole external-dep worktree mode: external/{basename}-{token}-{date} under parent; branch {token}-{date}[-N] on dep repo
 # parent = git toplevel when cwd is git; parent = abs(cwd) when cwd is plain non-git
-# unlike --dep: soft SKIP (exit 0) when not a go module / no modules / not a dep / non-git cwd
+# soft SKIP (exit 0) when not a go module / no modules / not a dep / non-git cwd
 # git consumer: worktree + /external gitignore + abs path when worktree succeeds
 # non-git cwd: worktree under {cwd}/external/; soft-skip replace; skip ensureGitignoreExternal
 # --no-dep: worktree (+ gitignore when git parent) only; skip module analyse (no SKIP)
@@ -22,16 +22,16 @@ consumer (git or plain non-git) + dep path -> wrk --bring <dep> [--no-dep] [-v]
 - Git and Go must be available.
 - Dep path must resolve to a usable git repo for worktree create (hard error otherwise).
 - **`--bring` does not require consumer git**: non-git cwd still materializes under `{abs(cwd)}/external/` and soft-skips replace + gitignore.
-- When cwd **is** git, parent remains the consumer git toplevel (main or linked) as for `--dep`.
-- Module analyse/replace is best-effort only for `--bring` (strict hard errors remain for `--dep` / `--all-deps` on non-git cwd).
-- `--no-dep` is long-only and valid only with `--bring` / `--dep` / `--all-deps`.
+- When cwd **is** git, parent remains the consumer git toplevel (main or linked).
+- Module analyse/replace is best-effort only for `--bring` (soft SKIP paths covered under this tree).
+- `--no-dep` is long-only and valid only with `--bring`.
 
 ## Steps
 
 - Leaves build isolated consumer (git or plain) + dep repos under `req.WorkRoot`.
 - `req.RepoDir` is the consumer cwd for `wrk --bring`; `req.ConsumerTop` is the external parent (git toplevel or abs plain cwd).
 - `req.Args = []string{"--bring", depPath}` (plus optional `--exec …`, `--no-dep`, `-v`).
-- Shared helpers mirror `dep/` fixture patterns (`initConsumerRepo`, `initDepRepo`, `externalWorktreePath`, …); see `not-git-cwd/` for plain-cwd fixtures.
+- Shared helpers: `initBringConsumerRepo`, `initBringDepRepo`, `bringExternalWorktreePath`, …; see `not-git-cwd/` for plain-cwd fixtures. Multi-module / basename leaves live under this tree.
 
 ## Context
 
@@ -40,10 +40,10 @@ consumer (git or plain non-git) + dep path -> wrk --bring <dep> [--no-dep] [-v]
   - `SKIP local dep replacement: consumer has no Go modules`
   - `SKIP local dep replacement: <depPath> is not a dependency of any consumer module`
   - `SKIP local dep replacement: <abs-cwd> is not a git repository` (non-git consumer cwd; soft for `--bring` only)
-- Mutually exclusive with `--dep` (and the same exclusive mode set as `--dep`).
+- Mutually exclusive with other wrk modes (same exclusive set as other mode flags).
 - `--exec` after successful `--bring` (including SKIP) runs in the external worktree.
-- See `not-git-cwd/`, `no-dep/`, `verbose/`, and `help-mentions-no-dep/` for flag/cwd-specific leaves.
-- `--dep` / `--all-deps` non-git hard-error remains covered under `dep/not-git-repo/` and `all-deps/not-git-cwd/` (not retested here).
+- See `not-git-cwd/`, `no-dep/`, `verbose/`, `help-mentions-no-dep/`, and `removed-flags/` for flag/cwd-specific leaves.
+- Hard removal of legacy `--dep` / `--all-deps` is asserted under `removed-flags/` (expect RED until implementer lands).
 
 ```go
 import (
@@ -197,9 +197,52 @@ func assertBringPathThenChildStdout(t *testing.T, stdout, wantPath, childLine st
 	assert.Output(t, stdout, v2StdoutTemplate(body))
 }
 
+
+func bringCountGitignoreExternalLines(top string) (int, error) {
+	data, err := os.ReadFile(filepath.Join(top, ".gitignore"))
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "/external" {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// bringReadWorktreeMainRepo reads a linked worktree's .git file and returns the main
+// repository path it is registered under (i.e. the <mainRepo> in
+// "<mainRepo>/.git/worktrees/<name>"). The result is symlink-canonicalized so
+// comparisons match git's resolved paths (macOS /var -> /private/var).
+func bringReadWorktreeMainRepo(wtDir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(wtDir, ".git"))
+	if err != nil {
+		return "", fmt.Errorf("read .git file: %w", err)
+	}
+	s := strings.TrimSpace(string(data))
+	const prefix = "gitdir: "
+	if !strings.HasPrefix(s, prefix) {
+		return "", fmt.Errorf("unexpected .git file format in %s: %s", wtDir, s)
+	}
+	gitdir := strings.TrimSpace(s[len(prefix):])
+	// gitdir is <mainRepo>/.git/worktrees/<name>; climb three dirs to mainRepo.
+	mainRepo := filepath.Dir(filepath.Dir(filepath.Dir(gitdir)))
+	if resolved, err := filepath.EvalSymlinks(mainRepo); err == nil {
+		mainRepo = resolved
+	}
+	return mainRepo, nil
+}
+
 func ensureBringHelpersUsed() {
 	_ = readBringGoMod
 	_ = bringGitignoreContainsExternal
+	_ = bringCountGitignoreExternalLines
+	_ = bringReadWorktreeMainRepo
 	_ = initBringConsumerRepo
 	_ = initBringDepRepo
 	_ = runBringGo

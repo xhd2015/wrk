@@ -8,7 +8,7 @@ consumer wt + ahead external dep (no local replace) -> TTY wrk --done -y -> both
 
 ## Steps
 
-1. Create consumer wt and external dep wt via `wrk --dep`.
+1. Create consumer wt and external dep wt via `wrk --bring`.
 2. Commit ahead on external dep wt.
 3. Drop consumer `replace => ./external/...` so consumer `--done` can finish after cascade.
 4. Run `wrk --done -y` under fake TTY.
@@ -49,7 +49,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	runGitIsolated(t, depRepo, "add", "go.mod", "dep.go")
 	runGitIsolated(t, depRepo, "commit", "-m", "add module")
 
-	externalPath := runWrkWithArgs(t, req, wtDir, "--dep", depRepo)
+	externalPath := runWrkWithArgs(t, req, wtDir, "--bring", depRepo)
 	req.ExternalWtDir = externalPath
 
 	writeFile(t, filepath.Join(externalPath, "dep.go"), "package dep // tty fix\n")

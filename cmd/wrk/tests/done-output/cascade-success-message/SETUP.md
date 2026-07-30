@@ -20,7 +20,7 @@
 
 ## Steps
 
-1. Consumer main + linked wt + `--dep` external (contained / already-included).
+1. Consumer main + linked wt + `--bring` external (contained / already-included).
 2. Drop replace; commit gitignore so own is clean enough to finish.
 3. Run bare `wrk --done`.
 
@@ -62,7 +62,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	runGitIsolated(t, depRepo, "add", "go.mod", "dep.go")
 	runGitIsolated(t, depRepo, "commit", "-m", "add module")
 
-	externalPath := runWrkWithArgs(t, req, wtDir, "--dep", depRepo)
+	externalPath := runWrkWithArgs(t, req, wtDir, "--bring", depRepo)
 	externalPath = compositionResolvePath(t, externalPath)
 	req.ExternalWtDir = externalPath
 

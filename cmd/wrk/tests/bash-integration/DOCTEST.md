@@ -58,7 +58,7 @@ bash-integration/
 │   ├── basenames/                   # prefix filter on project basenames
 │   ├── flags/                       # wrk -<tab> flag candidates
 │   ├── list-dir/                    # wrk -l <tab>
-│   ├── dep/                         # wrk --dep <tab>
+│   ├── bring/                       # wrk --bring <tab>
 │   ├── where/                       # wrk --where <tab>
 │   ├── status/                      # wrk --status <tab>
 │   ├── add-rm/                      # wrk --add/--rm <tab>

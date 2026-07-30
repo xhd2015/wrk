@@ -3,7 +3,7 @@
 **Feature**: wrk --done cascades merge-back to both external/* and non-external linked worktrees
 
 ```
-# consumer wt + external/dep wt (from --dep) + manual deps/foo linked wt -> wrk --done
+# consumer wt + external/dep wt (from --bring) + manual deps/foo linked wt -> wrk --done
 # scan_repo.Scan discovers both nested linked wts; cascade removes each before consumer merge-back
 consumer wt + external wt + deps/foo wt -> wrk --done -> both removed, consumer exit 0
 ```
@@ -12,7 +12,7 @@ consumer wt + external wt + deps/foo wt -> wrk --done -> both removed, consumer 
 
 1. Create consumer main repo with `go.mod` requiring `example.com/dep`.
 2. `wrk` creates the consumer linked worktree.
-3. `wrk --dep <depRepo>` spawns `external/mydep-main-{date}`.
+3. `wrk --bring <depRepo>` spawns `external/mydep-main-{date}`.
 4. Create a second dep main repo and run `git worktree add` into `{consumerWt}/deps/foo`.
 5. Drop the consumer's `replace => ./external/...` so the local-replace guard does not block.
 6. Run `wrk --done` from the consumer worktree.
@@ -55,7 +55,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	runGitIsolated(t, depRepo, "add", "go.mod", "dep.go")
 	runGitIsolated(t, depRepo, "commit", "-m", "add module")
 
-	externalPath := runWrkWithArgs(t, req, wtDir, "--dep", depRepo)
+	externalPath := runWrkWithArgs(t, req, wtDir, "--bring", depRepo)
 	req.ExternalWtDir = externalPath
 
 	fooDepRepo := filepath.Join(req.WorkRoot, "foodep")

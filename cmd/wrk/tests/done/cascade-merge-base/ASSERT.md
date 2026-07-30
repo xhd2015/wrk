@@ -8,7 +8,7 @@
 ## Exit Code
 
 - Not asserted by this leaf. The merge-base crash is the sole focus; the
-  consumer worktree is left dirty by `wrk --dep` + the `dropreplace`, so its own
+  consumer worktree is left dirty by `wrk --bring` + the `dropreplace`, so its own
   merge-back fate is out of scope here (covered by sibling leaves). The two
   assertions above are sufficient to prove the cascade bug: today both fail
   (stderr contains the merge-base error and the ext wt is left in place); once

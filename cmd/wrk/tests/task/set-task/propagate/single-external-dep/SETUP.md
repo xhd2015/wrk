@@ -15,7 +15,7 @@ wrk --set-task "new slug" (WRK_SET_TASK_CONFIRM=1, from consumer wt with externa
 1. Create consumer main repo with go.mod requiring a dep.
 2. Create dep main repo.
 3. Spawn consumer linked worktree with `--task "old slug"`.
-4. Run `wrk --dep <dep>` from inside consumer worktree.
+4. Run `wrk --bring <dep>` from inside consumer worktree.
 5. Store old external path and old gitdir content.
 6. Run `wrk --set-task "new slug"` with `WRK_SET_TASK_CONFIRM=1`.
 7. Verify dep's gitdir in dep main repo now points to new path.
@@ -43,8 +43,8 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.WtDir = consumerWt
 	req.MainRepo = consumerMain
 
-	// Run --dep from inside consumer worktree
-	depCmd := exec.Command(getWrkBin(t), "--dep", dep)
+	// Run --bring from inside consumer worktree
+	depCmd := exec.Command(getWrkBin(t), "--bring", dep)
 	depCmd.Dir = consumerWt
 	depCmd.Env = append(os.Environ(),
 		"WRK_HOME="+req.WrkHome,
@@ -53,9 +53,9 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	out, err := depCmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
-			t.Fatalf("wrk --dep exit %d stderr=%q", ee.ExitCode(), string(ee.Stderr))
+			t.Fatalf("wrk --bring exit %d stderr=%q", ee.ExitCode(), string(ee.Stderr))
 		}
-		t.Fatalf("wrk --dep: %v", err)
+		t.Fatalf("wrk --bring: %v", err)
 	}
 	extPath := strings.TrimSpace(string(out))
 	req.ExternalWtDir = extPath

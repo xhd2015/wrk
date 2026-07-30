@@ -162,11 +162,11 @@ func setupDivergedExternalForCascadeFail(t *testing.T, req *Request) {
 	runGitIsolated(t, depRepo, "add", "go.mod", "dep.go")
 	runGitIsolated(t, depRepo, "commit", "-m", "add module")
 
-	externalPath := runWrkWithArgs(t, req, wtDir, "--dep", depRepo)
+	externalPath := runWrkWithArgs(t, req, wtDir, "--bring", depRepo)
 	externalPath = compositionResolvePath(t, externalPath)
 	req.ExternalWtDir = externalPath
 
-	// Commit consumer porcelain after --dep so D2 dirty preflight does not
+	// Commit consumer porcelain after --bring so D2 dirty preflight does not
 	// block before the cascade MergeBack conflict under test.
 	runGitIsolated(t, wtDir, "add", "-A")
 	runGitIsolated(t, wtDir, "commit", "-m", "commit dep replace and ignore", "--allow-empty")

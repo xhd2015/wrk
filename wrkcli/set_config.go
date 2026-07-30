@@ -15,7 +15,7 @@ var setConfigDisallowedFlags = []string{
 	"--done", "--merge-back", "-l", "--list", "--status", "--repos", "--projects", "--projects-dep-graph",
 	"--scan-git-repos", "--no-cache", "--include-worktrees",
 	"--fetch", "--github", "--add", "--rm", "--where", "--cd", "--main",
-	"--dep", "--bring", "--all-deps", "--no-dep", "--tag-next", "--propagate-tags", "--sync", "--dry-run",
+	"--bring", "--no-dep", "--tag-next", "--propagate-tags", "--sync", "--dry-run",
 	"-t", "--task", "--set-task",
 	"--new",
 	"--exec",
@@ -260,7 +260,7 @@ func parseSetConfigArgs(args []string) (setConfigOpts, error) {
 				return opts, nil
 			}
 			// String flags with values that belong to other modes.
-			if arg == "--add" || arg == "--rm" || arg == "--where" || arg == "--dep" || arg == "--bring" ||
+			if arg == "--add" || arg == "--rm" || arg == "--where" || arg == "--bring" ||
 				arg == "--task" || arg == "-t" || arg == "--set-task" {
 				opts.conflict = arg
 				return opts, nil

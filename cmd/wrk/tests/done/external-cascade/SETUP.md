@@ -3,15 +3,15 @@
 **Feature**: wrk --done cascades merge-back to external/* worktrees before local-replace guard
 
 ```
-# consumer wt + external/dep wt (from --dep) -> wrk --done -> cascade removes dep wt, parent errors on local replace
-consumer wt -> wrk --dep -> external wt + replace in go.mod -> wrk --done -> dep wt gone, parent non-zero
+# consumer wt + external/dep wt (from --bring) -> wrk --done -> cascade removes dep wt, parent errors on local replace
+consumer wt -> wrk --bring -> external wt + replace in go.mod -> wrk --done -> dep wt gone, parent non-zero
 ```
 
 ## Steps
 
 1. Create consumer main repo with go.mod requiring `example.com/dep`.
 2. Run `wrk` to create consumer linked worktree.
-3. Run `wrk --dep` from consumer wt to spawn `external/mydep-main-{date}`.
+3. Run `wrk --bring` from consumer wt to spawn `external/mydep-main-{date}`.
 4. Run `wrk --done` from consumer wt (replace still present).
 
 ```go
@@ -50,10 +50,10 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	runGitIsolated(t, depRepo, "add", "go.mod", "dep.go")
 	runGitIsolated(t, depRepo, "commit", "-m", "add module")
 
-	externalPath := runWrkWithArgs(t, req, wtDir, "--dep", depRepo)
+	externalPath := runWrkWithArgs(t, req, wtDir, "--bring", depRepo)
 	req.ExternalWtDir = externalPath
 
-	// Commit --dep replace/gitignore so D2 dirty preflight does not block
+	// Commit --bring replace/gitignore so D2 dirty preflight does not block
 	// cascade; replace remains in go.mod for the local-replace guard under test.
 	runGitIsolated(t, wtDir, "add", "-A")
 	runGitIsolated(t, wtDir, "commit", "-m", "commit dep replace and ignore", "--allow-empty")

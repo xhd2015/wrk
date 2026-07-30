@@ -14,11 +14,11 @@ wrk --set-task "new slug" (inside consumer wt with external dep)
 ## Preconditions
 
 - Git must be available.
-- Consumer worktree contains one or more nested linked worktrees (external deps created via `wrk --dep` or any repos discoverable by `wrk --repos`).
+- Consumer worktree contains one or more nested linked worktrees (external deps created via `wrk --bring` or any repos discoverable by `wrk --repos`).
 
 ## Steps
 
-- Setup creates main consumer repo, spawns consumer worktree, creates dep repos, and runs `wrk --dep` from inside the consumer worktree to materialize external dep worktrees.
+- Setup creates main consumer repo, spawns consumer worktree, creates dep repos, and runs `wrk --bring` from inside the consumer worktree to materialize external dep worktrees.
 - Each leaf variant sets up different nested repo configurations before running `wrk --set-task`.
 
 ```go

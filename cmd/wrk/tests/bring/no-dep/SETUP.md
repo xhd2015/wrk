@@ -15,7 +15,7 @@ consumer (git) + dep path -> wrk --bring <dep> --no-dep
 ## Preconditions
 
 - Git and Go available (same as parent `bring/`).
-- `--no-dep` is long-only and valid only with `--bring` / `--dep` / `--all-deps`.
+- `--no-dep` is long-only and valid only with `--bring`.
 
 ## Steps
 

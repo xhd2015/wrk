@@ -16,7 +16,7 @@ wrk --list --no-in-module-replace -> non-zero, "only valid with --done"
 ## Expected (correct) behavior
 
 `--no-in-module-replace` is valid only with `--done`. Combined with any other
-mode (`--list`, `--dep`, `--all-deps`, no-args create) it errors with
+mode (`--list`, `--bring`, no-args create) it errors with
 `wrk: --no-in-module-replace is only valid with --done` and a non-zero exit,
 mirroring `--confirm-from-stdin`.
 

@@ -19,13 +19,13 @@ const skillSubcommandName = "wrk"
 // skillLocalFlags are skill-path flags that must not be treated as wrk mode flags
 // when scanning skill argv (e.g. --list/-l are skill actions, not wrk --list).
 var skillLocalFlags = map[string]struct{}{
-	"-l":         {},
-	"--list":     {},
-	"--show":     {},
-	"--install":  {},
-	"--header":   {},
-	"-h":         {},
-	"--help":     {},
+	"-l":        {},
+	"--list":    {},
+	"--show":    {},
+	"--install": {},
+	"--header":  {},
+	"-h":        {},
+	"--help":    {},
 }
 
 var wrkModeFlags = map[string]struct{}{
@@ -50,12 +50,10 @@ var wrkModeFlags = map[string]struct{}{
 	"-y":                     {},
 	"--yes":                  {},
 	"--no-in-module-replace": {},
-	"--all-deps":             {},
 	"--no-dep":               {},
 	"--tag-next":             {},
 	"--propagate-tags":       {},
 	"--sync":                 {},
-	"--dep":                  {},
 	"--bring":                {},
 	"-t":                     {},
 	"--task":                 {},

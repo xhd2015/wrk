@@ -4,7 +4,7 @@
 
 ```
 wrk --no-dep -> non-zero
-  stderr contains: --no-dep is only valid with --dep, --bring, or --all-deps
+  stderr contains: --no-dep is only valid with --bring
 ```
 
 ## Steps

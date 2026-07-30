@@ -7,7 +7,7 @@
 #   -> external/mydep-main-{date} + replace + /external gitignore
 #   -> stdout abs path; no SKIP on stderr
 consumer (go.mod require example.com/dep) + mydep (module example.com/dep)
-  -> wrk --bring <dep> -> success with replace (like --dep)
+  -> wrk --bring <dep> -> success with replace
 ```
 
 ## Steps

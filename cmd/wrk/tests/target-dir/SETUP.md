@@ -7,7 +7,7 @@
 myrepo (main) -> wrk myrepo <target-dir> -> worktree at <target-dir> or <target-dir>/<name>
 # <target-dir> resolved relative to shell cwd (process cwd), NOT relative to <dir>
 wrk <dir> <target-dir> -> spawn path overridden; WRK_HOME ignored
-# create-only: <target-dir> + --list/--done/--dep -> wrk: unexpected arguments
+# create-only: <target-dir> + --list/--done/--bring -> wrk: unexpected arguments
 ```
 
 ## Preconditions
@@ -22,7 +22,7 @@ wrk <dir> <target-dir> -> spawn path overridden; WRK_HOME ignored
   relative `<target-dir>` resolves against the shell cwd, not the repo dir).
 - `req.TargetDir` = `{WorkRoot}/myrepo` (absolute source repo, first positional).
 - `req.SpawnDir` = the `<target-dir>` under test (absolute for most leaves; relative for
-  `relative-path/`). `req.Args` carries any trailing flags (`--list`, `--dep <dep>`).
+  `relative-path/`). `req.Args` carries any trailing flags (`--list`, `--bring <dep>`).
 - Expected worktree paths are NOT under `{WRK_HOME}/worktrees`; assert funcs compute them
   directly with `filepath.Join(req.WorkRoot, ...)`.
 

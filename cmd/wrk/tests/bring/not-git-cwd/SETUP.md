@@ -30,7 +30,7 @@ plain dir (no .git) + mydep (git) -> wrk --bring <dep|basename> [--no-dep] [--ex
 - Soft SKIP stderr family matches other bring soft skips (`SKIP local dep replacement: …`).
 - No `/external` gitignore write when parent is non-git.
 - Basename leaf seeds `WRK_HOME/projects.json` via `wrk --add` (same as `dep/basename-fallback/`).
-- Hard-error on non-git for `--dep` / `--all-deps` is **not** retested here.
+- Legacy hard-error modes for non-git (`--dep` / `--all-deps`) are removed; soft path only under `--bring`.
 
 ```go
 import (

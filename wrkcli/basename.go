@@ -27,11 +27,11 @@ func isBasename(dir string) bool {
 	return true
 }
 
-func isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status bool, depPath, bringPath string, allDeps, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, list, done, mergeBack, cd, mainFlag bool) bool {
+func isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status bool, bringPath string, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, list, done, mergeBack, cd, mainFlag bool) bool {
 	if projects || projectsDepGraph || addFlagSet || removeFlagSet || setTaskFlagSet || whereFlagSet || repos || status || cd || mainFlag {
 		return false
 	}
-	if depPath != "" || bringPath != "" || allDeps || reinstallLocal || tagNext || propagateTags || syncFlag || pushFlag || list || done || mergeBack {
+	if bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || pushFlag || list || done || mergeBack {
 		return false
 	}
 	return true
@@ -125,7 +125,7 @@ func reconstructDepHint(rawArgs []string, resolvedDir string) string {
 }
 
 // reconstructInvocationHint rebuilds a suggested wrk command from raw CLI args,
-// replacing the first positional (skipPositional=0) or --dep/--bring value (skipPositional=1).
+// replacing the first positional (skipPositional=0) or --bring value (skipPositional=1).
 func reconstructInvocationHint(rawArgs, positionals []string, resolvedDir string, replaceMode int) string {
 	var parts []string
 	parts = append(parts, "wrk")
@@ -150,7 +150,7 @@ func reconstructInvocationHint(rawArgs, positionals []string, resolvedDir string
 			continue
 		}
 		parts = append(parts, arg)
-		if arg == "--dep" || arg == "--bring" {
+		if arg == "--bring" {
 			skipValue = true
 		} else if _, ok := flagValueArgs[arg]; ok {
 			skipValue = true

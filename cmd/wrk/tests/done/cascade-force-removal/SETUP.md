@@ -4,7 +4,7 @@
 
 ```
 # consumer wt + ahead external dep wt -> wrk --done (non-TTY)
-consumer wt -> wrk --dep -> external wt ahead of dep main
+consumer wt -> wrk --bring -> external wt ahead of dep main
 wrk --done (no TTY, no -y) -> error; external wt + commits preserved (no force-remove)
 ```
 
