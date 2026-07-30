@@ -57,10 +57,10 @@ github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUc
 github.com/rogpeppe/go-internal v1.6.1/go.mod h1:xXDCJY+GAPziupqXw64V24skbSoqbTEfhy4qGm1nDQc=
 github.com/rogpeppe/go-internal v1.15.0 h1:D0RCU5rMAp+SpgkiNdrjfJ+LX4J1M32V2NeCY7EJ6hc=
 github.com/rogpeppe/go-internal v1.15.0/go.mod h1:DrUVZyrJU+txYW5/1kwtXQSMFio52ZOxX7yM1VHvnxs=
-github.com/xhd2015/agent-pro v0.0.86 h1:j1PsISrlD/GufRimnH6MBVF0UmnQNha/DP69Z5+i9z0=
-github.com/xhd2015/agent-pro v0.0.86/go.mod h1:27Le5yjCV872zbJ4R9XDjyiUcCF/6SI6XzSQIhn6pTY=
-github.com/xhd2015/dot-pkgs/go-pkgs v0.0.91 h1:u4s1HYG9Zwdb3Lp46lV9r0wkKrwMd2I+VbHwNjXseFM=
-github.com/xhd2015/dot-pkgs/go-pkgs v0.0.91/go.mod h1:9OHHDoNrbeV7HhPiPK4Je7nZ1DTCngMq3lUmB6JaU9k=
+github.com/xhd2015/agent-pro v0.0.88 h1:tVVIpgAMB/ZoA2EaDvho7B/lEp2JfxRBd5TebSCNcGk=
+github.com/xhd2015/agent-pro v0.0.88/go.mod h1:lk5r+KQ5AOGxOJRApEMtix6iljcy0fZhP4haawfZMuA=
+github.com/xhd2015/dot-pkgs/go-pkgs v0.0.93 h1:AvZUjFbDZ77g9KHvECsxKaHxZRQNK0H3bXk6Hg4htuA=
+github.com/xhd2015/dot-pkgs/go-pkgs v0.0.93/go.mod h1:9OHHDoNrbeV7HhPiPK4Je7nZ1DTCngMq3lUmB6JaU9k=
 github.com/xhd2015/gitops v0.0.27 h1:7bLgOtiGx6cZpwas2xf5Qhq3X6pBCikmXAu2KVTGuYM=
 github.com/xhd2015/gitops v0.0.27/go.mod h1:KS8y6tZ3FG+myEaR+H6MvoR099YrP/ADIHZX9ROpZo8=
 github.com/xhd2015/go-coverage v1.0.41 h1:JjUcE93IMz0KHmdCYUKq9JN/EDC/5k0OEhsMAeVvL88=
