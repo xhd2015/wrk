@@ -1,7 +1,8 @@
 ## Expected
 
 - Exit code **0**.
-- Stdout prints the already-known Projects main path exactly once (always-print; not a new record).
+- Stdout prints the Projects main path exactly once (always-print; seed only warmed
+  home cache — print-only, no registry write).
 - Stderr contains greppable **`scan:`** phase lines (Debug wired).
 - Stderr contains greppable **`cache_base`** (product/library debug for the
   home-universe cache base used for this root).
@@ -13,7 +14,7 @@
 
 ## Side Effects
 
-- Product cache under FakeHome may update; projects stay at 2 entries.
+- Product cache under FakeHome may update; `projects.json` stays empty (print-only).
 
 ## Errors
 
@@ -37,15 +38,16 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		t.Fatalf("Projects -v debug: exit %d stderr=%q stdout=%q",
 			resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
-	// Always-print: seed already recorded both mains; this leaf scans ~/Projects only.
-	// Expect proj-main once; home-main is outside the Projects filter and must not appear.
+	// Always-print: quiet home seed warms home/repos.json only (no projects.json).
+	// This leaf scans ~/Projects; expect proj-main once; home-main outside filter.
 	wantProj := resolveScanPath(t, filepath.Join(req.FakeHome, "Projects", "proj-main"))
 	nProj := countScanStdoutPathLines(t, resp.Stdout, wantProj)
 	if nProj != 1 {
-		t.Fatalf("second scan must always-print known Projects main once; count=%d stdout=%q want=%q",
+		t.Fatalf("second scan must always-print Projects main once; count=%d stdout=%q want=%q",
 			nProj, resp.Stdout, wantProj)
 	}
-	assertScanProjectsCount(t, req.WrkHome, 2)
+	// Print-only: seed + leaf never write projects.json.
+	assertScanProjectsCount(t, req.WrkHome, 0)
 
 	stderr := resp.Stderr
 	if !strings.Contains(stderr, "scan:") {

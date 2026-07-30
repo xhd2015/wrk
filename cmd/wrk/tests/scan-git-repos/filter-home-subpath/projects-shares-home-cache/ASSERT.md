@@ -3,8 +3,7 @@
 - Exit code **0**.
 - Stdout is exactly the **Projects** main absolute path (single line + trailing
   `\n`) — **not** `home-main`.
-- `projects.json` prints only under Projects; projects.json unchanged
-  (count 1 after clear + filtered scan).
+- `projects.json` stays empty (print-only; seed + filtered scan never write it).
 - Product **home** universe index still exists at
   `{FakeHome}/.cache/git-repo-scan/home/repos.json` after the Projects scan
   (shared home cache files; not abandoned for a Projects-only universe).

@@ -7,7 +7,7 @@
 wrk --scan-git-repos
   -> roots = [$HOME] when home is a directory
   -> scan_repo finds mains under home
-  -> RecordProject(..., source="scan") + stdout abs paths
+  -> stdout abs paths (print-only; projects.json untouched)
 
 # unusable home
 wrk --scan-git-repos  (HOME missing or not a directory)

@@ -12,7 +12,7 @@ HOME=FakeHome (= WorkRoot)
 wrk --scan-git-repos                  # default root ~
   -> universe=home
   -> product cache files under $HOME/.cache/git-repo-scan/home/
-  -> emit/record mains under ~
+  -> stdout emit mains under ~ (print-only; projects.json untouched)
 
 wrk --scan-git-repos ~/Projects
   -> same home universe cache files (not a separate Projects universe)
@@ -40,7 +40,7 @@ wrk --scan-git-repos ~/Projects -v
 2. Create `home-main` and `Projects/proj-main` as main git repos.
 3. Stash paths: `MainRepo` = proj-main, `SecondRepo` = home-main.
 4. Register product-cache path helpers for descendants.
-5. Leaves set Args (and optional seed / clear projects) for the case under test.
+5. Leaves set Args (and optional quiet home seed for warm cache) for the case under test.
 
 ## Context
 
@@ -78,7 +78,8 @@ func productRootUniverseReposJSON(fakeHome string) string {
 }
 
 // seedScanHomeNoDebug runs quiet bare --scan-git-repos with FakeHome so both
-// fixture mains are discovered into projects.json and the product home universe.
+// fixture mains land in the product home universe cache. Scan is print-only:
+// projects.json is never written (assert count 0).
 func seedScanHomeNoDebug(t *testing.T, req *Request) {
 	t.Helper()
 	if req.FakeHome == "" {
@@ -97,12 +98,21 @@ func seedScanHomeNoDebug(t *testing.T, req *Request) {
 		}
 		t.Fatalf("seed bare --scan-git-repos: %v output=%q", err, string(out))
 	}
-	assertScanProjectRecorded(t, req.WrkHome, req.MainRepo, "scan")
-	assertScanProjectRecorded(t, req.WrkHome, req.SecondRepo, "scan")
+	// Print-only: registry stays empty after seed.
+	assertScanProjectsCount(t, req.WrkHome, 0)
+	// Product home universe must list both fixture mains after cold seed.
+	if !homeUniverseIndexHasPath(t, req.FakeHome, req.MainRepo) {
+		t.Fatalf("seed must list proj-main in home universe index: %q output=%q",
+			req.MainRepo, string(out))
+	}
+	if !homeUniverseIndexHasPath(t, req.FakeHome, req.SecondRepo) {
+		t.Fatalf("seed must list home-main in home universe index: %q output=%q",
+			req.SecondRepo, string(out))
+	}
 }
 
-// clearScanProjectsJSON removes projects.json so a later scan can re-record
-// and prove emit filter via stdout without treating paths as already-known.
+// clearScanProjectsJSON removes projects.json for isolation when a leaf needs a
+// clean registry (scan itself never writes it).
 func clearScanProjectsJSON(t *testing.T, wrkHome string) {
 	t.Helper()
 	if err := os.Remove(scanProjectsJSONPath(wrkHome)); err != nil && !os.IsNotExist(err) {

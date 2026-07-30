@@ -3,11 +3,11 @@
 **Feature**: --scan-git-repos streams every valid main in discovery order, with first path before finish
 
 ```
-# multi-root scan: print + record-as-needed as each main is found (discovery order)
+# multi-root scan: print as each main is found (discovery order; print-only)
 wrk --scan-git-repos ROOT_B ROOT_A
   -> scan_repo discovers mains under roots in root order
   -> stdout always prints valid main abs paths in discovery order (not post-scan sort)
-  -> RecordProject(..., source="scan") for new mains as found
+  -> projects.json never written
 
 # timing / incremental stdout (first path arrives before process exit)
 wrk --scan-git-repos --no-cache ROOT_FIRST ROOT_LATER
