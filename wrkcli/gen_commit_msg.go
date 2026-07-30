@@ -150,6 +150,12 @@ func runGenCommitMsgStage(workDir string, genArgs []string, dryRun bool) error {
 	if genArgsHasFlag(genArgs, "--dir") {
 		return fmt.Errorf("wrk: --dir is not valid with --gen-commit-msg when used in multi-stage compose")
 	}
+	// Exclusive-branch: refuse --commit (including dry-run) when HEAD is shared.
+	if genArgsHasFlag(genArgs, "--commit") {
+		if err := refuseCommitIfBranchShared(workDir); err != nil {
+			return err
+		}
+	}
 	forwarded := make([]string, 0, len(genArgs)+3)
 	forwarded = append(forwarded, genArgs...)
 	// Pin to activeRoot workDir.
@@ -274,9 +280,18 @@ func runGenCommitMsg(args []string, ctx *invocationContext) error {
 	// --dir to processCwd() (virtual Capture Dir) so InProcess leaves hit the
 	// fixture repo rather than the suite package directory.
 	hasDir := false
-	for _, arg := range forwarded {
-		if arg == "--dir" || strings.HasPrefix(arg, "--dir=") {
+	dirVal := ""
+	for i, arg := range forwarded {
+		if arg == "--dir" {
 			hasDir = true
+			if i+1 < len(forwarded) {
+				dirVal = forwarded[i+1]
+			}
+			break
+		}
+		if strings.HasPrefix(arg, "--dir=") {
+			hasDir = true
+			dirVal = strings.TrimPrefix(arg, "--dir=")
 			break
 		}
 	}
@@ -286,6 +301,22 @@ func runGenCommitMsg(args []string, ctx *invocationContext) error {
 			return err
 		}
 		forwarded = append(forwarded, "--dir", wd)
+		dirVal = wd
+	}
+
+	// Exclusive-branch: refuse --commit (including dry-run) when HEAD is shared.
+	if genArgsHasFlag(forwarded, "--commit") {
+		checkDir := dirVal
+		if checkDir == "" {
+			wd, err := processCwd()
+			if err != nil {
+				return err
+			}
+			checkDir = wd
+		}
+		if err := refuseCommitIfBranchShared(checkDir); err != nil {
+			return err
+		}
 	}
 
 	return commit_msg.RunGenCommitMsg(forwarded)

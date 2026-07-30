@@ -1702,7 +1702,7 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 	if hasCascade {
 		fmt.Println("==> cascade")
 		for _, path := range cascadeTargets {
-			if err := mergeBackExternalWorktree(path, confirmFromStdin, cascadeAssumeYes, dryRun); err != nil {
+			if err := mergeBackExternalWorktree(path, wrkHome, confirmFromStdin, cascadeAssumeYes, dryRun); err != nil {
 				return err
 			}
 		}
@@ -1731,12 +1731,14 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 		TargetPath: "",
 		Remove:     true,
 		DryRun:     dryRun,
+		TmpDir:     filepath.Join(wrkHome, "worktrees"),
+		StashLabel: "wrk-merge-back",
 		Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
 			return worktree.PromptConfirmPlan(plan, confirmFromStdin, ownAssumeYes)
 		},
 	})
 	if err != nil {
-		return err
+		return mapMergeBackSharedError(err, "--done")
 	}
 	// printDryRun already wrote planned commands (no trailing newline).
 	if result.Action == "dry-run" {
@@ -1786,12 +1788,14 @@ func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync
 		TargetPath: "",
 		Remove:     false,
 		DryRun:     dryRun,
+		TmpDir:     filepath.Join(wrkHome, "worktrees"),
+		StashLabel: "wrk-merge-back",
 		Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
 			return worktree.PromptConfirmPlan(plan, confirmFromStdin, assumeYes)
 		},
 	})
 	if err != nil {
-		return err
+		return mapMergeBackSharedError(err, "--merge-back")
 	}
 	// printDryRun already wrote planned commands (no trailing newline).
 	if result.Action == "dry-run" {
@@ -2070,7 +2074,7 @@ func preflightCascadeDirty(cascadeTargets []string, ownPath string) error {
 //
 // When dryRun is true (and preflight already passed), prints a compact plan line
 // and does not mutate (D6). Real success prints result.Message on stdout (D5).
-func mergeBackExternalWorktree(externalPath string, confirmFromStdin, assumeYes, dryRun bool) error {
+func mergeBackExternalWorktree(externalPath, wrkHome string, confirmFromStdin, assumeYes, dryRun bool) error {
 	if dryRun {
 		fmt.Printf("would: cascade merge-back %s\n", externalPath)
 		return nil
@@ -2079,6 +2083,8 @@ func mergeBackExternalWorktree(externalPath string, confirmFromStdin, assumeYes,
 		SourcePath: externalPath,
 		TargetPath: "",
 		Remove:     true,
+		TmpDir:     filepath.Join(wrkHome, "worktrees"),
+		StashLabel: "wrk-merge-back",
 		Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
 			return worktree.PromptConfirmPlan(plan, confirmFromStdin, assumeYes)
 		},

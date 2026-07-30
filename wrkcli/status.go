@@ -384,7 +384,7 @@ func applyWrkStatusWithLinkedSkip(repoPath string, meta *checkout.Meta) {
 	if err != nil {
 		return
 	}
-	meta.Status = status.FormatWrk(counts)
+	meta.Status = formatWrkStatus(counts)
 }
 
 func formatStatusRemoteLine(mainRepoPath, currentBranch string, colorEnabled bool, fetchEnabled bool, isClean bool) (string, error) {
@@ -576,8 +576,20 @@ func gitFetchUpstreamQuietNoOptionalLocks(repoPath, upstream string) error {
 	return nil
 }
 
+// formatWrkStatus renders the wrk-owned Status: value (no ANSI).
+// clean when all four buckets are zero; otherwise
+// dirty (N added, N changed, N renamed, N deleted) with all buckets always present.
+// Parse remains via go-pkgs/gitops (status.ParsePorcelainWrk / ParseChangeCounts).
+func formatWrkStatus(counts status.WrkCounts) string {
+	if counts.Added+counts.Changed+counts.Renamed+counts.Deleted == 0 {
+		return "clean"
+	}
+	return fmt.Sprintf("dirty (%d added, %d changed, %d renamed, %d deleted)",
+		counts.Added, counts.Changed, counts.Renamed, counts.Deleted)
+}
+
 func formatStatusCounts(counts status.WrkCounts, colorEnabled bool, greenClean bool) string {
-	return formatStatusText(status.FormatWrk(counts), colorEnabled, greenClean)
+	return formatStatusText(formatWrkStatus(counts), colorEnabled, greenClean)
 }
 
 func formatStatusText(plain string, colorEnabled bool, greenClean bool) string {
