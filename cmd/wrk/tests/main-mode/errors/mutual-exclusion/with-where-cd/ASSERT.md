@@ -1,7 +1,7 @@
 ## Expected
 
 - Non-zero exit; empty stdout.
-- Stderr mentions mutually exclusive (or that `--main` conflicts with `--cd`).
+- Stderr mentions mutually exclusive (or that `--where` conflicts with `--cd` under `--main`).
 
 ## Exit Code
 

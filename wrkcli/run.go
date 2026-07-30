@@ -56,13 +56,13 @@ func Run(args []string) error {
 	return runErr
 }
 
-func validateWhereFlagArg(args []string) error {
-	for i, arg := range args {
-		if arg != "--where" {
-			continue
-		}
-		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
-			return fmt.Errorf("wrk: --where requires a path argument")
+// rejectWhereEqualsForm fails on --where=value. lessflags Bool accepts equals form
+// and only treats ""/"true" as true, so --where=spl would silently clear the flag
+// and fall through to dashboard. Product contract: Bool+positional only.
+func rejectWhereEqualsForm(args []string) error {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--where=") {
+			return fmt.Errorf("wrk: --where does not take equals form (=value)")
 		}
 	}
 	return nil
@@ -121,7 +121,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		genCommitMsg, genCommitArgs, parseArgs = peelGenCommitMsgForCompose(args)
 	}
 
-	if err := validateWhereFlagArg(parseArgs); err != nil {
+	if err := rejectWhereEqualsForm(parseArgs); err != nil {
 		return err
 	}
 
@@ -153,7 +153,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	var dryRun bool
 	var taskDesc *string
 	var setTaskDesc *string
-	var wherePath *string
+	var where bool
 	var noCd bool
 	var forceCd bool
 	var cd bool
@@ -228,7 +228,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		Bool("--no-dep", &noDep).
 		String("-t,--task", &taskDesc).
 		String("--set-task", &setTaskDesc).
-		String("--where", &wherePath).
+		Bool("--where", &where).
 		Cut("--exec", &execArgs).
 		Help("-h,--help", usage()).
 		HelpNoExit().
@@ -259,7 +259,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	setTaskFlagSet := setTaskDesc != nil
 	addFlagSet := addPath != nil
 	removeFlagSet := removePath != nil
-	whereFlagSet := wherePath != nil
+	whereFlagSet := where
 	portFlagSet := portFlag != nil
 
 	if webFlag {
@@ -395,16 +395,57 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runScanGitRepos(wrkHome, remaining, noCache, includeWorktrees, verbose)
 	}
 
-	// --cd requires exactly one path positional before defaulting workDir to cwd.
+	// --cd and --where are always mutually exclusive (including under --main).
+	// Prefer this over arity when both Bool flags leave two positionals.
+	if cd && whereFlagSet {
+		ctx.workDir = origWd
+		if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
+			return err
+		}
+		return fmt.Errorf("wrk: --cd is mutually exclusive with other modes")
+	}
+
+	// --cd / --where share arity: without --main exactly one path/basename positional;
+	// with --main exactly zero positionals (main is resolved from cwd).
 	if cd {
-		if len(remaining) == 0 {
+		if mainFlag {
+			if len(remaining) > 0 {
+				ctx.workDir = origWd
+				if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
+					return err
+				}
+				return fmt.Errorf("wrk: unexpected arguments")
+			}
+		} else if len(remaining) == 0 {
 			ctx.workDir = origWd
 			if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
 				return err
 			}
 			return fmt.Errorf("wrk: --cd requires a path argument")
+		} else if len(remaining) > 1 {
+			ctx.workDir = origWd
+			if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
+				return err
+			}
+			return fmt.Errorf("wrk: unexpected arguments")
 		}
-		if len(remaining) > 1 {
+	}
+	if whereFlagSet {
+		if mainFlag {
+			if len(remaining) > 0 {
+				ctx.workDir = origWd
+				if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
+					return err
+				}
+				return fmt.Errorf("wrk: unexpected arguments")
+			}
+		} else if len(remaining) == 0 {
+			ctx.workDir = origWd
+			if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
+				return err
+			}
+			return fmt.Errorf("wrk: --where requires a path argument")
+		} else if len(remaining) > 1 {
 			ctx.workDir = origWd
 			if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
 				return err
@@ -415,18 +456,18 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	// --main takes no path positional when used alone. It may compose with --status
 	// (status of main repo, no shell); positionals then follow --status rules.
-	// It may also compose with --reinstall-local (and --dry-run as its modifier)
-	// and with activeRoot pipeline stages (sync/tag-next/push/propagate/reinstall/exec);
-	// those take no path positionals.
+	// It may also compose with --where / --cd (print main / runCd main; zero positionals),
+	// with --reinstall-local (and --dry-run as its modifier), and with activeRoot
+	// pipeline stages (sync/tag-next/push/propagate/reinstall/exec).
 	// Mutual exclusion with other modes is checked later; if another mode flag is
 	// also set, prefer that error over unexpected arguments.
 	if mainFlag {
-		// Pipeline partners and reinstall-local are compose partners (not otherMode).
+		// Pipeline partners, reinstall-local, --where, and --cd are compose partners (not otherMode).
 		mainPipelinePartner := reinstallLocal || tagNext || propagateTags || syncFlag || pushFlag || len(execArgs) > 0
 		otherMode := done || list || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet ||
-			whereFlagSet || bringPath != "" || jsonFlag || mergeBack || taskFlagSet ||
-			setTaskFlagSet || noCd || cd || spawnTarget != ""
-		if !mainPipelinePartner && !status {
+			bringPath != "" || jsonFlag || mergeBack || taskFlagSet ||
+			setTaskFlagSet || noCd || spawnTarget != ""
+		if !mainPipelinePartner && !status && !whereFlagSet && !cd {
 			otherMode = otherMode || dryRun
 		}
 		// --fetch is only valid with --status (or --projects); allow with --main --status.
@@ -440,7 +481,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			}
 			return fmt.Errorf("wrk: --main is mutually exclusive with other modes")
 		}
-		if !status && !mainPipelinePartner && len(remaining) > 0 {
+		if !status && !mainPipelinePartner && !whereFlagSet && !cd && len(remaining) > 0 {
 			ctx.workDir = origWd
 			if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
 				return err
@@ -509,11 +550,18 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		RawArgs:     args,
 		Positionals: remaining,
 	}
-	// Basename fallback: create/status/list/repos/--cd. --main uses cwd only.
+	// Basename fallback: create/status/list/repos/--cd (without --main).
+	// --where basename is a lookup key, not a source dir (workDir stays cwd).
+	// --main / --main --where / --main --cd use cwd only.
 	// One-arg create: if source resolve fails and the arg is task-like, offer
 	// treat-as-task (promote creates from process cwd).
 	var promotedTask string
-	workDir, err := resolveSourceWorkDir(origWd, sourceDir, createMode || status || list || repos || cd, wrkHome, dirHint)
+	resolveSrc := sourceDir
+	if whereFlagSet && !mainFlag {
+		// remaining[0] is the basename operand; do not resolve as workDir.
+		resolveSrc = ""
+	}
+	workDir, err := resolveSourceWorkDir(origWd, resolveSrc, createMode || status || list || repos || (cd && !mainFlag), wrkHome, dirHint)
 	if err != nil {
 		if createMode && !taskFlagSet && sourceDir != "" && spawnTarget == "" && isTaskLike(sourceDir) {
 			promote, perr := confirmTaskLikePromote("source", sourceDir, assumeYes)
@@ -544,9 +592,6 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	}
 	if removeFlagSet && strings.TrimSpace(*removePath) == "" {
 		return fmt.Errorf("wrk: --rm requires a path argument")
-	}
-	if whereFlagSet && strings.TrimSpace(*wherePath) == "" {
-		return fmt.Errorf("wrk: --where requires a path argument")
 	}
 
 	hasExec := len(execArgs) > 0
@@ -637,20 +682,22 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if removeFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || whereFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
 		return fmt.Errorf("wrk: --rm is mutually exclusive with other modes")
 	}
-	if whereFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || cd || mainFlag) {
+	// --where composes with --main (print main path). Still exclusive with --cd and other modes.
+	if whereFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || cd) {
 		return fmt.Errorf("wrk: --where is mutually exclusive with other modes")
 	}
-	if cd && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || noCd || mainFlag) {
+	// --cd composes with --main (runCd main). Still exclusive with --where and other modes.
+	if cd && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || noCd) {
 		return fmt.Errorf("wrk: --cd is mutually exclusive with other modes")
 	}
 	// --main composes with --status (and --fetch when status is set), with
-	// --reinstall-local, and with activeRoot pipeline stages (sync/tag-next/push/
-	// propagate-tags/reinstall-local/exec, plus --dry-run as modifier). Exclusive
-	// with done/merge-back, gen-commit-msg (checked earlier), and non-pipeline modes.
+	// --where / --cd, with --reinstall-local, and with activeRoot pipeline stages
+	// (sync/tag-next/push/propagate-tags/reinstall-local/exec, plus --dry-run as modifier).
+	// Exclusive with done/merge-back, gen-commit-msg (checked earlier), and non-pipeline modes.
 	if mainFlag {
 		mainPipelinePartner := reinstallLocal || tagNext || propagateTags || syncFlag || pushFlag || hasExec
-		otherMode := done || list || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || noCd || cd || (!status && fetchFlag)
-		if !mainPipelinePartner && !status {
+		otherMode := done || list || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || bringPath != "" || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || noCd || (!status && fetchFlag)
+		if !mainPipelinePartner && !status && !whereFlagSet && !cd {
 			otherMode = otherMode || dryRun
 		}
 		if otherMode {
@@ -772,9 +819,6 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if spawnTarget != "" && (bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || done || mergeBack || cd || mainFlag) {
 		return fmt.Errorf("wrk: unexpected arguments")
 	}
-	if whereFlagSet && len(remaining) > 0 {
-		return fmt.Errorf("wrk: unexpected arguments")
-	}
 
 	if projects {
 		colorEnabled := term.IsTerminal(int(os.Stdout.Fd())) || colorFlag
@@ -789,8 +833,17 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if removeFlagSet {
 		return runRemove(wrkHome, *removePath)
 	}
+	// --where: basename lookup, or with --main print main abs path of cwd checkout.
 	if whereFlagSet {
-		return runWhere(wrkHome, *wherePath)
+		if mainFlag {
+			mainRepo, err := resolveMainRepoForWorkDir(workDir)
+			if err != nil {
+				return err
+			}
+			fmt.Println(mainRepo)
+			return nil
+		}
+		return runWhere(wrkHome, remaining[0])
 	}
 	if status {
 		colorEnabled := term.IsTerminal(int(os.Stdout.Fd())) || colorFlag
@@ -810,6 +863,19 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// Multi-stage reinstall is handled by activeRoot pipeline below.
 	if reinstallLocal && !done && !mergeBack && !genCommitMsg && !syncFlag && !tagNext && !pushFlag && !propagateTags && !hasExec {
 		return runReinstallLocal(workDir, dryRun, mainFlag, colorFlag)
+	}
+	// --cd: resolve target (or with --main, main repo of cwd) then jump.
+	// Handled before bare --main so --main --cd never opens a nested shell.
+	if cd {
+		target := workDir
+		if mainFlag {
+			mainRepo, err := resolveMainRepoForWorkDir(workDir)
+			if err != nil {
+				return err
+			}
+			target = mainRepo
+		}
+		return runCd(target, execArgs)
 	}
 	// --main with pipeline partners: rewrite activeRoot to main (no nested shell).
 	// Bare --main alone still opens a nested shell via runMain.
@@ -832,9 +898,6 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		}
 		workDir = mainRepo
 		// Fall through to activeRoot pipeline / bare stage handlers with main as workDir.
-	}
-	if cd {
-		return runCd(workDir, execArgs)
 	}
 	if repos {
 		return runRepos(workDir)
@@ -1035,10 +1098,13 @@ Flags:
   -v, --verbose                   log major git commands and go mod tidy to stderr
   --add <dir>                     manually record a main repository path
   --rm <dir>                      remove a recorded main repository path
-  --where <basename>              look up saved project path(s) by basename
+  --where <basename>              look up saved project path(s) by basename (positional; also: wrk <basename> --where)
+                                  (with --main: print main repo abs path of this checkout; no basename)
   --cd <path|basename>            jump into directory (in-place follow-up or interactive shell)
+                                  (with --main: jump to main repo of this checkout; no path)
   --main                          open nested shell at main repository root for this checkout
                                   (with --status: run status against the main repo instead;
+                                   with --where: print main path; with --cd: runCd to main;
                                    with --reinstall-local: reinstall from main repo modules;
                                    with pipeline stages: run activeRoot as main, no nested shell)
   --bring <path>                  spawn a dependency worktree under ./external; soft-skip go.mod replace when not a module dep

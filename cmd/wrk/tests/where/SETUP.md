@@ -1,10 +1,11 @@
 # Scenario
 
-**Feature**: wrk --where basename lookup in projects.json
+**Feature**: wrk --where basename lookup in projects.json (Bool flag + positional)
 
 ```
-# read-only lookup by basename only (no cwd stat, no disk path resolution)
-wrk --where <basename> -> FindProjectsByBasename(projects.json)
+# Bool("--where") + exactly one basename positional (either order)
+wrk --where <basename>  OR  wrk <basename> --where
+  -> FindProjectsByBasename(projects.json)
 
 # match count drives stdout
 0 matches -> non-zero exit, stderr no-match message, empty stdout
@@ -14,8 +15,13 @@ wrk --where <basename> -> FindProjectsByBasename(projects.json)
 # basename-only input
 path separator or absolute path -> non-zero exit, basename-only rejection
 
+# binding / arity
+wrk --where              -> wrk: --where requires a path argument
+wrk --where=spl          -> fail (equals form; no treat-as-basename)
+wrk --where --main       -> compose: print main of cwd (see main-mode/compose/where)
+
 # standalone mode
-mutually exclusive with other modes; no extra positionals
+mutually exclusive with other modes; no extra positionals beyond the one basename
 ```
 
 ## Preconditions
@@ -23,10 +29,12 @@ mutually exclusive with other modes; no extra positionals
 - Project persistence (`projects.json`, `wrk --add`) is available.
 - Tests seed saved projects via `wrk --add`.
 - Lookup uses basename `spl` unless a descendant overrides `WhereBasename`.
+- `--where` is a **Bool** flag; operand is a remaining positional (breaking: was String-bound).
 
 ## Steps
 
-- Descendants configure saved project paths, cwd, and `req.Args = []string{"--where", <basename>}`.
+- Descendants configure saved project paths, cwd, and CLI form
+  (`req.Args = []string{"--where", <basename>}` or basename-then-flag via `TargetDir`).
 - Cwd is a neutral directory unless the scenario requires a local `./spl` entry.
 
 ## Context
@@ -34,6 +42,7 @@ mutually exclusive with other modes; no extra positionals
 - Basename: no path separator, not absolute (`spl` yes; `sub/spl`, `/abs/spl`, `../spl` no).
 - Unlike create-mode basename fallback, `--where` never stats cwd or resolves paths on disk.
 - Multi-match prints all paths (no TTY prompt); candidates sorted lexicographically.
+- Operand-then-flag mirrors `--cd`: `wrk <basename> --where` is valid.
 
 ```go
 import (
@@ -105,9 +114,21 @@ func sortedSavedPaths(t *testing.T, paths ...string) []string {
 	return out
 }
 
-// whereArgs returns CLI args for wrk --where <basename>.
+// whereArgs returns CLI args for wrk --where <basename> (flag then basename).
 func whereArgs(basename string) []string {
 	return []string{"--where", basename}
+}
+
+// setWhereFlagThenBasename: wrk --where <basename>
+func setWhereFlagThenBasename(req *Request, basename string) {
+	req.Args = []string{"--where", basename}
+	req.TargetDir = ""
+}
+
+// setWhereBasenameThenFlag: wrk <basename> --where
+func setWhereBasenameThenFlag(req *Request, basename string) {
+	req.TargetDir = basename
+	req.Args = []string{"--where"}
 }
 
 func ensureWhereHelpersUsed() {
@@ -118,4 +139,8 @@ func ensureWhereHelpersUsed() {
 	_ = resolvePath
 	_ = sortedSavedPaths
 	_ = whereArgs
-}```
+	_ = setWhereFlagThenBasename
+	_ = setWhereBasenameThenFlag
+}
+```
+

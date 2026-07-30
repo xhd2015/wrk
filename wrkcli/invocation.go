@@ -82,10 +82,11 @@ func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTa
 	case reinstallLocal:
 		// reinstall-local wins over main when both set (wrk --main --reinstall-local)
 		return "reinstall-local"
+	case cd:
+		// cd wins over main when both set (wrk --main --cd)
+		return "cd"
 	case mainFlag:
 		return "main"
-	case cd:
-		return "cd"
 	case repos:
 		return "repos"
 	case bringPath != "":
@@ -114,7 +115,6 @@ var flagValueArgs = map[string]struct{}{
 	"--set-task": {},
 	"--add":      {},
 	"--rm":       {},
-	"--where":    {},
 	"--port":     {},
 }
 

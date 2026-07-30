@@ -259,7 +259,8 @@ func parseSetConfigArgs(args []string) (setConfigOpts, error) {
 				opts.conflict = arg
 				return opts, nil
 			}
-			// String flags with values that belong to other modes.
+			// Value-taking mode flags (and former value flags) that belong to other modes.
+			// --where is Bool+positional now but still a conflicting mode token here.
 			if arg == "--add" || arg == "--rm" || arg == "--where" || arg == "--bring" ||
 				arg == "--task" || arg == "-t" || arg == "--set-task" {
 				opts.conflict = arg
