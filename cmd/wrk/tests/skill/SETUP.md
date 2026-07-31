@@ -188,12 +188,39 @@ func installDryRunCursorStdoutV2(t *testing.T, workRoot string) string {
 	return v2StdoutTemplate(body)
 }
 
+// skillDocumentsFlagToken reports whether flag appears as a whole flag name
+// (next byte is not a letter/digit/hyphen), so "--pr" does not match
+// "--propagate-tags".
+func skillDocumentsFlagToken(stdout, flag string) bool {
+	for i := 0; i < len(stdout); {
+		j := strings.Index(stdout[i:], flag)
+		if j < 0 {
+			return false
+		}
+		j += i
+		end := j + len(flag)
+		if end >= len(stdout) || !isSkillFlagNameRune(stdout[end]) {
+			return true
+		}
+		i = j + 1
+	}
+	return false
+}
+
+func isSkillFlagNameRune(b byte) bool {
+	return (b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9') ||
+		b == '-'
+}
+
 func ensureSkillHelpersUsed() {
 	_ = skillHeaderStdoutV2
 	_ = assertEmbeddedSkillStdout
 	_ = assertSkillUsageStdout
 	_ = installDryRunCursorStdoutV2
 	_ = cursorSkillInstallDir
+	_ = skillDocumentsFlagToken
 	_ = wrkcli.RunCapture
 }
 ```

@@ -4,6 +4,8 @@
 - Stdout is the embedded `SKILL.md` (marker + `name: wrk`).
 - Stdout documents `--propagate-tags` (consumer require bump to source releases).
 - Stdout documents `--projects-dep-graph` (cross-project module dep graph).
+- Stdout documents `--pr` as its own flag token (not only as a prefix of `--propagate-tags`).
+- Stdout documents `--title` and `--comment` as required companions of `--pr`.
 - Stderr empty.
 
 ## Side Effects
@@ -15,8 +17,6 @@
 - 0
 
 ```go
-import "strings"
-
 func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	_ = d
 	assertErrIsNil(t, err)
@@ -27,11 +27,17 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if resp.Stderr != "" {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
-	for _, flag := range []string{"--propagate-tags", "--projects-dep-graph"} {
-		if !strings.Contains(resp.Stdout, flag) {
-			t.Fatalf("embedded SKILL.md should document %s, stdout:\n%s", flag, resp.Stdout)
+	// Token-aware: "--pr" must not match only via "--propagate-tags".
+	for _, flag := range []string{
+		"--propagate-tags",
+		"--projects-dep-graph",
+		"--pr",
+		"--title",
+		"--comment",
+	} {
+		if !skillDocumentsFlagToken(resp.Stdout, flag) {
+			t.Fatalf("embedded SKILL.md should document %s as a flag token, stdout:\n%s", flag, resp.Stdout)
 		}
 	}
 }
 ```
-

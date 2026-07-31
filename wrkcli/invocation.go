@@ -56,7 +56,7 @@ func (ctx *invocationContext) autoRecord() error {
 	return nil
 }
 
-func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack bool, bring bool, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, cd, mainFlag, unwind bool) string {
+func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack bool, bring bool, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, prFlag, cd, mainFlag, unwind bool) string {
 	switch {
 	case setTaskFlagSet:
 		return "set-task"
@@ -83,6 +83,9 @@ func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTa
 		return "done"
 	case mergeBack:
 		return "merge-back"
+	case prFlag:
+		// --pr primary; may compose with --push / --gen-commit-msg (event stays "pr").
+		return "pr"
 	case reinstallLocal:
 		// reinstall-local wins over main when both set (wrk --main --reinstall-local)
 		return "reinstall-local"
@@ -120,6 +123,8 @@ var flagValueArgs = map[string]struct{}{
 	"--add":      {},
 	"--rm":       {},
 	"--port":     {},
+	"--title":    {},
+	"--comment":  {},
 }
 
 func extractEventArgs(original, positionals []string) []string {

@@ -82,6 +82,21 @@ Post-pipeline order is fixed: **sync → tag-next → push → propagate-tags �
 `--reinstall-local` after a successful primary scans modules from the main tip (empty reinstall plan still succeeds).
 `--json` is only for bare `--tag-next`, not with `--done` / `--merge-back` or `--propagate-tags`.
 
+## Pull request
+
+```sh
+wrk --pr --title 'Fix login' --comment 'Details of the change'
+wrk --push --pr --title 'Fix login' --comment 'Details of the change'
+wrk --gen-commit-msg --commit --model=MODEL --push --pr --title 'Fix login' --comment 'Details'
+```
+
+**`--pr`** creates or attaches a GitHub PR from a linked worktree (requires `gh` and a github.com origin).
+**`--title`** and **`--comment`** are required companions of `--pr` (both non-empty).
+Bare `--pr` ensures the remote head branch exists (pushes only if missing) and always adds the comment.
+Compose: `[--gen-commit-msg --commit …] [--push] --pr` (order: gen-commit → push → pr).
+With `--push`, always full-pushes the branch tip before the PR path.
+When a PR already exists for the head, `--title` is ignored and only the comment is added.
+
 ## Inspect
 
 ```sh

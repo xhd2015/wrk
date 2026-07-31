@@ -82,4 +82,20 @@ func assertFlagsInclude(t *testing.T, stdout string, flags ...string) {
 		assertContains(t, stdout, flag)
 	}
 }
+
+// assertExactFlagCandidates requires each flag to appear as a full completion
+// line (one candidate per line). Use for short flags like --pr that are
+// prefixes of longer flags (e.g. --propagate-tags).
+func assertExactFlagCandidates(t *testing.T, stdout string, flags ...string) {
+	t.Helper()
+	have := map[string]bool{}
+	for _, line := range splitCompletionLines(stdout) {
+		have[strings.TrimSpace(line)] = true
+	}
+	for _, flag := range flags {
+		if !have[flag] {
+			t.Fatalf("completion missing exact candidate %q; stdout=%q", flag, stdout)
+		}
+	}
+}
 ```
