@@ -18,7 +18,333 @@ type ghPR struct {
 	URL    string `json:"url"`
 }
 
-// runPR implements bare wrk --pr --title T --comment C from a linked worktree.
+// runPRShow implements bare wrk --pr (no --title/--comment): list open PR for
+// the linked worktree head and print its URL only, or empty stdout if none.
+// No ensure-push, create, or comment.
+func runPRShow(workDir string) error {
+	checkoutRoot, headBranch, err := prSharedGates(workDir)
+	if err != nil {
+		return err
+	}
+
+	existing, err := listOpenPRForHead(checkoutRoot, headBranch)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		fmt.Println(existing.URL)
+	}
+	return nil
+}
+
+// ghPRView is the subset of gh pr view --json fields used by --pr --status.
+type ghPRView struct {
+	Number            int           `json:"number"`
+	Title             string        `json:"title"`
+	URL               string        `json:"url"`
+	State             string        `json:"state"`
+	IsDraft           bool          `json:"isDraft"`
+	ReviewDecision    string        `json:"reviewDecision"`
+	StatusCheckRollup []ghCheckNode `json:"statusCheckRollup"`
+}
+
+// ghCheckNode is one statusCheckRollup entry (CheckRun or StatusContext).
+type ghCheckNode struct {
+	Typename   string `json:"__typename"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`     // CheckRun: QUEUED, IN_PROGRESS, COMPLETED, …
+	Conclusion string `json:"conclusion"` // CheckRun: SUCCESS, FAILURE, NEUTRAL, SKIPPED, …
+	State      string `json:"state"`      // StatusContext / rollup: SUCCESS, FAILURE, PENDING, …
+}
+
+// runPRStatus implements wrk --pr --status: list open PR for the linked
+// worktree head, fetch view JSON, and print URL + State/Title/Checks/Reviews.
+// Read-only: no push, create, or comment. Exit 0 even when Checks=failure.
+// No open PR: exit 0, empty stdout, stderr warning.
+func runPRStatus(workDir string) error {
+	checkoutRoot, headBranch, err := prSharedGates(workDir)
+	if err != nil {
+		return err
+	}
+
+	existing, err := listOpenPRForHead(checkoutRoot, headBranch)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		warn := fmt.Sprintf("warning: no open pull request for branch %s", headBranch)
+		fmt.Fprintln(os.Stderr, FormatStderrWarning(warn))
+		return nil
+	}
+
+	raw, err := runGh(checkoutRoot, "pr", "view", fmt.Sprintf("%d", existing.Number),
+		"--json", "number,title,url,state,isDraft,reviewDecision,statusCheckRollup",
+	)
+	if err != nil {
+		return fmt.Errorf("wrk: gh pr view failed: %s", err.Error())
+	}
+	if raw == "" {
+		raw = "{}"
+	}
+
+	// Decoder (not Unmarshal): some hermetic fake-gh scripts expand
+	// ${FAKE_GH_VIEW_JSON:-{}} which appends a trailing "}" when the env is set.
+	// Accept the first JSON value and ignore trailing junk.
+	var view ghPRView
+	dec := json.NewDecoder(strings.NewReader(raw))
+	if err := dec.Decode(&view); err != nil {
+		return fmt.Errorf("wrk: parse gh pr view JSON: %w", err)
+	}
+
+	state := formatPRState(view.IsDraft, view.State)
+	checks := formatChecksRollup(view.StatusCheckRollup)
+	reviews := formatReviewDecision(view.ReviewDecision)
+	url := view.URL
+	if url == "" {
+		url = existing.URL
+	}
+	title := view.Title
+	if title == "" {
+		title = existing.Title
+	}
+
+	// Exact field labels + column spacing (State:/Title:/Checks:/Reviews: → col 11).
+	fmt.Printf("%s\nState:     %s\nTitle:     %s\nChecks:    %s\nReviews:   %s\n",
+		url, state, title, checks, reviews)
+	return nil
+}
+
+// formatPRState maps isDraft + gh state → open|draft|… (lowercased).
+func formatPRState(isDraft bool, state string) string {
+	if isDraft {
+		return "draft"
+	}
+	s := strings.ToLower(strings.TrimSpace(state))
+	if s == "" {
+		return "open"
+	}
+	return s
+}
+
+// formatReviewDecision maps gh reviewDecision → human lower case.
+func formatReviewDecision(d string) string {
+	switch strings.ToUpper(strings.TrimSpace(d)) {
+	case "":
+		return "none"
+	case "APPROVED":
+		return "approved"
+	case "CHANGES_REQUESTED":
+		return "changes requested"
+	case "REVIEW_REQUIRED":
+		return "review required"
+	default:
+		// Fallback: snake_case → spaces, lower.
+		return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(d), "_", " "))
+	}
+}
+
+// formatChecksRollup maps statusCheckRollup → success|failure|pending|none|mixed.
+//
+// Rules:
+//   - empty / missing → none
+//   - any FAILURE/ERROR/TIMED_OUT/CANCELLED/ACTION_REQUIRED → failure
+//   - any PENDING/EXPECTED/IN_PROGRESS/QUEUED/WAITING/REQUESTED without failure → pending
+//   - all SUCCESS (and NEUTRAL/SKIPPED) → success
+//   - otherwise mixed (e.g. success + neutral-only edge cases already covered)
+func formatChecksRollup(nodes []ghCheckNode) string {
+	if len(nodes) == 0 {
+		return "none"
+	}
+
+	var hasSuccess, hasPending, hasFailure, hasOther bool
+	for _, n := range nodes {
+		switch classifyCheckNode(n) {
+		case "failure":
+			hasFailure = true
+		case "pending":
+			hasPending = true
+		case "success":
+			hasSuccess = true
+		default:
+			hasOther = true
+		}
+	}
+	// Failure dominates.
+	if hasFailure {
+		return "failure"
+	}
+	if hasPending {
+		// success+pending without failure → pending (in-progress overall).
+		return "pending"
+	}
+	if hasSuccess && !hasOther {
+		return "success"
+	}
+	if hasSuccess && hasOther {
+		return "mixed"
+	}
+	if hasOther {
+		return "mixed"
+	}
+	return "none"
+}
+
+// classifyCheckNode returns success|failure|pending|other for one rollup node.
+func classifyCheckNode(n ghCheckNode) string {
+	// Prefer conclusion (CheckRun completed), then state (StatusContext / rollup state),
+	// then status (CheckRun lifecycle).
+	conclusion := strings.ToUpper(strings.TrimSpace(n.Conclusion))
+	state := strings.ToUpper(strings.TrimSpace(n.State))
+	status := strings.ToUpper(strings.TrimSpace(n.Status))
+
+	// Explicit failure outcomes.
+	for _, v := range []string{conclusion, state} {
+		switch v {
+		case "FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "CANCELED", "ACTION_REQUIRED", "STARTUP_FAILURE":
+			return "failure"
+		}
+	}
+
+	// In-progress / expected / pending lifecycle.
+	for _, v := range []string{status, state, conclusion} {
+		switch v {
+		case "PENDING", "EXPECTED", "IN_PROGRESS", "QUEUED", "WAITING", "REQUESTED", "WAITING_TO_MERGE":
+			return "pending"
+		}
+	}
+
+	// Success-class (including neutral/skipped as non-blocking green).
+	for _, v := range []string{conclusion, state} {
+		switch v {
+		case "SUCCESS", "NEUTRAL", "SKIPPED":
+			return "success"
+		}
+	}
+	if status == "COMPLETED" && (conclusion == "" || conclusion == "SUCCESS" || conclusion == "NEUTRAL" || conclusion == "SKIPPED") {
+		if conclusion == "" && state != "" {
+			// COMPLETED without conclusion but with state already handled above.
+			return "other"
+		}
+		return "success"
+	}
+
+	if conclusion == "" && state == "" && status == "" {
+		return "other"
+	}
+	return "other"
+}
+
+// runPRComment implements wrk --pr --comment C (no --title): attach an additive
+// comment to the existing open PR for the linked worktree head. Never creates a
+// PR, never ensure-pushes, and never warns about title (title was not passed).
+func runPRComment(workDir, comment string, colorFlag bool) error {
+	comment = strings.TrimSpace(comment)
+	if comment == "" {
+		return fmt.Errorf("wrk: --comment must not be empty")
+	}
+
+	checkoutRoot, headBranch, err := prSharedGates(workDir)
+	if err != nil {
+		return err
+	}
+
+	existing, err := listOpenPRForHead(checkoutRoot, headBranch)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return fmt.Errorf("wrk: no open pull request for branch %q", headBranch)
+	}
+
+	if err := commentPR(checkoutRoot, existing.Number, comment); err != nil {
+		return err
+	}
+	fmt.Println(prSuccessToken("comment added", stdoutColorEnabled(colorFlag)))
+	fmt.Println(existing.URL)
+	return nil
+}
+
+// runPRPushExisting implements wrk --pr --push [--comment C] without --title:
+// require an open PR for the linked worktree head, full tip push (runPushMain
+// semantics), optional additive comment, then print the PR URL.
+//
+// Open-PR list runs BEFORE any push so a missing PR leaves origin tip unchanged.
+// Never creates a PR and never emits a title-ignored warning.
+// Stdout stages (blank line between push and PR stage):
+//
+//	pushed <branch> → origin/<branch>
+//
+//	[comment added]
+//	https://...
+func runPRPushExisting(workDir, comment string, dryRun bool, colorFlag bool) error {
+	comment = strings.TrimSpace(comment)
+
+	checkoutRoot, headBranch, err := prSharedGates(workDir)
+	if err != nil {
+		return err
+	}
+
+	existing, err := listOpenPRForHead(checkoutRoot, headBranch)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return fmt.Errorf("wrk: no open pull request for branch %q", headBranch)
+	}
+
+	// Full tip push (same as bare --push / compose push stage).
+	if err := runPushMain(checkoutRoot, dryRun, nil); err != nil {
+		return err
+	}
+
+	// Blank line between push stage and PR stage (joinStdoutBlocks style).
+	fmt.Println()
+
+	if comment != "" {
+		if err := commentPR(checkoutRoot, existing.Number, comment); err != nil {
+			return err
+		}
+		fmt.Println(prSuccessToken("comment added", stdoutColorEnabled(colorFlag)))
+	}
+	fmt.Println(existing.URL)
+	return nil
+}
+
+// prSharedGates enforces the common --pr preconditions: linked worktree,
+// github.com origin, named head branch, and gh on PATH. Returns checkout root
+// and head branch name.
+func prSharedGates(workDir string) (checkoutRoot, headBranch string, err error) {
+	checkoutRoot, err = requireLinkedWorktree(workDir, "--pr")
+	if err != nil {
+		return "", "", err
+	}
+
+	// origin must be github.com (fetch URL; push may use pushurl to a bare).
+	originURL, err := gitOutputDir(checkoutRoot, "remote", "get-url", "origin")
+	if err != nil {
+		return "", "", fmt.Errorf("wrk: --pr requires an origin remote (github.com): %w", err)
+	}
+	originURL = strings.TrimSpace(originURL)
+	if !isGitHubRemoteURL(originURL) {
+		return "", "", fmt.Errorf("wrk: --pr requires a github.com origin remote (got %q)", originURL)
+	}
+
+	headBranch, err = worktree.ReadBranch(checkoutRoot)
+	if err != nil {
+		return "", "", fmt.Errorf("wrk: resolve current branch for --pr: %w", err)
+	}
+	headBranch = strings.TrimSpace(headBranch)
+	if headBranch == "" || headBranch == "HEAD" {
+		return "", "", fmt.Errorf("wrk: --pr cannot run on a detached HEAD")
+	}
+
+	if _, err := exec.LookPath("gh"); err != nil {
+		return "", "", fmt.Errorf("Error: wrk: --pr requires the GitHub CLI (gh); install from https://cli.github.com/")
+	}
+	return checkoutRoot, headBranch, nil
+}
+
+// runPR implements wrk --pr --title T --comment C from a linked worktree.
 // It ensures the head branch exists on origin (push only when missing), then
 // creates or attaches a GitHub PR via gh:
 //   - new PR: title + comment as initial body (no separate issue comment)
@@ -312,5 +638,3 @@ func stdoutColorEnabled(force bool) bool {
 	}
 	return term.IsTerminal(int(os.Stdout.Fd()))
 }
-
-

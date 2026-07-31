@@ -84,19 +84,28 @@ Post-pipeline order is fixed: **sync → tag-next → push → propagate-tags �
 
 ## Pull request
 
+Multi-mode from a linked worktree (requires `gh` and a github.com origin):
+
 ```sh
-wrk --pr --title 'Fix login' --comment 'Details of the change'
-wrk --push --pr --title 'Fix login' --comment 'Details of the change'
+wrk --pr                                          # show open PR URL (or empty)
+wrk --pr --status                                 # open PR metadata + checks/reviews rollup
+wrk --pr --comment 'Follow-up note'               # comment-only on existing open PR
+wrk --pr --push                                   # full-push tip when open PR exists (error if none)
+wrk --pr --push --comment 'Pushed tip'            # push then comment on open PR
+wrk --pr --title 'Fix login' --comment 'Details'  # create or attach
+wrk --push --pr --title 'Fix login' --comment 'Details'
 wrk --gen-commit-msg --commit --model=MODEL --push --pr --title 'Fix login' --comment 'Details'
 ```
 
-**`--pr`** creates or attaches a GitHub PR from a linked worktree (requires `gh` and a github.com origin).
-**`--title`** and **`--comment`** are required companions of `--pr` (both non-empty).
-Bare `--pr` ensures the remote head branch exists (pushes only if missing).
-New PR: `--title` + `--comment` as **initial body** (no separate issue comment).
-Existing PR: `--title` ignored; `--comment` is an additive PR comment.
+**`--pr`** modes (flag combinations; not every mode needs title+comment):
+- **Show** (bare `--pr`): print open PR URL for the current branch, or empty if none.
+- **Status** (`--pr --status`): open PR metadata + checks/reviews rollup (not with `--title`/`--comment`/`--push`).
+- **Comment-only** (`--pr --comment C`, no `--title`): add a comment on an existing open PR (error if none).
+- **Push-existing** (`--pr --push` without `--title`): require open PR, full-push branch tip, print URL; optional `--comment` after push.
+- **Create/attach** (`--pr --title T --comment C`): both required and non-empty for this mode. Ensures remote head branch (push only if missing). New PR: title + comment as **initial body**. Existing PR: `--title` ignored; `--comment` is additive.
+
 Compose: `[--gen-commit-msg --commit …] [--push] --pr` (order: gen-commit → push → pr).
-With `--push`, always full-pushes the branch tip before the PR path.
+With `--push` on create/attach compose, always full-pushes the branch tip before the PR path.
 
 ## Inspect
 

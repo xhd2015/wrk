@@ -676,28 +676,66 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return fmt.Errorf("wrk: --title and --comment are only valid with --pr")
 	}
 	// --pr is a primary that may compose with peel partners --push and
-	// --gen-commit-msg (fixed order: gen-commit → push → pr). Still exclusive
-	// with other modes (--done, --merge-back, --list, --main, etc.).
+	// --gen-commit-msg (fixed order: gen-commit → push → pr), and with
+	// --status for read-only PR status. Still exclusive with other modes
+	// (--done, --merge-back, --list, --main, etc.).
+	// Modes:
+	//   bare --pr (no --title/--comment): show open PR URL (or empty)
+	//   --pr --status: print open PR metadata + checks/reviews rollup
+	//   --pr --comment C (no --title): comment-only on existing open PR
+	//   --pr --push (no --title/--comment): push-existing (open PR required → full push → URL)
+	//   --pr --push --comment C (no --title): push then comment on open PR
+	//   --pr --title T --comment C: create/attach
+	//   incomplete create (title without comment): error
+	//   --gen-commit-msg with --pr still requires --title (create compose)
+	//   --pr --status + --title/--comment/--push: invalid combination
 	if prFlag {
-		otherMode := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
+		// status is allowed with --pr (PR status mode); validated below.
+		otherMode := done || mergeBack || list || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext ||
 			propagateTags || syncFlag || dryRun || jsonFlag || taskFlagSet || setTaskFlagSet ||
-			spawnTarget != "" || cd || mainFlag || fetchFlag || hasExec || newFlag ||
+			spawnTarget != "" || cd || mainFlag || unwind || fetchFlag || hasExec || newFlag ||
 			confirmFromStdin || forceConfirm || noInModuleReplace || noCd || forceCd
 		if otherMode {
 			return fmt.Errorf("wrk: --pr is mutually exclusive with other modes")
 		}
-		if prTitle == nil {
-			return fmt.Errorf("wrk: --title is required with --pr")
-		}
-		if prComment == nil {
-			return fmt.Errorf("wrk: --comment is required with --pr")
-		}
-		if strings.TrimSpace(*prTitle) == "" {
-			return fmt.Errorf("wrk: --title must not be empty")
-		}
-		if strings.TrimSpace(*prComment) == "" {
-			return fmt.Errorf("wrk: --comment must not be empty")
+		if status {
+			// PR status is read-only: no create/attach, comment, or push.
+			if prTitle != nil || prComment != nil {
+				return fmt.Errorf("wrk: --pr --status cannot be combined with --title or --comment")
+			}
+			if pushFlag {
+				return fmt.Errorf("wrk: --pr --status cannot be combined with --push")
+			}
+			if genCommitMsg {
+				return fmt.Errorf("wrk: --pr --status cannot be combined with --gen-commit-msg")
+			}
+		} else if prTitle == nil && prComment == nil {
+			// Bare show, or push-existing when --push (no title/comment).
+			// gen-commit + pr still needs create/attach title.
+			if genCommitMsg {
+				return fmt.Errorf("wrk: --title is required with --pr")
+			}
+		} else if prTitle == nil {
+			// Comment-only, or push+comment when --push (no title).
+			// Non-empty body required. gen-commit compose still needs title.
+			if strings.TrimSpace(*prComment) == "" {
+				return fmt.Errorf("wrk: --comment must not be empty")
+			}
+			if genCommitMsg {
+				return fmt.Errorf("wrk: --title is required with --pr")
+			}
+		} else {
+			// Title set: create/attach requires --comment (and both non-empty).
+			if prComment == nil {
+				return fmt.Errorf("wrk: --comment is required with --pr")
+			}
+			if strings.TrimSpace(*prTitle) == "" {
+				return fmt.Errorf("wrk: --title must not be empty")
+			}
+			if strings.TrimSpace(*prComment) == "" {
+				return fmt.Errorf("wrk: --comment must not be empty")
+			}
 		}
 	}
 
@@ -747,7 +785,10 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			return fmt.Errorf("wrk: --main is mutually exclusive with other modes")
 		}
 	}
-	if status && (done || list || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || spawnTarget != "" || cd || unwind) {
+	// --status composes with --pr (PR status) and --main; exclusive with push/list/etc.
+	// prFlag is carved out here; invalid --pr --status + title/comment/push is checked above.
+	// --unwind remains exclusive with bare --status.
+	if status && (done || list || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || spawnTarget != "" || cd || unwind) {
 		return fmt.Errorf("wrk: --status is mutually exclusive with other modes")
 	}
 	if confirmFromStdin && !done && !mergeBack {
@@ -915,6 +956,10 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return runWhere(wrkHome, remaining[0])
 	}
 	if status {
+		if prFlag {
+			// PR status mode (--pr --status): open PR metadata + check rollup.
+			return runPRStatus(workDir)
+		}
 		colorEnabled := term.IsTerminal(int(os.Stdout.Fd())) || colorFlag
 		statusRoot := workDir
 		if mainFlag {
@@ -1037,8 +1082,13 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if stageN > 1 && !bareTagPushJSON {
 			title, comment := "", ""
 			if prFlag {
-				title = *prTitle
-				comment = *prComment
+				// Title/comment may be nil for push-existing / push+comment.
+				if prTitle != nil {
+					title = *prTitle
+				}
+				if prComment != nil {
+					comment = *prComment
+				}
 			}
 			return runActiveRootPipeline(workDir, wrkHome, genCommitMsg, genCommitArgs, syncFlag, tagNext, pushFlag, prFlag, title, comment, propagateTags, reinstallLocal, dryRun, colorFlag, execArgs)
 		}
@@ -1083,8 +1133,14 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if pushFlag {
 		return runBarePush(workDir, dryRun)
 	}
-	// Bare --pr: create/attach GitHub PR from linked worktree (P1).
+	// Bare --pr: show / comment-only / create-attach depending on flags.
 	if prFlag {
+		if prTitle == nil && prComment == nil {
+			return runPRShow(workDir)
+		}
+		if prTitle == nil {
+			return runPRComment(workDir, *prComment, colorFlag)
+		}
 		return runPR(workDir, *prTitle, *prComment, colorFlag)
 	}
 	task := ""
@@ -1209,14 +1265,17 @@ Flags:
                                   with --done/--merge-back: push main branch (and tags when with --tag-next);
                                   with --tag-next: also push newly created tags (branch + tags);
                                   with --pr: full-push branch tip then run PR path
-  --pr --title <title> --comment <body>
-                                  create or attach a GitHub PR from a linked worktree (requires gh);
-                                  ensures remote head branch (push only if missing);
+  --pr                            show open GitHub PR URL for current linked-worktree branch (or empty);
+                                  with --status: print open PR metadata + checks/reviews rollup (or empty);
+                                  with --comment only: add comment to existing open PR (error if none);
+                                  with --push (no --title): full-push tip when open PR exists (error if none);
+                                  with --title and --comment: create or attach a PR (requires gh);
+                                  ensures remote head branch on create/attach (push only if missing);
                                   new PR: title + comment as initial body; existing: title ignored, comment added;
-                                  compose: [--gen-commit-msg --commit …] [--push] --pr (order: gen-commit → push → pr;
-                                  with --push always full-pushes the branch tip before the PR path)
-  --title <title>                 with --pr: PR title (required, non-empty; only used on create)
-  --comment <body>                with --pr: initial body on create, or additive comment if PR exists
+                                  compose: [--gen-commit-msg --commit …] [--push] --pr --title T --comment C
+                                  (order: gen-commit → push → pr; with --push full-pushes tip before PR path)
+  --title <title>                 with --pr create/attach: PR title (required, non-empty; only used on create)
+  --comment <body>                with --pr: comment-only body, or create/attach initial body / additive comment
   --json                          with bare --tag-next only: machine-readable plan/result on stdout
                                   (not valid with --propagate-tags)
   --task <desc>                   append task slug to worktree/branch names
@@ -1692,8 +1751,10 @@ func requireMainActiveRoot(workDir, flag string) error {
 // activeRoot stays the git toplevel of workDir for the whole run.
 // Stage order: gen-commit → sync → tag-next → push → pr → propagate-tags → reinstall-local → exec.
 // --tag-next is gated to main activeRoot; other stages OK on linked worktrees.
-// When withPush and withPR: full branch push first, then runPR (ensure-push is a
-// no-op once remote tip already matches after the push stage).
+// When withPush and withPR and title set: full branch push first, then runPR
+// (ensure-push is a no-op once remote tip already matches after the push stage).
+// When withPush and withPR and title empty: push-existing / push+comment —
+// list open PR first, then full tip push, then optional comment + URL.
 func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommitArgs []string, withSync, withTagNext, withPush, withPR bool, prTitle, prComment string, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool, execArgs []string) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
@@ -1754,25 +1815,37 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 		tagPlan = tagRes.Plan
 		printed = true
 	}
-	if withPush {
+
+	// Push-existing / push+comment: --push --pr without --title.
+	// List open PR BEFORE push so a missing open PR leaves origin tip unchanged.
+	pushExisting := withPush && withPR && strings.TrimSpace(prTitle) == ""
+	if pushExisting {
 		blankBefore()
-		var tags []string
-		if withTagNext {
-			tags = createdTags
-		}
-		if err := runPushMain(activeRoot, dryRun, tags); err != nil {
+		if err := runPRPushExisting(activeRoot, prComment, dryRun, colorFlag); err != nil {
 			return err
 		}
 		printed = true
-	}
-	// --pr after push (or after gen-commit when --push omitted). Ensure-push
-	// inside runPR is idempotent when a prior full push already published the tip.
-	if withPR {
-		blankBefore()
-		if err := runPR(activeRoot, prTitle, prComment, colorFlag); err != nil {
-			return err
+	} else {
+		if withPush {
+			blankBefore()
+			var tags []string
+			if withTagNext {
+				tags = createdTags
+			}
+			if err := runPushMain(activeRoot, dryRun, tags); err != nil {
+				return err
+			}
+			printed = true
 		}
-		printed = true
+		// --pr after push (or after gen-commit when --push omitted). Ensure-push
+		// inside runPR is idempotent when a prior full push already published the tip.
+		if withPR {
+			blankBefore()
+			if err := runPR(activeRoot, prTitle, prComment, colorFlag); err != nil {
+				return err
+			}
+			printed = true
+		}
 	}
 	if withPropagateTags {
 		blankBefore()

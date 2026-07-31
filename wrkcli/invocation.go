@@ -74,6 +74,10 @@ func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTa
 		return "rm"
 	case whereFlagSet:
 		return "where"
+	case prFlag:
+		// --pr primary; may compose with --status / --push / --gen-commit-msg
+		// (event stays "pr"). When --pr --status, command is "pr" not "status".
+		return "pr"
 	case status:
 		// status wins over main when both set (wrk --main --status)
 		return "status"
@@ -83,9 +87,6 @@ func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTa
 		return "done"
 	case mergeBack:
 		return "merge-back"
-	case prFlag:
-		// --pr primary; may compose with --push / --gen-commit-msg (event stays "pr").
-		return "pr"
 	case reinstallLocal:
 		// reinstall-local wins over main when both set (wrk --main --reinstall-local)
 		return "reinstall-local"

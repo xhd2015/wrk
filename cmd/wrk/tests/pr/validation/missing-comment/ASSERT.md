@@ -1,12 +1,12 @@
 ## Expected
 
 - Non-zero exit.
-- Stderr mentions `--comment` (required / missing).
+- Stderr mentions `--comment` (required / missing for incomplete create).
 - No PR success tokens; `gh pr create` not called.
 
 ## Errors
 
-- Both `--title` and `--comment` are always required with `--pr`.
+- Create mode requires both `--title` and `--comment`. Bare `--pr` is show (P1); `--pr --comment` alone is comment-only (P2). Title without comment remains incomplete create.
 
 ## Exit Code
 
