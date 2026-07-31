@@ -6,7 +6,7 @@
 # remote head exists; no open PR; --color forces ANSI on non-TTY
 linked wt + origin/feature-pr + fake gh (list empty)
   -> wrk --pr --title "Fix login" --comment "please review" --color
-  -> green: PR created / title set / comment added
+  -> green: PR created / title set / body set
   -> plain URL line
 ```
 

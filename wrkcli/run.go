@@ -1181,12 +1181,12 @@ Flags:
                                   with --pr: full-push branch tip then run PR path
   --pr --title <title> --comment <body>
                                   create or attach a GitHub PR from a linked worktree (requires gh);
-                                  ensures remote head branch (push only if missing); always adds comment;
+                                  ensures remote head branch (push only if missing);
+                                  new PR: title + comment as initial body; existing: title ignored, comment added;
                                   compose: [--gen-commit-msg --commit …] [--push] --pr (order: gen-commit → push → pr;
                                   with --push always full-pushes the branch tip before the PR path)
-
-  --title <title>                 with --pr: PR title (required, non-empty)
-  --comment <body>                with --pr: PR comment body (required, non-empty; additive)
+  --title <title>                 with --pr: PR title (required, non-empty; only used on create)
+  --comment <body>                with --pr: initial body on create, or additive comment if PR exists
   --json                          with bare --tag-next only: machine-readable plan/result on stdout
                                   (not valid with --propagate-tags)
   --task <desc>                   append task slug to worktree/branch names

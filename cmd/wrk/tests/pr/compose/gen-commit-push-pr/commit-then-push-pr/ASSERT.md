@@ -6,12 +6,12 @@
 - Origin `feature-pr` equals post-commit local HEAD (push stage ran after commit).
 - Stdout order: commit title appears before push confirm; push confirm before `PR created`.
 - Stdout includes push confirm and new-PR success tokens + URL.
-- Fake `gh`: create + comment called.
+- Fake `gh`: create only (body = comment); no issue comment.
 - Stderr may include gen-commit logs (`Running git commit...`, generated-message banners); must not contain `mutually exclusive`.
 
 ## Side Effects
 
-- New commit on feature branch; tip pushed; PR created + comment.
+- New commit on feature branch; tip pushed; PR created with body = `--comment`.
 
 ## Exit Code
 
@@ -81,6 +81,6 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 
 	invocs := parseFakeGhLog(t, ghLogPath(req))
 	_ = assertGhSubcmdCalled(t, invocs, "create")
-	_ = assertGhSubcmdCalled(t, invocs, "comment")
+	assertGhSubcmdNotCalled(t, invocs, "comment")
 }
 ```

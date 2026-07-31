@@ -3,7 +3,7 @@
 ```
 PR created
 title set: Fix login
-comment added
+body set
 https://github.com/acme/app/pull/42
 ```
 
@@ -13,12 +13,12 @@ https://github.com/acme/app/pull/42
 - Stdout is new-PR shape **without** any `pushed …` line.
 - Stderr empty.
 - Origin `refs/heads/feature-pr` still equals the pre-run snapshot (local ahead not published).
-- Fake `gh` called create + comment.
+- Fake `gh` called create (body = comment); **no** issue comment.
 
 ## Side Effects
 
 - No ensure-push when remote head already exists.
-- PR created + comment added.
+- PR created with body = `--comment`.
 
 ## Exit Code
 
@@ -64,7 +64,8 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	}
 
 	invocs := parseFakeGhLog(t, ghLogPath(req))
-	_ = assertGhSubcmdCalled(t, invocs, "create")
-	_ = assertGhSubcmdCalled(t, invocs, "comment")
+	createInv := assertGhSubcmdCalled(t, invocs, "create")
+	assertGhArgContains(t, createInv, prDefaultComment)
+	assertGhSubcmdNotCalled(t, invocs, "comment")
 }
 ```

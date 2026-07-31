@@ -8,8 +8,8 @@ linked wt (ahead) + origin/feature-pr (stale) + fake gh list=[]
   -> wrk --push --pr --title "Fix login" --comment "please review"
   -> full push: origin tip advances to local HEAD
   -> stdout includes "pushed feature-pr → origin/feature-pr"
-  -> then gh pr create + comment
-  -> PR created / title set / comment added / URL
+  -> then gh pr create (body = comment)
+  -> PR created / title set / body set / URL
 ```
 
 ## Steps

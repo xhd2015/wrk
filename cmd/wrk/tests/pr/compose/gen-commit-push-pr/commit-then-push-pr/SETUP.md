@@ -10,7 +10,7 @@ linked wt + origin/feature-pr + staged compose-stage.go + commandcode mock + fak
   -> HEAD subject = "feat: compose pr"
   -> origin tip == new HEAD (full push after commit)
   -> stdout includes commit title, push confirm, PR created block (in that order)
-  -> gh pr create + comment
+  -> gh pr create (body = comment)
 ```
 
 ## Steps

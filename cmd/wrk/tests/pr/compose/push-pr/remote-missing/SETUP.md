@@ -7,7 +7,7 @@
 linked wt (feature-pr) + github origin (main only) + fake gh list=[]
   -> wrk --pr --title "Fix login" --comment "please review" --push
   -> full push creates origin/feature-pr
-  -> then gh pr create + comment
+  -> then gh pr create (body = comment)
   -> stdout: pushed … then PR created block
 ```
 
