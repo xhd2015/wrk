@@ -42,7 +42,8 @@ cwd + GOBIN -> wrk --reinstall-local
 - Summary last line (totals across all modules):
   `reinstalled N, skipped M, failed F\n`
   (no `across K modules` suffix — that is dry-run-only).
-- Exit **1** iff `failed > 0`; plan-time collision → non-zero before any install.
+- Soft exit: `failed > 0` → stderr `warning:` (reinstall/fail) + exit **0**
+  (not ExitCodeError 1). Plan-time collision → non-zero before any install.
 - Cross-module install×install collision is a hard plan error (stderr, non-zero);
   stubs must remain unchanged.
 

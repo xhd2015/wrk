@@ -27,8 +27,8 @@ func isBasename(dir string) bool {
 	return true
 }
 
-func isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status bool, bring bool, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, list, done, mergeBack, cd, mainFlag bool) bool {
-	if projects || projectsDepGraph || addFlagSet || removeFlagSet || setTaskFlagSet || whereFlagSet || repos || status || cd || mainFlag {
+func isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status bool, bring bool, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, list, done, mergeBack, cd, mainFlag, unwind bool) bool {
+	if projects || projectsDepGraph || addFlagSet || removeFlagSet || setTaskFlagSet || whereFlagSet || repos || status || cd || mainFlag || unwind {
 		return false
 	}
 	if bring || reinstallLocal || tagNext || propagateTags || syncFlag || pushFlag || list || done || mergeBack {

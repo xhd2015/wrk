@@ -13,7 +13,10 @@ compiler noise onto stdout.)
 
 ## Expected
 
-- Exit code **1** (failed > 0).
+- Exit code **0** (soft: install failures never fail the process; `failed > 0`
+  yields warning + exit 0, not ExitCodeError 1).
+- Stderr contains a `warning:` line that mentions reinstall and/or fail
+  (exact wording implementer-owned; child `go` noise may also appear).
 - Stdout contains progress for both packages in multi-plan order (`broken` in
   root module before `toolgood` in nested `tools/`).
 - Last content line of stdout is exactly `reinstalled 1, skipped 0, failed 1`.
@@ -32,12 +35,12 @@ compiler noise onto stdout.)
 
 ## Errors
 
-- Overall process fails only via exit 1 after finishing the multi plan (not
-  abort-on-first-error / not skip remaining modules).
+- Overall process finishes the multi plan (not abort-on-first-error / not skip
+  remaining modules) and exits **0** with a soft `warning:` when `failed > 0`.
 
 ## Exit Code
 
-- 1
+- 0
 
 ```go
 import (
@@ -48,7 +51,14 @@ import (
 func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	_ = d
 	assertErrIsNil(t, err)
-	assertExitCode(t, resp, 1)
+	assertExitZero(t, resp)
+	if !strings.Contains(resp.Stderr, "warning:") {
+		t.Fatalf("stderr must contain warning: when failed > 0, got %q", resp.Stderr)
+	}
+	lower := strings.ToLower(resp.Stderr)
+	if !strings.Contains(lower, "reinstall") && !strings.Contains(lower, "fail") {
+		t.Fatalf("stderr warning must mention reinstall or fail, got %q", resp.Stderr)
+	}
 	assertNotContains(t, resp.Stdout, "would:")
 	assertNotContains(t, resp.Stdout, "# module")
 	assertNotContains(t, resp.Stdout, "across")

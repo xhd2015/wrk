@@ -1,6 +1,6 @@
 # Scenario
 
-**Feature**: execute continues after a failing install and still installs later bins
+**Feature**: execute continues after a failing install and still installs later bins (soft exit)
 
 ```
 # E3: GOBIN has stubs for broken + good (lexicographic: broken then good)
@@ -9,7 +9,7 @@ mod/ -> wrk --reinstall-local
   -> go install ./cmd/broken  # fails (streamed go errors)
   -> go install ./cmd/good    # still runs
   -> reinstalled 1, skipped 0, failed 1
-  -> exit 1; GOBIN/good runs good-ok
+  -> exit 0; stderr warning: (reinstall/fail); GOBIN/good runs good-ok
 ```
 
 ## Steps

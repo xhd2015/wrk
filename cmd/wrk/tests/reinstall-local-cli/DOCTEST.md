@@ -1,7 +1,7 @@
 # wrk --reinstall-local — CLI dry-run + execute + multi + --main compose (P6)
 
 ## Version
-0.0.7
+0.0.8
 
 Decision tree for **Phase 2** CLI dry-run surface, **Phase 3** execute path,
 **Phase 4** hardening (events.jsonl), **Phase 3 multi-module dry-run**,
@@ -18,9 +18,11 @@ untouched.
 **P2 (sealed):** `--reinstall-local --dry-run` prints a full reinstall plan and
 mutates nothing (**single-module** walk-up format preserved when K=1).
 
-**P3 execute (sealed):** bare `wrk --reinstall-local` (without `--dry-run`) runs
-planned `go install` / `go run` commands sequentially, continues on failure,
-and prints an execute summary.
+**P3 execute (sealed except soft-exit update):** bare `wrk --reinstall-local`
+(without `--dry-run`) runs planned `go install` / `go run` commands sequentially,
+continues on failure, and prints an execute summary. When `failed > 0`, prints
+stderr `warning:` (mentions reinstall/fail) and exits **0** (soft; not
+ExitCodeError 1).
 
 **P3 multi dry-run (sealed when GREEN):** wire CLI dry-run to
 `PlanLocalReinstallsFromWorkDir(workDir, binDir, useMain=false)` and print
@@ -168,9 +170,13 @@ JSON CLI, bare `--main` nested shell e2e, FORCE_COLOR / CLICOLOR, coloring
   `reinstalled N, skipped M, failed F\n`
   where N/M/F are totals across **all** modules in the multi plan (no
   `across K modules` suffix — that is dry-run-only).
-- **Execute exit code** — exit **1** iff `failed > 0`; otherwise **0**
-  (including all-skip success with N=0, F=0). Plan-time collision → non-zero
-  with no execute summary.
+- **Execute exit code (soft failures)** — exit **0** always after a finished
+  execute plan, including when `failed > 0`. When `failed > 0`, also print a
+  **warning** on **stderr** with prefix `warning:` that mentions reinstall
+  and/or fail (exact wording implementer-owned; may share stderr with streamed
+  child `go` noise). Hard errors (unknown method, plan failure, no go.mod,
+  cross-module install×install collision) remain non-zero as today. All-skip
+  success (N=0, F=0) stays exit 0 with **no** soft-failure warning required.
 - **Item print order** — single-mod (K=1): lexicographic by bin name
   (interleaved install/skip by name), then summary. Multi-mod dry-run: modules
   by ModuleRoot lex, items by BinName within each module, then summary with
@@ -213,10 +219,10 @@ reinstall-local-cli/
 ├── execute/                         # real --reinstall-local without --dry-run (P3, sealed single-mod)
 │   ├── present-install/             # E1-s: go install runs; bin executable; reinstalled 1
 │   ├── skip-only/                   # E2-s: no go install; skipped only; exit 0
-│   └── continue-on-failure/         # E3-s: one compile fail among installs; exit 1; continue
+│   └── continue-on-failure/         # E3-s: one compile fail among installs; soft exit 0 + warning:; continue
 ├── execute-multi/                   # multi-module execute (P5)
 │   ├── nested-modules/              # E1: root + tools both install into GOBIN; reinstalled 2
-│   ├── continue-on-failure/         # E2: fail in root module; tools module still installs
+│   ├── continue-on-failure/         # E2: fail in root; tools still installs; soft exit 0 + warning:
 │   └── install-collision/           # collision: plan error before any go install; stub unchanged
 ├── events/                          # P4/P6 hardening: events.jsonl command identity
 │   ├── dry-run/                     # H1: dry-run success → command=reinstall-local; args include --dry-run
@@ -267,9 +273,9 @@ Split factor (MECE, significance-first):
 | **C4** | dry-run-multi/from-subdir | git repo root+tools; cwd=`pkg/sub` → same multi dry-run as full tree; both modules; `across 2 modules` |
 | E1-s | execute/present-install | `./cmd/tool` prints version + GOBIN stub → real `go install`; exit 0; GOBIN/tool executable and runs; summary `reinstalled 1, skipped 0, failed 0` |
 | E2-s | execute/skip-only | `./cmd/missing` no bin → no go; exit 0; `skip:` + `reinstalled 0, skipped 1, failed 0` |
-| E3-s | execute/continue-on-failure | present `broken` (does not compile) + `good` (ok) → continue; exit 1; good installed; `failed >= 1` in summary |
+| E3-s | execute/continue-on-failure | present `broken` (does not compile) + `good` (ok) → continue; exit 0; stderr `warning:` (reinstall/fail); good installed; `failed 1` in summary |
 | **E1** | execute-multi/nested-modules | root + nested tools both bins present → `go install` each with per-module Dir; both GOBIN bins run; `reinstalled 2, skipped 0, failed 0` |
-| **E2** | execute-multi/continue-on-failure | root `broken` fails compile; tools `toolgood` still installs; exit 1; `reinstalled 1, skipped 0, failed 1` |
+| **E2** | execute-multi/continue-on-failure | root `broken` fails compile; tools `toolgood` still installs; exit 0; stderr `warning:`; `reinstalled 1, skipped 0, failed 1` |
 | E-coll | execute-multi/install-collision | mod-a + mod-b both `./cmd/samebin` + GOBIN → non-zero **before** install; stub unchanged; stderr names `samebin`/`mod-a`/`mod-b` |
 | **E3** | dry-run-multi/* (regression) | multi dry-run still zero mutation; `across K modules` / collision plan errors unchanged (sealed C1/C3/C4) |
 | H1 | events/dry-run | success dry-run → `events.jsonl` last event `command: "reinstall-local"`, `exit_code: 0`, args include `--reinstall-local` and `--dry-run` |
@@ -326,11 +332,14 @@ doctest test ./cmd/wrk/tests/reinstall-local-cli/help/mentions-flag
 until implementer prints plan Diagnostics on stderr with optional ANSI under
 `--color`. Items-only stdout leaves without diagnostic asserts stay GREEN.
 
-**Coverage (P5 multi execute):** expect **GREEN** on `execute-multi/*` when
-`runReinstallLocal` already plans multi via `PlanLocalReinstallsFromWorkDir`
-and applies via `executeMultiLocalReinstalls` (P3 execute multi). RED only if
-execute still walks a single module. Do **not** weaken sealed
-`execute/*` / `dry-run-multi/*` ASSERT bodies.
+**Coverage (P5 multi execute):** expect **GREEN** on happy-path
+`execute-multi/nested-modules` and `install-collision` when multi execute
+already works. **Classic TDD soft-exit:** expect **RED** on
+`execute/continue-on-failure` and `execute-multi/continue-on-failure` until
+implementer changes `executeLocalReinstalls` /
+`executeMultiLocalReinstalls` so `failed > 0` prints stderr `warning:` and
+returns nil (exit 0) instead of `ExitCodeError{Code: 1}`. Do **not** weaken
+sealed success-path `execute/*` / `dry-run-multi/*` ASSERT bodies.
 
 **Coverage (P4 main-compose):** expect **GREEN** when flag mutex allows
 `--main` + `--reinstall-local` and `runReinstallLocal` passes `useMain=true`.

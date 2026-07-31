@@ -5,7 +5,7 @@
 ```
 # module + GOBIN stubs -> go install|go run for Action=install; skip otherwise
 # continue on failure; summary reinstalled N, skipped M, failed F
-# exit 1 iff failed > 0
+# soft: failed > 0 -> stderr warning: + exit 0 (not ExitCodeError 1)
 mod/ + gobin/ -> wrk --reinstall-local
 ```
 
@@ -24,8 +24,10 @@ mod/ + gobin/ -> wrk --reinstall-local
 
 ## Context
 
-- Group default: real execute path (P3). Currently production returns
-  `not implemented yet` → leaves are RED until implementer wires apply.
+- Group default: real execute path (P3). Happy-path leaves (present-install /
+  skip-only) stay GREEN when execute works. Soft-exit contract: when
+  `failed > 0`, stderr gets `warning:` and process exits **0** — classic TDD
+  RED on `continue-on-failure` until implementer softens execute.
 - Progress lines: `go install <RelPath>` / `go run <RelPath>` (no `would:`).
 - Skip lines unchanged: `skip: <bin> (not in <bindir>)`.
 - Summary always: `reinstalled N, skipped M, failed F\n`.

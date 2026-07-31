@@ -124,6 +124,7 @@ var wrkCompletionFlags = []string{
 	"--where",
 	"--cd",
 	"--main",
+	"--unwind",
 	"--bring",
 	"--no-dep",
 	"--tag-next",

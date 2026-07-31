@@ -8,12 +8,12 @@
 # execute: go install|go run + skip: lines + reinstalled N, skipped M, failed F; mutates GOBIN
 WorkRoot/{mod,gobin,.wrk}
   -> wrk --reinstall-local [--dry-run] (cwd=mod, GOBIN=gobin)
-  -> stdout plan or execute report; exit 0 | non-zero on errors / failed installs
+  -> stdout plan or execute report; exit 0 (incl. soft failed installs + warning:) | non-zero on hard errors
 ```
 
 ## Preconditions
 
-- Nested root: no inheritance from `cmd/wrk/tests` (own `DOCTEST.md` Version 0.0.7).
+- Nested root: no inheritance from `cmd/wrk/tests` (own `DOCTEST.md` Version 0.0.8).
 - Go toolchain on PATH; session wrk binary built once per doctest run to
   `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/wrk`.
 - Fixture modules are real directories under a per-leaf `t.TempDir()` WorkRoot:
@@ -85,21 +85,21 @@ func doctestSessionID(t *testing.T) string {
 	harnessMu.Lock()
 	sid := harnessSessionID
 	harnessMu.Unlock()
+	// Parallel-safe: only d.DOCTEST_SESSION_ID via adoptDoctestContext (no os.Getenv).
 	if sid == "" {
-		sid = os.Getenv("DOCTEST_SESSION_ID")
-	}
-	if sid == "" {
-		t.Fatal("DOCTEST_SESSION_ID not set (expected d *session.Doctest in Setup)")
+		t.Fatal("d.DOCTEST_SESSION_ID not set (expected adoptDoctestContext from Setup)")
 	}
 	return sid
 }
 
-func doctestRootPath() string {
+func doctestRootPath(t *testing.T) string {
+	t.Helper()
 	harnessMu.Lock()
 	root := harnessDoctestRoot
 	harnessMu.Unlock()
+	// Parallel-safe: only d.DOCTEST_ROOT via adoptDoctestContext (no os.Getenv).
 	if root == "" {
-		root = os.Getenv("DOCTEST_ROOT")
+		t.Fatal("d.DOCTEST_ROOT not set (expected adoptDoctestContext from Setup)")
 	}
 	return root
 }
@@ -170,9 +170,9 @@ func getWrkBin(t *testing.T) string {
 		if _, err := os.Stat(bin); err == nil {
 			return
 		}
-		modRoot := findModuleRoot(doctestRootPath())
+		modRoot := findModuleRoot(doctestRootPath(t))
 		if modRoot == "" {
-			t.Fatal("find module root: no go.mod in ancestors")
+			t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
 		}
 		cmd := exec.Command("go", "build", "-o", bin, "./cmd/wrk")
 		cmd.Dir = modRoot

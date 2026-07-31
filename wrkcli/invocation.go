@@ -56,10 +56,14 @@ func (ctx *invocationContext) autoRecord() error {
 	return nil
 }
 
-func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack bool, bring bool, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, cd, mainFlag bool) string {
+func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack bool, bring bool, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, cd, mainFlag, unwind bool) string {
 	switch {
 	case setTaskFlagSet:
 		return "set-task"
+	case unwind:
+		// Primary mode: compose with ship/land flags (done/tag-next/push) without
+		// losing command identity.
+		return "unwind"
 	case projects:
 		return "projects"
 	case projectsDepGraph:

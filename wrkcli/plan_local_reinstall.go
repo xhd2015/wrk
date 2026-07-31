@@ -847,7 +847,7 @@ func printPlanItemsDryRun(items []PlanItem, binDir string, nInstall, nSkip *int)
 // for a single-module plan (legacy helper; CLI uses executeMultiLocalReinstalls).
 // Skip items print the same skip: line as dry-run and do not invoke go.
 // Child stdout/stderr are streamed to the process. Continues after failures.
-// Summary: reinstalled N, skipped M, failed F. Exit 1 iff failed > 0.
+// Summary: reinstalled N, skipped M, failed F. Soft: failed > 0 → stderr warning, exit 0.
 func executeLocalReinstalls(plan *LocalReinstallPlan, colorOn bool) error {
 	printReinstallDiagnostics(plan.Diagnostics, colorOn)
 	nReinstalled, nSkip, nFailed := 0, 0, 0
@@ -856,7 +856,7 @@ func executeLocalReinstalls(plan *LocalReinstallPlan, colorOn bool) error {
 	}
 	fmt.Printf("reinstalled %d, skipped %d, failed %d\n", nReinstalled, nSkip, nFailed)
 	if nFailed > 0 {
-		return ExitCodeError{Code: 1}
+		printReinstallFailedWarning(nFailed, colorOn)
 	}
 	return nil
 }
@@ -864,6 +864,7 @@ func executeLocalReinstalls(plan *LocalReinstallPlan, colorOn bool) error {
 // executeMultiLocalReinstalls runs installs for every module in the multi plan
 // (module order, then BinName order within each module). Same progress/skip
 // lines and summary as single-module execute. Continues after failures.
+// Soft: failed > 0 → stderr warning, exit 0 (hard plan errors still fail).
 func executeMultiLocalReinstalls(plan *MultiLocalReinstallPlan, colorOn bool) error {
 	for _, mod := range plan.Modules {
 		printReinstallDiagnostics(mod.Diagnostics, colorOn)
@@ -876,9 +877,19 @@ func executeMultiLocalReinstalls(plan *MultiLocalReinstallPlan, colorOn bool) er
 	}
 	fmt.Printf("reinstalled %d, skipped %d, failed %d\n", nReinstalled, nSkip, nFailed)
 	if nFailed > 0 {
-		return ExitCodeError{Code: 1}
+		printReinstallFailedWarning(nFailed, colorOn)
 	}
 	return nil
+}
+
+// printReinstallFailedWarning emits a soft-failure notice when installs fail.
+// Install failures do not fail the process (exit 0); hard plan errors still do.
+func printReinstallFailedWarning(nFailed int, colorOn bool) {
+	prefix := "warning:"
+	if colorOn {
+		prefix = colorize(prefix, ansiOrange)
+	}
+	fmt.Fprintf(os.Stderr, "%s reinstall finished with %d failed\n", prefix, nFailed)
 }
 
 // executePlanItems runs install/skip actions for one module's items.
