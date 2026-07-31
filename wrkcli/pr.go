@@ -226,9 +226,11 @@ func listOpenPRForHead(repo, headBranch string) (*ghPR, error) {
 // createPR runs gh pr create and returns the PR URL and number (parsed from URL
 // when gh only prints the link).
 func createPR(repo, title, baseBranch, headBranch string) (url string, number int, err error) {
-	// Body left default/empty (no --body): minimal PR description.
+	// Non-interactive gh requires --body (or --fill). Use empty body; wrk always
+	// posts the user comment via `gh pr comment` separately.
 	out, runErr := runGh(repo, "pr", "create",
 		"--title", title,
+		"--body", "",
 		"--base", baseBranch,
 		"--head", headBranch,
 	)
