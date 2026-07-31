@@ -1,9 +1,9 @@
-
 ## Expected
 
 - Exit code 0.
 - Stdout contains multiple flag candidates; each line starts with `-`.
 - Stdout includes key flags from usage: `--list`, `-l`, `--status`, `--bring`, `--where`, `--add`, `--rm`, `--bash-integration`.
+- Stdout includes exact completion candidates `--pr`, `--title`, and `--comment` (one flag per line; not a substring of another flag).
 
 ## Side Effects
 
@@ -37,6 +37,8 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		"--rm",
 		"--bash-integration",
 	)
+	// P3: exact line match so "--pr" is not satisfied by "--propagate-tags".
+	assertExactFlagCandidates(t, resp.Stdout, "--pr", "--title", "--comment")
 	// Removed flags must not appear as completion candidates.
 	for _, bad := range []string{"--dep", "--all-deps"} {
 		for _, line := range strings.Split(resp.Stdout, "\n") {

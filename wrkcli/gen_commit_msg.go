@@ -12,8 +12,8 @@ import (
 // genCommitMsgDisallowedFlags are wrk mode / create-flow flags that cannot
 // appear with bare --gen-commit-msg (library-owned flags like --dry-run are allowed).
 // Pipeline compose partners (--done, --merge-back, --sync, --tag-next, --push,
-// --propagate-tags, --reinstall-local, --exec) are peeled before this list is
-// consulted, so they never hit the bare exclusive path.
+// --pr, --propagate-tags, --reinstall-local, --exec) are peeled before this list
+// is consulted, so they never hit the bare exclusive path.
 var genCommitMsgDisallowedFlags = []string{
 	"--done", "--merge-back", "-l", "--list", "--status", "--repos", "--projects",
 	"--projects-dep-graph",
@@ -42,6 +42,7 @@ var genCommitMsgComposePartners = []string{
 	"--done", "--merge-back",
 	"--sync", "--tag-next", "--push", "--propagate-tags",
 	"--reinstall-local", "--exec",
+	"--pr",
 }
 
 // hasGenCommitComposePartner reports whether args include a pipeline partner

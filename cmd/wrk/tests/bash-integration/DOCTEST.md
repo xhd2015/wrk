@@ -56,7 +56,7 @@ bash-integration/
 ├── wrk-home-override/custom/        # WRK_HOME=/custom install path + marker text
 ├── complete/
 │   ├── basenames/                   # prefix filter on project basenames
-│   ├── flags/                       # wrk -<tab> flag candidates
+│   ├── flags/                       # wrk -<tab> flag candidates (incl. --pr/--title/--comment)
 │   ├── list-dir/                    # wrk -l <tab>
 │   ├── bring/                       # wrk --bring <tab>
 │   ├── where/                       # wrk --where <tab>
