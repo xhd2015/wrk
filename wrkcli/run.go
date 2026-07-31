@@ -142,7 +142,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	var forceConfirm bool
 	var assumeYes bool
 	var noInModuleReplace bool
-	var bringPath string
+	var bringPaths []string
 	var noDep bool
 	var reinstallLocal bool
 	var tagNext bool
@@ -224,7 +224,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		Bool("--open-in-agent", &openInAgent).
 		Bool("--no-open-in-agent", &noOpenInAgent).
 		Bool("--no-config", &noConfig).
-		String("--bring", &bringPath).
+		StringSlice("--bring", &bringPaths).
 		Bool("--no-dep", &noDep).
 		String("-t,--task", &taskDesc).
 		String("--set-task", &setTaskDesc).
@@ -257,6 +257,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	taskFlagSet := taskDesc != nil
 	setTaskFlagSet := setTaskDesc != nil
+	bringMode := len(bringPaths) > 0
 	addFlagSet := addPath != nil
 	removeFlagSet := removePath != nil
 	whereFlagSet := where
@@ -267,7 +268,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	} else if scanGitRepos {
 		ctx.command = "scan-git-repos"
 	} else {
-		ctx.command = resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, bringPath, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, cd, mainFlag)
+		ctx.command = resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, bringMode, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, cd, mainFlag)
 		// P1: pure bare no-args is dashboard, not create. --new / positionals / -t
 		// and create modifiers keep command "create".
 		if ctx.command == "create" && isDashboardBareEntry(newFlag, taskFlagSet, remaining, createUXFlags{
@@ -299,7 +300,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return fmt.Errorf("wrk: --include-worktrees is only valid with --scan-git-repos")
 	}
 	// --no-dep is only valid with --bring.
-	if noDep && bringPath == "" {
+	if noDep && !bringMode {
 		return fmt.Errorf("wrk: --no-dep is only valid with --bring")
 	}
 
@@ -324,6 +325,10 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	}
 	if len(remaining) == 2 {
 		spawnTarget = remaining[1]
+	}
+	// --bring does not accept leftover positionals (no multi-value sugar; no workDir override).
+	if bringMode && len(remaining) > 0 {
+		return fmt.Errorf("wrk: unexpected arguments")
 	}
 
 	wrkHome, err := resolveWrkHome()
@@ -376,7 +381,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// --scan-git-repos discovers main repos under roots (print-only; never records).
 	if scanGitRepos {
 		otherMode := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
-			addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" ||
+			addFlagSet || removeFlagSet || whereFlagSet || bringMode ||
 			reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || taskFlagSet ||
 			setTaskFlagSet || fetchFlag || noCd || forceCd || cd || mainFlag ||
 			confirmFromStdin || forceConfirm || noInModuleReplace || webFlag ||
@@ -465,7 +470,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		// Pipeline partners, reinstall-local, --where, and --cd are compose partners (not otherMode).
 		mainPipelinePartner := reinstallLocal || tagNext || propagateTags || syncFlag || pushFlag || len(execArgs) > 0
 		otherMode := done || list || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet ||
-			bringPath != "" || jsonFlag || mergeBack || taskFlagSet ||
+			bringMode || jsonFlag || mergeBack || taskFlagSet ||
 			setTaskFlagSet || noCd || spawnTarget != ""
 		if !mainPipelinePartner && !status && !whereFlagSet && !cd {
 			otherMode = otherMode || dryRun
@@ -499,7 +504,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		// are intentionally excluded so multi-stage composition is allowed.
 		// --main is a scope modifier for the activeRoot pipeline (not otherMode).
 		otherMode := list || status || repos || projects || projectsDepGraph ||
-			addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" ||
+			addFlagSet || removeFlagSet || whereFlagSet || bringMode ||
 			taskFlagSet || setTaskFlagSet ||
 			cd || fetchFlag || spawnTarget != ""
 		// Bare --sync --json (no tag-next) still exclusive; multi-stage +json named later.
@@ -529,7 +534,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 
 	// Resolve sourceDir to absolute; default to process cwd when absent.
 	// Passed to every sub-command as workDir instead of using os.Getwd/Chdir.
-	createMode := isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status, bringPath, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, list, done, mergeBack, cd, mainFlag)
+	createMode := isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status, bringMode, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, list, done, mergeBack, cd, mainFlag)
 	uxFlags := createUXFlags{
 		newWindow:     newWindow,
 		noNewWindow:   noNewWindow,
@@ -631,7 +636,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return fmt.Errorf("wrk: task description must not be empty")
 	}
 	// --set-task is mutually exclusive with all other modes.
-	if setTaskFlagSet && (taskFlagSet || done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || spawnTarget != "" || cd || mainFlag) {
+	if setTaskFlagSet && (taskFlagSet || done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || spawnTarget != "" || cd || mainFlag) {
 		return fmt.Errorf("wrk: --set-task is mutually exclusive with other flags")
 	}
 	if setTaskFlagSet {
@@ -643,14 +648,14 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		return fmt.Errorf("wrk: task description must not be empty")
 	}
 	// --task is only valid with create mode.
-	if taskFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || mergeBack || cd || mainFlag) {
+	if taskFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || mergeBack || cd || mainFlag) {
 		return fmt.Errorf("wrk: --task is mutually exclusive with --done, --merge-back, --list, --status, --repos, --projects, --add, --rm, --where, and --bring")
 	}
 
 	// --new is the create entry; exclusive with non-create modes.
 	if newFlag {
 		otherMode := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
-			addFlagSet || removeFlagSet || whereFlagSet || setTaskFlagSet || bringPath != "" ||
+			addFlagSet || removeFlagSet || whereFlagSet || setTaskFlagSet || bringMode ||
 			reinstallLocal || tagNext || propagateTags || syncFlag || pushFlag || jsonFlag ||
 			cd || mainFlag || dryRun
 		if otherMode {
@@ -667,27 +672,27 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if done && mergeBack {
 		return fmt.Errorf("wrk: --done and --merge-back are mutually exclusive")
 	}
-	if repos && (done || list || status || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || spawnTarget != "" || cd || mainFlag) {
+	if repos && (done || list || status || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || spawnTarget != "" || cd || mainFlag) {
 		return fmt.Errorf("wrk: --repos is mutually exclusive with other modes")
 	}
-	if projects && (done || list || status || repos || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
+	if projects && (done || list || status || repos || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
 		return fmt.Errorf("wrk: --projects is mutually exclusive with other modes")
 	}
-	if projectsDepGraph && (done || list || status || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag || fetchFlag) {
+	if projectsDepGraph && (done || list || status || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag || fetchFlag) {
 		return fmt.Errorf("wrk: --projects-dep-graph is mutually exclusive with other modes")
 	}
-	if addFlagSet && (done || list || status || repos || projects || projectsDepGraph || removeFlagSet || whereFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
+	if addFlagSet && (done || list || status || repos || projects || projectsDepGraph || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
 		return fmt.Errorf("wrk: --add is mutually exclusive with other modes")
 	}
-	if removeFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || whereFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
+	if removeFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag) {
 		return fmt.Errorf("wrk: --rm is mutually exclusive with other modes")
 	}
 	// --where composes with --main (print main path). Still exclusive with --cd and other modes.
-	if whereFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || cd) {
+	if whereFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || cd) {
 		return fmt.Errorf("wrk: --where is mutually exclusive with other modes")
 	}
 	// --cd composes with --main (runCd main). Still exclusive with --where and other modes.
-	if cd && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || noCd) {
+	if cd && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || noCd) {
 		return fmt.Errorf("wrk: --cd is mutually exclusive with other modes")
 	}
 	// --main composes with --status (and --fetch when status is set), with
@@ -696,7 +701,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// Exclusive with done/merge-back, gen-commit-msg (checked earlier), and non-pipeline modes.
 	if mainFlag {
 		mainPipelinePartner := reinstallLocal || tagNext || propagateTags || syncFlag || pushFlag || hasExec
-		otherMode := done || list || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || bringPath != "" || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || noCd || (!status && fetchFlag)
+		otherMode := done || list || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || bringMode || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || noCd || (!status && fetchFlag)
 		if !mainPipelinePartner && !status && !whereFlagSet && !cd {
 			otherMode = otherMode || dryRun
 		}
@@ -704,7 +709,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 			return fmt.Errorf("wrk: --main is mutually exclusive with other modes")
 		}
 	}
-	if status && (done || list || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || spawnTarget != "" || cd) {
+	if status && (done || list || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || spawnTarget != "" || cd) {
 		return fmt.Errorf("wrk: --status is mutually exclusive with other modes")
 	}
 	if confirmFromStdin && !done && !mergeBack {
@@ -716,14 +721,14 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if noInModuleReplace && !done {
 		return fmt.Errorf("wrk: --no-in-module-replace is only valid with --done")
 	}
-	if bringPath != "" && (done || list || mergeBack || tagNext || propagateTags || syncFlag || cd || mainFlag || reinstallLocal) {
+	if bringMode && (done || list || mergeBack || tagNext || propagateTags || syncFlag || cd || mainFlag || reinstallLocal) {
 		return fmt.Errorf("wrk: --bring is mutually exclusive with --done, --merge-back and --list")
 	}
 	// --reinstall-local may compose with pipeline stages (activeRoot model) and with
 	// --main / --done / --merge-back. Still exclusive with list/status/repos and similar.
 	if reinstallLocal {
 		otherMode := list || status || repos || projects || projectsDepGraph ||
-			addFlagSet || removeFlagSet || whereFlagSet || bringPath != "" ||
+			addFlagSet || removeFlagSet || whereFlagSet || bringMode ||
 			cd || taskFlagSet || setTaskFlagSet ||
 			spawnTarget != "" || jsonFlag || fetchFlag
 		if done || mergeBack {
@@ -743,7 +748,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// that stage). Still exclusive with list/status/repos and other non-pipeline modes.
 	if tagNext {
 		// --main is a scope modifier (activeRoot := main), not exclusive with --tag-next.
-		otherMode := bringPath != "" || list || cd ||
+		otherMode := bringMode || list || cd ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != ""
 		if otherMode {
@@ -754,7 +759,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// --push alone with bare --propagate-tags (no tag-next/done/merge-back) is invalid.
 	// --json is rejected separately so the error names both flags.
 	if propagateTags {
-		otherMode := bringPath != "" || list || cd ||
+		otherMode := bringMode || list || cd ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != ""
 		if !done && !mergeBack && !tagNext && pushFlag {
@@ -768,7 +773,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// --sync may compose with pipeline stages (activeRoot model); exclusive with
 	// non-pipeline modes. Multi-stage + --json is rejected by the --json check below.
 	if syncFlag {
-		otherMode := bringPath != "" || list || cd ||
+		otherMode := bringMode || list || cd ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != ""
 		if jsonFlag && !tagNext {
@@ -783,7 +788,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	// non-pipeline modes. --json is rejected separately so the error names --json.
 	// --main is a scope modifier and may compose with --push (pipeline activeRoot).
 	if pushFlag && !tagNext && !done && !mergeBack {
-		otherMode := bringPath != "" || list || cd ||
+		otherMode := bringMode || list || cd ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
 			taskFlagSet || setTaskFlagSet || spawnTarget != ""
 		// propagate without tag-next/done still invalid (handled above for propagate).
@@ -816,7 +821,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	}
 
 	// spawnTarget only applies to the create path. Reject for any other mode.
-	if spawnTarget != "" && (bringPath != "" || reinstallLocal || tagNext || propagateTags || syncFlag || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || done || mergeBack || cd || mainFlag) {
+	if spawnTarget != "" && (bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || done || mergeBack || cd || mainFlag) {
 		return fmt.Errorf("wrk: unexpected arguments")
 	}
 
@@ -902,8 +907,8 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 	if repos {
 		return runRepos(workDir)
 	}
-	if bringPath != "" {
-		return runBring(workDir, bringPath, wrkHome, args, execArgs, noDep)
+	if bringMode {
+		return runBring(workDir, bringPaths, wrkHome, args, execArgs, noDep)
 	}
 	if list {
 		return runList(workDir)
@@ -1107,7 +1112,7 @@ Flags:
                                    with --where: print main path; with --cd: runCd to main;
                                    with --reinstall-local: reinstall from main repo modules;
                                    with pipeline stages: run activeRoot as main, no nested shell)
-  --bring <path>                  spawn a dependency worktree under ./external; soft-skip go.mod replace when not a module dep
+  --bring <path>                  spawn a dependency worktree under ./external (repeatable: --bring p1 --bring p2); soft-skip go.mod replace when not a module dep
   --no-dep                        with --bring: worktree only; skip replace and tidy
   --reinstall-local [--dry-run]   reinstall local module binaries already in GOBIN/GOPATH/bin
                                   (with --main: scan main repository modules for this checkout;
@@ -2154,18 +2159,111 @@ func mergeBackExternalWorktree(externalPath, wrkHome string, confirmFromStdin, a
 	return nil
 }
 
-// runBring materializes an external dependency worktree under ./external and
+// runBring materializes external dependency worktree(s) under ./external and
 // best-effort applies go.mod replace (soft SKIP notices on stderr, exit 0).
+// bringArgs comes from repeatable --bring (one or more paths).
 // When noDep is true: still materialize/reuse external worktree, but skip all
 // replace/tidy and module analyse/match (no SKIP messages).
+//
+// Multi-bring (len>1): left→right; print each abs path before the next; soft
+// SKIP continues; hard errors fail-fast (earlier external worktrees kept).
+// go mod tidy runs once per consumer module after all replaces so mid-loop tidy
+// cannot drop still-pending requires. Single-bring tidies immediately after
+// replaces (unchanged).
 //
 // Non-git consumer cwd: uses abs(cwd) as the external parent, skips
 // ensureGitignoreExternal, and soft-skips replace/tidy with
 // "SKIP local dep replacement: <abs-cwd> is not a git repository" (unless noDep).
-func runBring(workDir string, bringArg string, wrkHome string, rawArgs []string, execArgs []string, noDep bool) error {
+func runBring(workDir string, bringArgs []string, wrkHome string, rawArgs []string, execArgs []string, noDep bool) error {
+	if len(bringArgs) == 0 {
+		return fmt.Errorf("wrk: --bring requires a path")
+	}
+	if len(bringArgs) > 1 && len(execArgs) > 0 {
+		return fmt.Errorf("wrk: --exec is only valid with a single --bring path")
+	}
+	if err := checkDuplicateBringPaths(bringArgs, wrkHome, rawArgs); err != nil {
+		return err
+	}
+
+	multi := len(bringArgs) > 1
+	tidyAtEnd := make(map[string]struct{})
+	var lastExternal string
+
+	for _, bringArg := range bringArgs {
+		externalPath, replacedDirs, err := bringOne(workDir, bringArg, wrkHome, rawArgs, noDep, !multi)
+		if err != nil {
+			return err
+		}
+		for _, d := range replacedDirs {
+			tidyAtEnd[d] = struct{}{}
+		}
+		// Print each success before attempting the next (fail-fast still shows first path).
+		absPath, err := filepath.Abs(externalPath)
+		if err != nil {
+			return fmt.Errorf("resolve external worktree path: %w", err)
+		}
+		fmt.Println(absPath)
+		lastExternal = absPath
+	}
+
+	if multi && !noDep && len(tidyAtEnd) > 0 {
+		dirs := make([]string, 0, len(tidyAtEnd))
+		for d := range tidyAtEnd {
+			dirs = append(dirs, d)
+		}
+		sort.Strings(dirs)
+		for _, d := range dirs {
+			if err := goModTidyForBring(d); err != nil {
+				return err
+			}
+		}
+	}
+
+	// --exec only valid with single bring (rejected above for multi).
+	return runExecInDir(lastExternal, execArgs)
+}
+
+// checkDuplicateBringPaths rejects the same bring arg or same resolved path twice
+// before any external worktree is created. If a path fails to resolve, returns
+// nil so the main left→right loop can fail-fast after prior successes.
+func checkDuplicateBringPaths(bringArgs []string, wrkHome string, rawArgs []string) error {
+	seenArg := make(map[string]struct{}, len(bringArgs))
+	for _, a := range bringArgs {
+		if _, ok := seenArg[a]; ok {
+			return fmt.Errorf("wrk: duplicate --bring path: %s", a)
+		}
+		seenArg[a] = struct{}{}
+	}
+	seenResolved := make(map[string]struct{}, len(bringArgs))
+	for _, a := range bringArgs {
+		p, err := resolveDirArg(a, true, wrkHome, &DirHintOptions{
+			RawArgs: rawArgs,
+			DepMode: true,
+		})
+		if err != nil {
+			// Defer hard resolve errors to the ordered bring loop.
+			return nil
+		}
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return nil
+		}
+		abs = filepath.Clean(abs)
+		if _, ok := seenResolved[abs]; ok {
+			return fmt.Errorf("wrk: duplicate --bring path: %s", abs)
+		}
+		seenResolved[abs] = struct{}{}
+	}
+	return nil
+}
+
+// bringOne materializes one dependency worktree and optionally applies replaces.
+// When tidyNow is true, runs go mod tidy after each successful replace (single-bring).
+// When tidyNow is false (multi mid-loop), returns consumer dirs that need tidy later.
+func bringOne(workDir, bringArg, wrkHome string, rawArgs []string, noDep, tidyNow bool) (externalPath string, replacedDirs []string, err error) {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
-		return fmt.Errorf("resolve cwd: %w", err)
+		return "", nil, fmt.Errorf("resolve cwd: %w", err)
 	}
 
 	insideWorkTree := worktree.IsInsideWorkTree(cwd)
@@ -2174,7 +2272,7 @@ func runBring(workDir string, bringArg string, wrkHome string, rawArgs []string,
 	if insideWorkTree {
 		consumerTop, err = worktree.ShowToplevel(cwd)
 		if err != nil {
-			return err
+			return "", nil, err
 		}
 	} else {
 		// --bring from non-git cwd: parent for external/ is abs(cwd).
@@ -2185,52 +2283,52 @@ func runBring(workDir string, bringArg string, wrkHome string, rawArgs []string,
 		DepMode: true,
 	})
 	if err != nil {
-		return err
+		return "", nil, err
 	}
 	if _, err := worktree.ResolveMainRepo(depPath); err != nil {
-		return err
+		return "", nil, err
 	}
 
 	// Create external worktree (+ /external gitignore only when consumer is git).
-	externalPath, err := createExternalWorktreeForRepo(consumerTop, depPath)
+	externalPath, err = createExternalWorktreeForRepo(consumerTop, depPath)
 	if err != nil {
-		return err
+		return "", nil, err
 	}
 
 	// --no-dep: worktree only; skip replace + tidy (and analyse/match).
 	if noDep {
-		return finishDepLike(externalPath, execArgs)
+		return externalPath, nil, nil
 	}
 
 	// Non-git consumer: soft-skip replace/tidy without module analyse.
 	if !insideWorkTree {
 		fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a git repository\n", cwd)
-		return finishDepLike(externalPath, execArgs)
+		return externalPath, nil, nil
 	}
 
 	// Soft-skip replace with notices; worktree already exists.
 	depModules, err := scan.Scan(depPath, scan.Options{})
 	if err != nil {
-		return fmt.Errorf("scan dep modules: %w", err)
+		return "", nil, fmt.Errorf("scan dep modules: %w", err)
 	}
 	if len(depModules) == 0 {
 		fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a go module\n", depPath)
-		return finishDepLike(externalPath, execArgs)
+		return externalPath, nil, nil
 	}
 
 	consumerModules, err := scan.Scan(consumerTop, scan.Options{})
 	if err != nil {
-		return fmt.Errorf("scan consumer modules: %w", err)
+		return "", nil, fmt.Errorf("scan consumer modules: %w", err)
 	}
 	if len(consumerModules) == 0 {
 		fmt.Fprintf(os.Stderr, "SKIP local dep replacement: consumer has no Go modules\n")
-		return finishDepLike(externalPath, execArgs)
+		return externalPath, nil, nil
 	}
 
 	matchingConsumerDirs, depModDir := matchDepToConsumerModules(consumerTop, consumerModules, depModules)
 	if len(matchingConsumerDirs) == 0 {
 		fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a dependency of any consumer module\n", depPath)
-		return finishDepLike(externalPath, execArgs)
+		return externalPath, nil, nil
 	}
 
 	// The replace must target the directory holding the dep module's go.mod:
@@ -2241,14 +2339,17 @@ func runBring(workDir string, bringArg string, wrkHome string, rawArgs []string,
 	}
 	for _, m := range matchingConsumerDirs {
 		if _, _, err := replace.ReplaceIn(m.dir, replaceDir); err != nil {
-			return err
+			return "", nil, err
 		}
-		if err := goModTidy(m.dir); err != nil {
-			return err
+		replacedDirs = append(replacedDirs, m.dir)
+		if tidyNow {
+			if err := goModTidyForBring(m.dir); err != nil {
+				return "", nil, err
+			}
 		}
 	}
 
-	return finishDepLike(externalPath, execArgs)
+	return externalPath, replacedDirs, nil
 }
 
 type consumerMatch struct{ dir string }
@@ -2281,15 +2382,6 @@ func matchDepToConsumerModules(consumerTop string, consumerModules []scan.Module
 		}
 	}
 	return matchingConsumerDirs, depModDir
-}
-
-func finishDepLike(externalPath string, execArgs []string) error {
-	absPath, err := filepath.Abs(externalPath)
-	if err != nil {
-		return fmt.Errorf("resolve external worktree path: %w", err)
-	}
-	fmt.Println(absPath)
-	return runExecInDir(absPath, execArgs)
 }
 
 // resolveDepModule scans the dep repo at depPath for Go modules and returns the
