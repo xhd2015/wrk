@@ -31,14 +31,35 @@ import (
 	"golang.org/x/term"
 )
 
+// RunOpts configures an in-process wrk invocation. CLI main uses Run (zero opts).
+type RunOpts struct {
+	// Args are CLI args after the program name (same as Run).
+	Args []string
+
+	// ScanTestPauseAfterFirstPrint, when > 0, pauses after the first path
+	// printed by --scan-git-repos so mid-scan interrupt tests can cancel
+	// while the walk is still open. Production leaves this zero.
+	//
+	// Supporting tests:
+	//   - cmd/wrk/tests/scan-git-repos/interrupt/sigint-after-first-path
+	//   - (other leaves under scan-git-repos/interrupt/ if added)
+	ScanTestPauseAfterFirstPrint time.Duration
+}
+
 // Run executes wrk logic with args. The first positional argument,
 // if present, is the source directory for all modes.
 func Run(args []string) error {
+	return RunWithOpts(RunOpts{Args: args})
+}
+
+// RunWithOpts is like Run but accepts optional in-process test/runtime opts
+// (passed down the call stack; no env or package globals).
+func RunWithOpts(opts RunOpts) error {
 	origWd, err := processCwd()
 	if err != nil {
 		return fmt.Errorf("get cwd: %w", err)
 	}
-	ctx := newInvocationContext(origWd, args)
+	ctx := newInvocationContext(origWd, opts.Args)
 	var runErr error
 	defer func() {
 		exitCode := 0
@@ -52,7 +73,7 @@ func Run(args []string) error {
 		}
 		ctx.finish(exitCode)
 	}()
-	runErr = run(origWd, args, ctx)
+	runErr = run(origWd, opts.Args, ctx, opts)
 	return runErr
 }
 
@@ -68,7 +89,7 @@ func rejectWhereEqualsForm(args []string) error {
 	return nil
 }
 
-func run(origWd string, args []string, ctx *invocationContext) error {
+func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) error {
 	if len(args) > 0 && args[0] == "skill" {
 		wrkHome, err := resolveWrkHome()
 		if err != nil {
@@ -405,7 +426,7 @@ func run(origWd string, args []string, ctx *invocationContext) error {
 		if err := ctx.autoRecord(); err != nil {
 			return err
 		}
-		return runScanGitRepos(wrkHome, remaining, noCache, includeWorktrees, verbose)
+		return runScanGitRepos(wrkHome, remaining, noCache, includeWorktrees, verbose, opts.ScanTestPauseAfterFirstPrint)
 	}
 
 	// --cd and --where are always mutually exclusive (including under --main).
@@ -1412,7 +1433,12 @@ func envTruthy(s string) bool {
 // (HOME/.cache/git-repo-scan). verbose (from -v/--verbose) and truthy
 // WRK_SCAN_DEBUG enable scan_repo Debug plus greppable cache_base + filter
 // lines on stderr.
-func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktrees bool, verbose bool) error {
+//
+// pauseAfterFirstPrint, when > 0, blocks after the first emitted path (select on
+// timer or ctx cancel) so interrupt tests can land SIGINT/cancel mid-scan.
+// Production passes 0. Supporting tests:
+//   - cmd/wrk/tests/scan-git-repos/interrupt/sigint-after-first-path
+func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktrees bool, verbose bool, pauseAfterFirstPrint time.Duration) error {
 	_ = wrkHome // scan never mutates projects.json under WRK_HOME
 
 	// Resolve home for default root and two-base mapping. Default root requires
@@ -1487,6 +1513,25 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 
 	// CacheRoot left empty → product default under $HOME when cache enabled.
 	printed := make(map[string]bool)
+	// emitPath prints path once and optionally pauses after the first emit so
+	// interrupt tests (ScanTestPauseAfterFirstPrint) can cancel mid-scan.
+	// Owned by runScanGitRepos — not a test-injected OnRepo.
+	emitPath := func(path string) error {
+		if printed[path] {
+			return nil
+		}
+		fmt.Println(path)
+		first := len(printed) == 0
+		printed[path] = true
+		if first && pauseAfterFirstPrint > 0 {
+			select {
+			case <-time.After(pauseAfterFirstPrint):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
 	onRepo := func(repo scan_repo.Repo) error {
 		isMain := repo.RepoType == scan_repo.RepoTypeMain
 		isWorktree := repo.RepoType == scan_repo.RepoTypeWorktree
@@ -1501,12 +1546,7 @@ func runScanGitRepos(wrkHome string, roots []string, noCache bool, includeWorktr
 		if !pathUnderAnyRoot(path, filterRoots) {
 			return nil
 		}
-		// Always print each valid path at most once per run.
-		if !printed[path] {
-			fmt.Println(path)
-			printed[path] = true
-		}
-		return nil
+		return emitPath(path)
 	}
 
 	// Explicit CacheRoot from resolved home so Capture FakeHome (captureUserHome)

@@ -21,7 +21,8 @@ wrk --scan-git-repos ROOT...  -> exit 0; no interrupt warning
 - Git available (parent scan-git-repos Setup skips if missing).
 - Isolated `WRK_HOME` at `{WorkRoot}/.wrk`; cwd non-git `{WorkRoot}`.
 - Root `Run` cannot deliver mid-flight signals (runs to completion). Interrupt
-  leaves use a subtree helper that spawns `wrk` with stdout pipe, signals
+  leaves use a subtree helper that runs in-process via `wrkcli.RunWithWriters`
+  with `ScanTestPauseAfterFirstPrint` (options down the stack, not env), signals
   `SIGINT` after the first newly printed path line, then waits for exit.
 - Product contract (implemented): SIGINT/SIGTERM cancel scan context → exit 130
   via `ExitCodeError{130}`, stderr `warning:` progress saved, projects.json untouched.
@@ -33,27 +34,28 @@ Helper `runScanGitReposSIGINTAfterFirstStdout`:
 
 1. Removes `{WRK_HOME}/projects.json` so partial-record asserts are not polluted
    by a prior full root `Run` of the same Args.
-2. Starts `wrk` with `buildWrkCLIArgs(req)` / `wrkEnv(req)` / `req.RepoDir`.
-3. Reads stdout until the first complete line (`…\n`), then
-   `Process.Signal(syscall.SIGINT)`.
-4. Drains remaining stdout/stderr and waits (30s timeout → Kill).
-5. Returns stdout, stderr, and exit code (`-1` when terminated by signal without
-   a normal exit status).
+2. Runs in-process via `wrkcli.RunWithWriters` with
+   `ScanTestPauseAfterFirstPrint: 200ms` (passed down RunOpts — no env).
+3. On the first stdout path line, sends `SIGINT` to this process (product
+   `signal.Notify` cancels the scan ctx; default terminate is replaced).
+4. Pause after first print keeps the walk open until cancel is observed.
+5. Returns stdout, stderr, and exit code from `ExitCodeError` / err.
 
 ```go
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
+
 	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/wrk/wrkcli"
 )
 
 // scanInterruptResult is the outcome of a mid-scan SIGINT probe.
@@ -63,6 +65,10 @@ type scanInterruptResult struct {
 	ExitCode int
 }
 
+// scanInterruptPause is the RunOpts.ScanTestPauseAfterFirstPrint duration used
+// by interrupt probes so SIGINT can land while the walk is still open.
+const scanInterruptPause = 200 * time.Millisecond
+
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = d
 	ensureScanGitReposHelpersUsed()
@@ -70,9 +76,12 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	return nil
 }
 
-// runScanGitReposSIGINTAfterFirstStdout runs wrk with req.Args, sends SIGINT
-// after the first newly printed stdout path line, and captures exit/output.
-// Resets projects.json first so recorded state reflects only this probe.
+// runScanGitReposSIGINTAfterFirstStdout runs --scan-git-repos in-process with
+// ScanTestPauseAfterFirstPrint, sends SIGINT after the first printed path line,
+// and captures exit/output. Resets projects.json first.
+//
+// Uses io.Pipe + RunWithWriters (not a custom Write method) so doctest codegen
+// stays valid. SIGINT targets this process; product signal.Notify cancels ctx.
 func runScanGitReposSIGINTAfterFirstStdout(t *testing.T, req *Request) scanInterruptResult {
 	t.Helper()
 
@@ -82,118 +91,54 @@ func runScanGitReposSIGINTAfterFirstStdout(t *testing.T, req *Request) scanInter
 		t.Fatalf("remove projects.json: %v", err)
 	}
 
-	bin := getWrkBin(t)
-	args := buildWrkCLIArgs(req)
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.RepoDir
-	cmd.Env = wrkEnv(req)
-
-	stdoutR, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatalf("stdout pipe: %v", err)
-	}
-	stderrR, err := cmd.StderrPipe()
-	if err != nil {
-		t.Fatalf("stderr pipe: %v", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start wrk: %v", err)
-	}
-
-	var (
-		stdoutMu  sync.Mutex
-		stdoutBuf bytes.Buffer
-		stderrBuf bytes.Buffer
-	)
-
-	stderrDone := make(chan struct{})
+	stdoutR, stdoutW := io.Pipe()
+	var stdoutBuf, stderrBuf bytes.Buffer
+	readDone := make(chan struct{})
 	go func() {
-		defer close(stderrDone)
-		_, _ = io.Copy(&stderrBuf, stderrR)
-	}()
-
-	// Read first line → SIGINT → drain remainder.
-	readDone := make(chan error, 1)
-	go func() {
+		defer close(readDone)
 		r := bufio.NewReader(stdoutR)
 		line, readErr := r.ReadString('\n')
 		if line != "" {
-			stdoutMu.Lock()
 			stdoutBuf.WriteString(line)
-			stdoutMu.Unlock()
-		}
-		if line != "" || readErr == nil {
-			// First newly printed path (or empty line) observed — interrupt.
-			if cmd.Process != nil {
-				_ = cmd.Process.Signal(syscall.SIGINT)
+			if proc, e := os.FindProcess(os.Getpid()); e == nil {
+				_ = proc.Signal(syscall.SIGINT)
 			}
-		}
-		if readErr != nil && readErr != io.EOF {
-			// Still try to drain whatever remains after a partial read.
-			rest, _ := io.ReadAll(r)
-			if len(rest) > 0 {
-				stdoutMu.Lock()
-				stdoutBuf.Write(rest)
-				stdoutMu.Unlock()
-			}
-			readDone <- readErr
-			return
 		}
 		rest, _ := io.ReadAll(r)
 		if len(rest) > 0 {
-			stdoutMu.Lock()
 			stdoutBuf.Write(rest)
-			stdoutMu.Unlock()
 		}
-		if readErr == io.EOF && line == "" {
-			readDone <- io.EOF
-			return
-		}
-		readDone <- nil
+		_ = readErr
 	}()
 
-	waitCh := make(chan error, 1)
-	go func() { waitCh <- cmd.Wait() }()
+	env := []string{"WRK_HOME=" + req.WrkHome, "WRK_DATE=" + wrkDate}
+	if req.FakeHome != "" {
+		env = append(env, "HOME="+req.FakeHome)
+	}
+	env = appendExtraEnv(env, req)
 
-	var waitErr error
-	select {
-	case waitErr = <-waitCh:
-	case <-time.After(30 * time.Second):
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		waitErr = <-waitCh
-		t.Fatalf("timeout waiting for wrk after SIGINT (30s); stdout=%q stderr=%q",
-			stdoutBuf.String(), stderrBuf.String())
-	}
-
-	select {
-	case <-readDone:
-	case <-time.After(5 * time.Second):
-		t.Logf("stdout reader did not finish within 5s after process exit")
-	}
-	select {
-	case <-stderrDone:
-	case <-time.After(5 * time.Second):
-		t.Logf("stderr reader did not finish within 5s after process exit")
-	}
+	err := wrkcli.RunWithWriters(stdoutW, &stderrBuf, wrkcli.CaptureOpts{
+		Args:                         buildWrkCLIArgs(req),
+		Dir:                          req.RepoDir,
+		WrkHome:                      req.WrkHome,
+		Env:                          env,
+		ScanTestPauseAfterFirstPrint: scanInterruptPause,
+	})
+	_ = stdoutW.Close()
+	<-readDone
 
 	exitCode := 0
-	if waitErr != nil {
-		if ee, ok := waitErr.(*exec.ExitError); ok {
-			exitCode = ee.ExitCode() // -1 when terminated by signal without normal exit
+	if err != nil {
+		var ece wrkcli.ExitCodeError
+		if errors.As(err, &ece) {
+			exitCode = ece.Code
 		} else {
-			t.Fatalf("wait wrk: %v", waitErr)
+			exitCode = 1
 		}
 	}
 
-	stdoutMu.Lock()
-	out := stdoutBuf.String()
-	stdoutMu.Unlock()
-
 	return scanInterruptResult{
-		Stdout:   out,
+		Stdout:   stdoutBuf.String(),
 		Stderr:   stderrBuf.String(),
 		ExitCode: exitCode,
 	}

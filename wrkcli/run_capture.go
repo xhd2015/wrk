@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // runCaptureMu serializes Capture / RunWithWriters because product code writes
@@ -89,6 +90,9 @@ type CaptureOpts struct {
 	// --confirm-from-stdin and similar non-TTY prompt paths. Empty leaves
 	// the process stdin unchanged (typically not a pipe under go test).
 	Stdin string
+	// ScanTestPauseAfterFirstPrint is passed through to RunWithOpts (not env).
+	// See RunOpts.ScanTestPauseAfterFirstPrint for docs and supporting tests.
+	ScanTestPauseAfterFirstPrint time.Duration
 }
 
 // CaptureResult is the CLI-shaped outcome of Capture / RunWithWriters.
@@ -127,7 +131,7 @@ func Capture(opts CaptureOpts) CaptureResult {
 		return CaptureResult{Stderr: errSetup.Error(), ExitCode: 1}
 	}
 
-	err := Run(opts.Args)
+	err := RunWithOpts(runOptsFromCapture(opts))
 	if err != nil {
 		var ece ExitCodeError
 		if !errors.As(err, &ece) {
@@ -158,6 +162,14 @@ func Capture(opts CaptureOpts) CaptureResult {
 	}
 	res.ExitCode = 1
 	return res
+}
+
+// runOptsFromCapture copies CaptureOpts fields that RunWithOpts understands.
+func runOptsFromCapture(opts CaptureOpts) RunOpts {
+	return RunOpts{
+		Args:                         opts.Args,
+		ScanTestPauseAfterFirstPrint: opts.ScanTestPauseAfterFirstPrint,
+	}
 }
 
 // RunWithWriters runs wrk in-process, writing primary output to the given
@@ -192,7 +204,7 @@ func RunWithWriters(stdout, stderr io.Writer, opts CaptureOpts) error {
 	if errSetup != nil {
 		return errSetup
 	}
-	err := Run(opts.Args)
+	err := RunWithOpts(runOptsFromCapture(opts))
 	finishIO()
 	return err
 }
