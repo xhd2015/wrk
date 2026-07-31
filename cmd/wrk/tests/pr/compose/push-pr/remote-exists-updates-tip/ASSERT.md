@@ -5,7 +5,7 @@ pushed feature-pr → origin/feature-pr
 
 PR created
 title set: Fix login
-comment added
+body set
 https://github.com/acme/app/pull/42
 ```
 
@@ -16,12 +16,12 @@ https://github.com/acme/app/pull/42
 - Stdout: full-push confirm then new-PR block (blank line between stages OK).
 - Origin `refs/heads/feature-pr` equals linked worktree HEAD (tip updated — unlike bare `--pr`).
 - Pre-run origin snapshot is **behind** final origin tip (proves full push, not ensure-skip).
-- Fake `gh`: create + comment called.
+- Fake `gh`: create with body; no issue comment.
 
 ## Side Effects
 
 - Full branch push published the local-ahead commit.
-- New PR created + comment added.
+- New PR created with body = `--comment`.
 
 ## Exit Code
 
@@ -69,6 +69,6 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 
 	invocs := parseFakeGhLog(t, ghLogPath(req))
 	_ = assertGhSubcmdCalled(t, invocs, "create")
-	_ = assertGhSubcmdCalled(t, invocs, "comment")
+	assertGhSubcmdNotCalled(t, invocs, "comment")
 }
 ```

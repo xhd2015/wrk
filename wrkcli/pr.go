@@ -20,7 +20,9 @@ type ghPR struct {
 
 // runPR implements bare wrk --pr --title T --comment C from a linked worktree.
 // It ensures the head branch exists on origin (push only when missing), then
-// creates or attaches a GitHub PR via gh and always adds an additive comment.
+// creates or attaches a GitHub PR via gh:
+//   - new PR: title + comment as initial body (no separate issue comment)
+//   - existing PR: title ignored; comment as additive gh pr comment
 func runPR(workDir, title, comment string, colorFlag bool) error {
 	title = strings.TrimSpace(title)
 	comment = strings.TrimSpace(comment)
@@ -83,30 +85,28 @@ func runPR(workDir, title, comment string, colorFlag bool) error {
 
 	colorEnabled := stdoutColorEnabled(colorFlag)
 	var prURL string
-	var prNumber int
 
 	if existing != nil {
-		// Title ignored when PR already exists; still add comment.
+		// Title ignored when PR already exists; comment becomes an issue comment.
 		warn := fmt.Sprintf("warning: title ignored (PR already exists); existing title: %s", existing.Title)
 		fmt.Fprintln(os.Stderr, FormatStderrWarning(warn))
 		prURL = existing.URL
-		prNumber = existing.Number
+		if err := commentPR(checkoutRoot, existing.Number, comment); err != nil {
+			return err
+		}
+		fmt.Println(prSuccessToken("comment added", colorEnabled))
 	} else {
-		url, number, err := createPR(checkoutRoot, title, baseBranch, headBranch)
+		// New PR: --comment is the initial body (not a separate issue comment).
+		url, _, err := createPR(checkoutRoot, title, comment, baseBranch, headBranch)
 		if err != nil {
 			return err
 		}
 		prURL = url
-		prNumber = number
 		fmt.Println(prSuccessToken("PR created", colorEnabled))
-		titleLine := prSuccessToken("title set", colorEnabled) + ": " + title
-		fmt.Println(titleLine)
+		fmt.Println(prSuccessToken("title set", colorEnabled) + ": " + title)
+		fmt.Println(prSuccessToken("body set", colorEnabled))
 	}
 
-	if err := commentPR(checkoutRoot, prNumber, comment); err != nil {
-		return err
-	}
-	fmt.Println(prSuccessToken("comment added", colorEnabled))
 	fmt.Println(prURL)
 	return nil
 }
@@ -224,13 +224,12 @@ func listOpenPRForHead(repo, headBranch string) (*ghPR, error) {
 }
 
 // createPR runs gh pr create and returns the PR URL and number (parsed from URL
-// when gh only prints the link).
-func createPR(repo, title, baseBranch, headBranch string) (url string, number int, err error) {
-	// Non-interactive gh requires --body (or --fill). Use empty body; wrk always
-	// posts the user comment via `gh pr comment` separately.
+// when gh only prints the link). body is the initial PR description (--comment).
+func createPR(repo, title, body, baseBranch, headBranch string) (url string, number int, err error) {
+	// Non-interactive gh requires --title and --body (or --fill).
 	out, runErr := runGh(repo, "pr", "create",
 		"--title", title,
-		"--body", "",
+		"--body", body,
 		"--base", baseBranch,
 		"--head", headBranch,
 	)

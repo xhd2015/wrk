@@ -33,7 +33,8 @@ linked wt (feature) + origin (github.com fetch URL + bare pushurl)
 
 - Base branch for PR = main checkout's **current** branch (fixture keeps `main`).
 - Head = linked worktree current branch.
-- Always additive comment via `gh pr comment`; never rewrite body.
+- New PR: `--comment` is initial body (`gh pr create --body`); no issue comment.
+- Existing PR: title ignored; `--comment` is additive `gh pr comment` only.
 - Existing open PR: title ignored (warning on stderr); still comment + URL.
 
 ```go
@@ -321,7 +322,7 @@ func prCreatedStdout(title, url string) string {
 	if url == "" {
 		url = prDefaultURL
 	}
-	return fmt.Sprintf("PR created\ntitle set: %s\ncomment added\n%s\n", title, url)
+	return fmt.Sprintf("PR created\ntitle set: %s\nbody set\n%s\n", title, url)
 }
 
 func prCreatedWithPushStdout(branch, title, url string) string {

@@ -7,8 +7,8 @@
 linked wt + github origin + fake gh (list empty)
   -> wrk --pr --title T --comment C
   -> ensure remote head if missing
-  -> gh pr create + gh pr comment
-  -> stdout: [pushed …] PR created / title set / comment added / URL
+  -> gh pr create (body = comment)
+  -> stdout: [pushed …] PR created / title set / body set / URL
 ```
 
 ## Steps

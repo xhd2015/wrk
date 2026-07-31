@@ -92,10 +92,11 @@ wrk --gen-commit-msg --commit --model=MODEL --push --pr --title 'Fix login' --co
 
 **`--pr`** creates or attaches a GitHub PR from a linked worktree (requires `gh` and a github.com origin).
 **`--title`** and **`--comment`** are required companions of `--pr` (both non-empty).
-Bare `--pr` ensures the remote head branch exists (pushes only if missing) and always adds the comment.
+Bare `--pr` ensures the remote head branch exists (pushes only if missing).
+New PR: `--title` + `--comment` as **initial body** (no separate issue comment).
+Existing PR: `--title` ignored; `--comment` is an additive PR comment.
 Compose: `[--gen-commit-msg --commit …] [--push] --pr` (order: gen-commit → push → pr).
 With `--push`, always full-pushes the branch tip before the PR path.
-When a PR already exists for the head, `--title` is ignored and only the comment is added.
 
 ## Inspect
 

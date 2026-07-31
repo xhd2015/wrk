@@ -7,8 +7,8 @@
 linked wt (ahead) + origin/feature-pr (stale tip)
   -> wrk --pr --title "Fix login" --comment "please review"
   -> no git push of tip; no "pushed …" line
-  -> still gh pr create + comment
-  -> PR created / title set / comment added / URL
+  -> still gh pr create (body = comment)
+  -> PR created / title set / body set / URL
   -> origin/feature-pr unchanged (still pre-ahead SHA)
 ```
 

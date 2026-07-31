@@ -3,17 +3,17 @@
 ```
 PR created   (green)
 title set: Fix login   (green token only)
-comment added   (green)
+body set   (green)
 https://github.com/acme/app/pull/42   (plain)
 ```
 
 ## Expected
 
 - Exit code 0.
-- Stdout success tokens `PR created`, `title set`, and `comment added` are green ANSI (`\x1b[32m`…`\x1b[0m`).
+- Stdout success tokens `PR created`, `title set`, and `body set` are green ANSI (`\x1b[32m`…`\x1b[0m`).
 - Title value and URL stay plain (uncolored).
 - Stderr empty.
-- Fake `gh` create + comment called.
+- Fake `gh` create only (no issue comment).
 
 ## Side Effects
 
@@ -43,13 +43,13 @@ version: 3
 ---
 <ansi-color green>PR created</ansi-color>
 <ansi-color green>title set</ansi-color>: Fix login
-<ansi-color green>comment added</ansi-color>
+<ansi-color green>body set</ansi-color>
 https://github.com/acme/app/pull/42
 `
 	assert.Output(t, resp.Stdout, tmpl)
 
 	invocs := parseFakeGhLog(t, ghLogPath(req))
 	_ = assertGhSubcmdCalled(t, invocs, "create")
-	_ = assertGhSubcmdCalled(t, invocs, "comment")
+	assertGhSubcmdNotCalled(t, invocs, "comment")
 }
 ```

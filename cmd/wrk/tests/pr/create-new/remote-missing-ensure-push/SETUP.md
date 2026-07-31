@@ -8,8 +8,8 @@ linked wt (feature-pr) + github origin (main only)
   -> wrk --pr --title "Fix login" --comment "please review"
   -> git push HEAD to origin/feature-pr
   -> stdout starts with: pushed feature-pr → origin/feature-pr
-  -> gh pr create + comment
-  -> PR created / title set / comment added / URL
+  -> gh pr create (body = comment)
+  -> PR created / title set / body set / URL
 ```
 
 ## Steps

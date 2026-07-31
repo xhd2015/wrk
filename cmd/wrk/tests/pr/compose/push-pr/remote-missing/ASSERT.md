@@ -5,7 +5,7 @@ pushed feature-pr → origin/feature-pr
 
 PR created
 title set: Fix login
-comment added
+body set
 https://github.com/acme/app/pull/42
 ```
 
@@ -15,12 +15,12 @@ https://github.com/acme/app/pull/42
 - Not mutually exclusive.
 - Stdout: full-push confirm then new-PR block.
 - Origin has `feature-pr` equal to linked HEAD.
-- Fake `gh`: list + create + comment.
+- Fake `gh`: list + create (body = comment); no issue comment.
 
 ## Side Effects
 
 - Remote head branch created via full push stage.
-- New PR + comment.
+- New PR with body = `--comment`.
 
 ## Exit Code
 
@@ -57,6 +57,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	_ = assertGhSubcmdCalled(t, invocs, "list")
 	createInv := assertGhSubcmdCalled(t, invocs, "create")
 	assertGhArgContains(t, createInv, prDefaultTitle)
-	_ = assertGhSubcmdCalled(t, invocs, "comment")
+	assertGhArgContains(t, createInv, prDefaultComment)
+	assertGhSubcmdNotCalled(t, invocs, "comment")
 }
 ```
