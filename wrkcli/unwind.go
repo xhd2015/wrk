@@ -45,6 +45,9 @@ type UnwindFlags struct {
 	MergeBack      bool
 	ReinstallLocal bool
 	Color          bool
+	Sync           bool
+	GenCommitMsg   bool
+	GenCommitArgs  []string
 }
 
 // UnwindPlan is the free-first peel plan for dirty pending stack members.
@@ -390,17 +393,48 @@ func ValidateUnwindFlags(plan *UnwindPlan, flags UnwindFlags) error {
 	if plan.NeedsLand && !flags.Done && !flags.MergeBack {
 		return fmt.Errorf("wrk: --unwind for linked worktrees requires --done or --merge-back")
 	}
+	if flags.GenCommitMsg {
+		if !genArgsHasFlag(flags.GenCommitArgs, "--commit") {
+			return fmt.Errorf("wrk: --commit is required with --gen-commit-msg when used with --unwind")
+		}
+		if genArgsHasFlag(flags.GenCommitArgs, "--dir") {
+			return fmt.Errorf("wrk: --dir is not valid with --gen-commit-msg when used with --unwind")
+		}
+	}
 	return nil
 }
 
 // FormatUnwindDryRun returns the dry-run plan text (trailing newline).
-func FormatUnwindDryRun(plan *UnwindPlan) string {
+func FormatUnwindDryRun(plan *UnwindPlan, flags ...UnwindFlags) string {
 	var b strings.Builder
+	var f UnwindFlags
+	if len(flags) > 0 {
+		f = flags[0]
+	}
 	b.WriteString("==== unwind (dry-run) ====\n")
 	if plan != nil {
 		for _, label := range plan.PeelOrder {
 			fmt.Fprintf(&b, "would: peel %s\n", label)
+			if f.GenCommitMsg {
+				b.WriteString("  would: generate commit message and commit staged changes\n")
+			}
+			if f.Done || f.MergeBack {
+				b.WriteString("  would: merge-back linked worktree into main\n")
+			}
+			if f.Sync {
+				b.WriteString("  would: sync linked worktrees\n")
+			}
+			if f.TagNext {
+				b.WriteString("  would: create release tag\n")
+			}
+			if f.Push {
+				b.WriteString("  would: push branch and created tag\n")
+			}
+			b.WriteString("  would: pin stack consumers\n")
 		}
+	}
+	if f.ReinstallLocal {
+		b.WriteString("would: reinstall local binaries\n")
 	}
 	return b.String()
 }
@@ -428,7 +462,7 @@ func runUnwind(workDir string, flags UnwindFlags) error {
 		return err
 	}
 	if flags.DryRun {
-		_, err = fmt.Fprint(os.Stdout, FormatUnwindDryRun(plan))
+		_, err = fmt.Fprint(os.Stdout, FormatUnwindDryRun(plan, flags))
 		return err
 	}
 	return ApplyUnwind(workDir, wrkHome, members, edges, plan, flags)
@@ -481,6 +515,19 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 			if !flags.Done && !flags.MergeBack {
 				return fmt.Errorf("wrk: --unwind for linked worktrees requires --done or --merge-back")
 			}
+			if flags.GenCommitMsg {
+				fmt.Println("---- generate commit message ----")
+				// Unwind operates on a dirty peel, while the message generator works
+				// from the index. Stage the peel before invoking its existing commit
+				// stage so untracked changes are included just as --done would include
+				// them before removing a worktree.
+				if err := gitRunDir(m.Path, "add", "-A"); err != nil {
+					return fmt.Errorf("wrk: stage unwind peel before generated commit: %w", err)
+				}
+				if err := runGenCommitMsgStage(m.Path, flags.GenCommitArgs, false); err != nil {
+					return err
+				}
+			}
 			// --done (Remove) refuses dirty porcelain; auto-commit pending dirt.
 			if flags.Done {
 				if err := autoCommitIfDirty(m.Path); err != nil {
@@ -508,6 +555,13 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 			fmt.Println(result.Message)
 			if result.TargetPath != "" {
 				mainPath = result.TargetPath
+			}
+		}
+
+		if flags.Sync {
+			fmt.Println("---- sync linked worktrees ----")
+			if err := runSync(mainPath, false); err != nil {
+				return err
 			}
 		}
 

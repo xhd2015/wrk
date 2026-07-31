@@ -39,6 +39,7 @@ var genCommitMsgDisallowedFlags = []string{
 // genCommitMsgComposePartners are flags that compose with --gen-commit-msg under
 // the activeRoot pipeline model (peeled; not mutually exclusive).
 var genCommitMsgComposePartners = []string{
+	"--unwind",
 	"--done", "--merge-back",
 	"--sync", "--tag-next", "--push", "--propagate-tags",
 	"--reinstall-local", "--exec",

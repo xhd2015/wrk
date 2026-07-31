@@ -876,7 +876,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if syncFlag {
 		otherMode := bringMode || list || cd ||
 			projects || projectsDepGraph || repos || addFlagSet || removeFlagSet || whereFlagSet || status ||
-			taskFlagSet || setTaskFlagSet || spawnTarget != "" || unwind
+			taskFlagSet || setTaskFlagSet || spawnTarget != ""
 		if jsonFlag && !tagNext {
 			otherMode = true
 		}
@@ -929,13 +929,13 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	}
 
 	// --unwind is a primary mode: stack DAG plan / cycle preflight / free-first peel.
-	// Composes with ship/land flags (--tag-next, --push, --done, --merge-back) and --dry-run.
+	// Composes with ship/land flags and repository-local post stages.
 	if unwind {
 		otherMode := list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || bringMode ||
-			propagateTags || syncFlag || jsonFlag ||
+			propagateTags || jsonFlag ||
 			taskFlagSet || setTaskFlagSet || cd || mainFlag ||
-			newFlag || genCommitMsg || hasExec || spawnTarget != ""
+			newFlag || hasExec || spawnTarget != ""
 		if otherMode {
 			return fmt.Errorf("wrk: --unwind is mutually exclusive with other modes")
 		}
@@ -950,6 +950,9 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			MergeBack:      mergeBack,
 			ReinstallLocal: reinstallLocal,
 			Color:          colorFlag,
+			Sync:           syncFlag,
+			GenCommitMsg:   genCommitMsg,
+			GenCommitArgs:  genCommitArgs,
 		})
 	}
 
@@ -1248,9 +1251,9 @@ Flags:
   --list                          list worktrees (git worktree list)
   --status                        show status for git repos under this checkout
   --repos                         list git repos under this checkout
-  --unwind [--dry-run] [--tag-next] [--push] [--done|--merge-back]
+  --unwind [--gen-commit-msg --commit …] [--done|--merge-back] [--sync] [--tag-next] [--push] [--reinstall-local] [--dry-run]
                                   plan free-first peel order over the checkout stack DAG
-                                  (cycle preflight; dirty pending only; pin flags when edges)
+                                  (linked peels: optional generated commit → land → sync → tag/push → pin)
   --projects                      list recorded main repository paths
   --projects-dep-graph            module-level dep graph across registered projects
   --scan-git-repos [ROOT...]      list valid git repos under roots (print-only; never mutates projects.json; default: ~)
