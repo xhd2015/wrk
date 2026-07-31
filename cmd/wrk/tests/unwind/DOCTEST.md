@@ -8,6 +8,8 @@ Decision tree for **stack unwind**:
 - **P3 (GREEN):** discover checkout **stack**, build module→**repo DAG**,
   **reject cycles before any mutation**, print free-first peel order under
   `wrk --unwind --dry-run`. Flag validation (pin/land) before plan apply.
+  `--reinstall-local` is an accepted tail request: it must not turn an unwind
+  dry run into a mutual-exclusion error.
 - **P4 (Classic TDD RED for new apply leaves):** non-dry-run **apply** peels
   free-first with **explicit** ship/land flags only; after shipping a dep that
   has stack consumers, **Pin** consumers to live tags (`gotool/update.Pin`) and
@@ -27,7 +29,7 @@ implementer lands non-dry-run apply (today stubs with
 # DSN (Domain Specific Notion)
 
 - **wrk --unwind** — top-level primary mode. Compose with ship/land flags and
-  `--dry-run`. Mutually exclusive with unrelated modes (`--list`, `--status`,
+  `--dry-run`, and the optional **reinstall-local tail**. Mutually exclusive with unrelated modes (`--list`, `--status`,
   bare create, …). Event `command: "unwind"` when recorded (optional for leaves).
 - **Stack** — status-partition style inventory of the checkout: **primary** git
   toplevel (main or linked) plus **nested external** independent repos under
@@ -106,7 +108,8 @@ unwind/
 │   ├── free-first-order/                 # 3-repo chain all dirty + pin/land flags
 │   ├── single-repo-no-edges/             # main-only dirty; no tag/push required
 │   ├── clean-leaf-skipped/               # leaf clean; mid+root dirty → peel mid, root
-│   └── missing-flags-with-edges/         # edges present; no tag-next/push → error
+│   ├── missing-flags-with-edges/         # edges present; no tag-next/push → error
+│   └── reinstall-local-tail/             # accepted tail request; ordinary plan stays dry
 ├── apply/                                # P4 non-dry-run peel / pin (Classic TDD)
 │   ├── leaf-then-pin/                    # peel leaf WT → pin root require to new tag
 │   ├── already-main-no-land/             # single main dirty; tag-next+push; no land
@@ -130,6 +133,7 @@ Split factor (MECE, significance-first):
 | D2 | dry-run/single-repo-no-edges | sole root main dirty; dry-run single peel; no pin flags | GREEN |
 | D3 | dry-run/clean-leaf-skipped | leaf clean; peel mid then root only | GREEN |
 | D4 | dry-run/missing-flags-with-edges | edges + dry-run without tag/push → error | GREEN |
+| D5 | dry-run/reinstall-local-tail | single dirty main + `--reinstall-local`; ordinary dry-run plan, no mutual-exclusion error or mutation | RED until unwind accepts the tail |
 | C1 | cycle/two-cycle | A↔B dry-run → cycle error; zero mutations | GREEN |
 | A1 | apply/leaf-then-pin | 2-repo leaf WT dirty+ahead + root requires leaf; `--unwind --done --tag-next --push`; pin root to new tag; leaf main advanced; local bare push | RED until apply |
 | A2 | apply/already-main-no-land | single main dirty + root-bump + bare origin; `--unwind --tag-next --push` (no land); tag+push; no worktree land | RED until apply |
@@ -142,6 +146,7 @@ Split factor (MECE, significance-first):
 doctest vet ./cmd/wrk/tests/unwind
 doctest test -count=1 ./cmd/wrk/tests/unwind
 doctest test -count=1 ./cmd/wrk/tests/unwind/dry-run/free-first-order
+doctest test -count=1 ./cmd/wrk/tests/unwind/dry-run/reinstall-local-tail
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/leaf-then-pin
 doctest test -count=1 ./cmd/wrk/tests/unwind/cycle/apply-two-cycle
 ```

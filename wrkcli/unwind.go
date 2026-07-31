@@ -38,11 +38,13 @@ type RepoEdge struct {
 
 // UnwindFlags are ship/land modifiers composed with --unwind.
 type UnwindFlags struct {
-	DryRun    bool
-	TagNext   bool
-	Push      bool
-	Done      bool
-	MergeBack bool
+	DryRun         bool
+	TagNext        bool
+	Push           bool
+	Done           bool
+	MergeBack      bool
+	ReinstallLocal bool
+	Color          bool
 }
 
 // UnwindPlan is the free-first peel plan for dirty pending stack members.
@@ -441,6 +443,22 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		return nil
 	}
 	byLabel := pickPeelMembersByLabel(members)
+	// Reinstall is a tail stage: collect each peeled main repository in the
+	// deterministic free-first order, then run it only after every peel and pin
+	// succeeds. This avoids rebuilding from intermediate stack states.
+	reinstallMainPaths := make([]string, 0, len(plan.PeelOrder))
+	seenReinstallMainPath := make(map[string]struct{}, len(plan.PeelOrder))
+	addReinstallMainPath := func(path string) {
+		path = storage.NormalizePath(path)
+		if path == "" {
+			return
+		}
+		if _, ok := seenReinstallMainPath[path]; ok {
+			return
+		}
+		seenReinstallMainPath[path] = struct{}{}
+		reinstallMainPaths = append(reinstallMainPaths, path)
+	}
 
 	for i, label := range plan.PeelOrder {
 		if i > 0 {
@@ -518,8 +536,32 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		if err := pinConsumersOfPeeled(label, mainPath, version, members, edges); err != nil {
 			return err
 		}
+		addReinstallMainPath(mainPath)
+	}
+
+	if flags.ReinstallLocal {
+		for _, mainPath := range reinstallMainPaths {
+			if err := runUnwindReinstallLocal(mainPath, flags.Color); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+// runUnwindReinstallLocal executes one unwind tail entry. A repository without
+// modules is not an error for a successful unwind, matching the compose tail.
+func runUnwindReinstallLocal(mainPath string, colorFlag bool) error {
+	err := runReinstallLocal(mainPath, false, true, colorFlag)
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(err.Error(), "no go.mod modules found") ||
+		strings.Contains(err.Error(), "no go.mod found") {
+		fmt.Fprintf(os.Stderr, "skip reinstall-local: %s\n", err.Error())
+		return nil
+	}
+	return err
 }
 
 // pickPeelMembersByLabel chooses the checkout to peel for each label.

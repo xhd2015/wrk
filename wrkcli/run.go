@@ -830,7 +830,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		otherMode := list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || bringMode ||
 			cd || taskFlagSet || setTaskFlagSet ||
-			spawnTarget != "" || jsonFlag || fetchFlag || unwind
+			spawnTarget != "" || jsonFlag || fetchFlag
 		if done || mergeBack {
 			// Primary compose: post stages and done modifiers are allowed.
 		} else if !tagNext && !propagateTags && !syncFlag && !pushFlag && !genCommitMsg && !hasExec {
@@ -933,7 +933,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if unwind {
 		otherMode := list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || bringMode ||
-			reinstallLocal || propagateTags || syncFlag || jsonFlag ||
+			propagateTags || syncFlag || jsonFlag ||
 			taskFlagSet || setTaskFlagSet || cd || mainFlag ||
 			newFlag || genCommitMsg || hasExec || spawnTarget != ""
 		if otherMode {
@@ -943,11 +943,13 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			return fmt.Errorf("wrk: --unwind is mutually exclusive with other modes")
 		}
 		return runUnwind(workDir, UnwindFlags{
-			DryRun:    dryRun,
-			TagNext:   tagNext,
-			Push:      pushFlag,
-			Done:      done,
-			MergeBack: mergeBack,
+			DryRun:         dryRun,
+			TagNext:        tagNext,
+			Push:           pushFlag,
+			Done:           done,
+			MergeBack:      mergeBack,
+			ReinstallLocal: reinstallLocal,
+			Color:          colorFlag,
 		})
 	}
 
