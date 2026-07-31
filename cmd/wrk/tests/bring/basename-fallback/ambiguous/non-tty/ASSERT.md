@@ -1,7 +1,7 @@
 ## Expected
 
 - Non-zero exit code.
-- Stderr mentions multiple matches for `mydep`.
+- Stderr mentions multiple matches for `mydep` **exactly once** (no double dump from duplicate preflight + apply resolve).
 - Stderr lists both candidate absolute paths (lexicographically sorted).
 - Stdout is empty.
 - No external worktree created under either saved dep repo.
@@ -16,6 +16,7 @@
 
 ```go
 import (
+	"strings"
 	"github.com/xhd2015/doctest/session"
 	"github.com/xhd2015/doctest/assert"
 )
@@ -28,6 +29,11 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	}
 	if resp.Stdout != "" {
 		t.Fatalf("stdout should be empty, got %q", resp.Stdout)
+	}
+
+	// Listing once: preflight/apply must not print the candidate block twice.
+	if n := strings.Count(resp.Stderr, `Multiple projects match "mydep":`); n != 1 {
+		t.Fatalf("expected exactly one match listing, got %d stderr=%q", n, resp.Stderr)
 	}
 
 	sorted := sortedSavedPaths(t, req.DepPath, req.SecondRepo)

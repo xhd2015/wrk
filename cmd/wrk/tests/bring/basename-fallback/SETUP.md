@@ -11,6 +11,10 @@ consumer (git + go.mod) -> wrk --bring <basename> -> stat(cwd/<basename>) fails 
 1 match   -> resolve saved dep path -> external worktree + replace + tidy + gitignore
 2+ matches -> TTY numbered prompt OR non-TTY error listing candidates
 
+# P1 preflight resolve-once (ambiguous basename)
+# each --bring arg is resolved at most once (interactive Select when ambiguous);
+# apply reuses the abs path — no second prompt / no double non-TTY dump
+
 # fallback skipped
 ./<basename> exists in cwd (even non-git) -> use cwd path, no lookup
 <dir> contains path separator -> no lookup
@@ -32,6 +36,7 @@ consumer (git + go.mod) -> wrk --bring <basename> -> stat(cwd/<basename>) fails 
 - Basename: no path separator, not absolute (`mydep` yes; `sub/mydep`, `/abs`, `../x` no).
 - Ambiguous candidates are sorted lexicographically by absolute path before display.
 - `WRK_BASENAME_CONFIRM=1` bypasses TTY detection for tests (same pattern as create-mode basename fallback).
+- **Resolve-once (P1):** ambiguous TTY path must emit exactly one `Select [1-N]:` per arg; a single stdin line is enough for success. Non-TTY must list candidates once.
 - Helpers mirror `projects/basename-fallback/SETUP.md`; dep fixtures reuse `dep/SETUP.md` consumer/dep init.
 
 ```go

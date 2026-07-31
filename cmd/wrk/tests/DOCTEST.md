@@ -200,7 +200,14 @@ wrk tests
 │   │   ├── cwd-exists/no-fallback/
 │   │   ├── path-with-separator/no-fallback/
 │   │   ├── no-match/error/
-│   │   └── ambiguous/            # tty-select + non-tty
+│   │   └── ambiguous/            # tty-select + non-tty (P1 resolve-once; no will bring)
+│   ├── multi/                    # repeatable --bring p1 --bring p2
+│   │   ├── two-success/          # two abs deps → two external paths
+│   │   ├── basename-two/         # two registered basenames
+│   │   ├── preflight-ambiguous/  # P2 multi Select one-by-one + will bring plan
+│   │   │   ├── two-basenames-select/
+│   │   │   └── duplicate-after-select/
+│   │   └── reject/               # exec / positionals / exact duplicates
 │   ├── exec-after-skip/          # SKIP not-a-dependency + --exec pwd runs in external
 │   ├── reuse-same-repo/          # Policy A: reuse live external WT of same depMain
 │   │   ├── second-bring/         # second --bring → same path; reuse warning; no -1

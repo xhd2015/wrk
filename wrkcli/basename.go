@@ -8,10 +8,31 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/xhd2015/wrk/wrkcli/storage"
 	"golang.org/x/term"
 )
+
+// sharedStdinLineReader returns a single bufio.Reader over the current os.Stdin.
+// Creating a new bufio.Reader per Select discards buffered trailing lines (e.g.
+// multi-bring stdin "2\n1\n" — the second pick would see EOF). Rebind when
+// Capture swaps os.Stdin so each invocation still gets its pipe.
+var (
+	stdinLineMu     sync.Mutex
+	stdinLineReader *bufio.Reader
+	stdinLineSrc    *os.File
+)
+
+func sharedStdinLineReader() *bufio.Reader {
+	stdinLineMu.Lock()
+	defer stdinLineMu.Unlock()
+	if stdinLineReader == nil || stdinLineSrc != os.Stdin {
+		stdinLineReader = bufio.NewReader(os.Stdin)
+		stdinLineSrc = os.Stdin
+	}
+	return stdinLineReader
+}
 
 func isBasename(dir string) bool {
 	if dir == "" || filepath.IsAbs(dir) {
@@ -209,8 +230,9 @@ func pickAmbiguousBasename(basename string, matches []string) (string, error) {
 		n := len(matches)
 		fmt.Fprint(os.Stderr, listing)
 		fmt.Fprintf(os.Stderr, "Select [1-%d]: ", n)
-		reader := bufio.NewReader(os.Stdin)
-		line, err := reader.ReadString('\n')
+		// Share one reader so multi-arg Select (e.g. stdin "2\n1\n") consumes
+		// successive lines without a fresh buffer discarding the rest.
+		line, err := sharedStdinLineReader().ReadString('\n')
 		if err != nil {
 			return "", fmt.Errorf("wrk: read selection: %w", err)
 		}

@@ -2384,6 +2384,9 @@ func mergeBackExternalWorktree(externalPath, wrkHome string, confirmFromStdin, a
 // cannot drop still-pending requires. Single-bring tidies immediately after
 // replaces (unchanged).
 //
+// Preflight resolves each --bring arg once (basename confirm at most once per
+// arg). Apply reuses the cached absolute path — no second resolveDirArg prompt.
+//
 // Non-git consumer cwd: uses abs(cwd) as the external parent, skips
 // ensureGitignoreExternal, and soft-skips replace/tidy with
 // "SKIP local dep replacement: <abs-cwd> is not a git repository" (unless noDep).
@@ -2394,16 +2397,49 @@ func runBring(workDir string, bringArgs []string, wrkHome string, rawArgs []stri
 	if len(bringArgs) > 1 && len(execArgs) > 0 {
 		return fmt.Errorf("wrk: --exec is only valid with a single --bring path")
 	}
-	if err := checkDuplicateBringPaths(bringArgs, wrkHome, rawArgs); err != nil {
+
+	// Resolve each arg once up front (interactive select at most once per arg).
+	// Duplicate raw/resolved paths fail before any external worktree is created.
+	// Per-arg resolve errors are deferred to the left→right apply loop so prior
+	// successes still materialize (multi fail-fast).
+	resolved, resolveErrs, err := preflightResolveBringArgs(bringArgs, wrkHome, rawArgs)
+	if err != nil {
 		return err
 	}
 
 	multi := len(bringArgs) > 1
+	// Multi-only plan on stderr after full successful preflight, before create.
+	// Single-arg skips this (noise). Duplicate/hard preflight err returns above.
+	if multi {
+		allResolved := true
+		for _, e := range resolveErrs {
+			if e != nil {
+				allResolved = false
+				break
+			}
+		}
+		if allResolved {
+			fmt.Fprintln(os.Stderr, "will bring:")
+			for i, a := range bringArgs {
+				fmt.Fprintf(os.Stderr, "  %s → %s\n", a, resolved[i])
+			}
+		}
+	}
+
 	tidyAtEnd := make(map[string]struct{})
 	var lastExternal string
 
-	for _, bringArg := range bringArgs {
-		externalPath, replacedDirs, err := bringOne(workDir, bringArg, wrkHome, rawArgs, noDep, !multi)
+	for i := range bringArgs {
+		if resolveErrs[i] != nil {
+			return resolveErrs[i]
+		}
+		depPath := resolved[i]
+		if depPath == "" {
+			// Args after a preflight resolve failure are left empty; fail-fast
+			// returns at the first resolveErrs[i] above before reaching them.
+			return fmt.Errorf("wrk: internal: unresolved --bring path: %s", bringArgs[i])
+		}
+		externalPath, replacedDirs, err := bringOneFromResolved(workDir, depPath, noDep, !multi)
 		if err != nil {
 			return err
 		}
@@ -2436,44 +2472,53 @@ func runBring(workDir string, bringArgs []string, wrkHome string, rawArgs []stri
 	return runExecInDir(lastExternal, execArgs)
 }
 
-// checkDuplicateBringPaths rejects the same bring arg or same resolved path twice
-// before any external worktree is created. If a path fails to resolve, returns
-// nil so the main left→right loop can fail-fast after prior successes.
-func checkDuplicateBringPaths(bringArgs []string, wrkHome string, rawArgs []string) error {
+// preflightResolveBringArgs resolves each --bring arg once and rejects
+// duplicates. On success, resolved[i] is the cleaned absolute path.
+// When resolve fails for an arg, resolveErrs[i] is set and later args are not
+// resolved (caller applies left→right and returns that error after prior
+// successes). A non-nil err is only for duplicate detection failures.
+func preflightResolveBringArgs(bringArgs []string, wrkHome string, rawArgs []string) (resolved []string, resolveErrs []error, err error) {
 	seenArg := make(map[string]struct{}, len(bringArgs))
 	for _, a := range bringArgs {
 		if _, ok := seenArg[a]; ok {
-			return fmt.Errorf("wrk: duplicate --bring path: %s", a)
+			return nil, nil, fmt.Errorf("wrk: duplicate --bring path: %s", a)
 		}
 		seenArg[a] = struct{}{}
 	}
+
+	resolved = make([]string, len(bringArgs))
+	resolveErrs = make([]error, len(bringArgs))
 	seenResolved := make(map[string]struct{}, len(bringArgs))
-	for _, a := range bringArgs {
-		p, err := resolveDirArg(a, true, wrkHome, &DirHintOptions{
-			RawArgs: rawArgs,
-			DepMode: true,
-		})
-		if err != nil {
+	hint := &DirHintOptions{RawArgs: rawArgs, DepMode: true}
+
+	for i, a := range bringArgs {
+		p, resErr := resolveDirArg(a, true, wrkHome, hint)
+		if resErr != nil {
 			// Defer hard resolve errors to the ordered bring loop.
-			return nil
+			resolveErrs[i] = resErr
+			return resolved, resolveErrs, nil
 		}
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			return nil
+		abs, absErr := filepath.Abs(p)
+		if absErr != nil {
+			resolveErrs[i] = absErr
+			return resolved, resolveErrs, nil
 		}
 		abs = filepath.Clean(abs)
 		if _, ok := seenResolved[abs]; ok {
-			return fmt.Errorf("wrk: duplicate --bring path: %s", abs)
+			return nil, nil, fmt.Errorf("wrk: duplicate --bring path: %s", abs)
 		}
 		seenResolved[abs] = struct{}{}
+		resolved[i] = abs
 	}
-	return nil
+	return resolved, resolveErrs, nil
 }
 
-// bringOne materializes one dependency worktree and optionally applies replaces.
+// bringOneFromResolved materializes one dependency worktree from an already-
+// resolved absolute dep path and optionally applies replaces.
 // When tidyNow is true, runs go mod tidy after each successful replace (single-bring).
 // When tidyNow is false (multi mid-loop), returns consumer dirs that need tidy later.
-func bringOne(workDir, bringArg, wrkHome string, rawArgs []string, noDep, tidyNow bool) (externalPath string, replacedDirs []string, err error) {
+// Does not call resolveDirArg — preflight already resolved and confirmed basenames.
+func bringOneFromResolved(workDir, depPath string, noDep, tidyNow bool) (externalPath string, replacedDirs []string, err error) {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve cwd: %w", err)
@@ -2490,13 +2535,6 @@ func bringOne(workDir, bringArg, wrkHome string, rawArgs []string, noDep, tidyNo
 	} else {
 		// --bring from non-git cwd: parent for external/ is abs(cwd).
 		consumerTop = cwd
-	}
-	depPath, err := resolveDirArg(bringArg, true, wrkHome, &DirHintOptions{
-		RawArgs: rawArgs,
-		DepMode: true,
-	})
-	if err != nil {
-		return "", nil, err
 	}
 	if _, err := worktree.ResolveMainRepo(depPath); err != nil {
 		return "", nil, err

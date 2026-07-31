@@ -1,11 +1,13 @@
 # Scenario
 
-**Feature**: multiple saved deps with same basename for --bring resolution
+**Feature**: multiple saved deps with same basename for --bring resolution (resolve once)
 
 ```
 # two+ saved dep projects match basename
-TTY + stdin -> numbered select -> --bring succeeds for chosen dep
-non-TTY -> error listing all candidate absolute paths
+# preflight resolves each --bring arg once (TTY Select or non-TTY list error)
+# apply reuses resolved abs path — no second prompt / no double dump
+TTY + stdin -> one numbered select -> --bring succeeds for chosen dep
+non-TTY -> error listing all candidate absolute paths once
 ```
 
 ## Steps
