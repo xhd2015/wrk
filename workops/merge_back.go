@@ -10,22 +10,30 @@ import (
 
 // MergeBack lands a linked worktree into main without removing the worktree.
 // When DryRun is true, plans only (no HEAD or worktree mutations).
-// Sync is reserved for post-land sync composition; when true with DryRun it
-// does not mutate either. Real Sync apply is not required for Phase 1 dry-run.
+// When Sync=true under DryRun, still no mutations (post-land sync is no-op).
+// When Sync=true and not DryRun, runs post-land FF sync (CLI --merge-back --sync parity).
 func MergeBack(ctx context.Context, opts MergeBackOptions) error {
+	_, err := MergeBackFull(ctx, opts)
+	return err
+}
+
+// MergeBackFull is like MergeBack but returns the land outcome for composition
+// (target path, relation, action/message). Aborted confirm returns Action
+// "aborted" with a nil error.
+func MergeBackFull(ctx context.Context, opts MergeBackOptions) (*MergeBackResult, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	if opts.WorktreeDir == "" {
-		return fmt.Errorf("workops: MergeBack requires WorktreeDir")
+		return nil, fmt.Errorf("workops: MergeBack requires WorktreeDir")
 	}
 
 	source, err := resolveCheckoutRoot(opts.WorktreeDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !worktree.IsLinked(source) {
-		return fmt.Errorf("workops: MergeBack requires a linked worktree (%s is not a linked worktree)", source)
+		return nil, fmt.Errorf("workops: MergeBack requires a linked worktree (%s is not a linked worktree)", source)
 	}
 
 	tmpDir := ""
@@ -33,28 +41,62 @@ func MergeBack(ctx context.Context, opts MergeBackOptions) error {
 		tmpDir = filepath.Join(opts.WrkHome, "worktrees")
 	}
 
-	result, err := worktree.MergeBack(worktree.MergeBackOptions{
+	confirm := opts.Confirm
+	if confirm == nil {
+		// Library path is non-interactive: auto-confirm when mutation needs it.
+		confirm = func(plan worktree.MergeBackPlan) (bool, error) {
+			return true, nil
+		}
+	}
+
+	wtResult, err := worktree.MergeBack(worktree.MergeBackOptions{
 		SourcePath: source,
 		TargetPath: "",
 		Remove:     false,
 		DryRun:     opts.DryRun,
 		TmpDir:     tmpDir,
 		StashLabel: "wrk-merge-back",
-		// Library path is non-interactive: auto-confirm when mutation needs it.
-		Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
-			return true, nil
-		},
+		Confirm:    confirm,
 	})
 	if err != nil {
-		return err
-	}
-	if result != nil && result.Action == "aborted" {
-		return nil
+		return nil, err
 	}
 
-	// Sync composition: Phase 1 dry-run leaves set Sync=false. When Sync is
-	// requested under DryRun, do not mutate. Full sync apply is left for a
-	// later phase / caller composition.
-	_ = opts.Sync
-	return nil
+	out := toMergeBackResult(wtResult)
+	if out == nil {
+		return &MergeBackResult{}, nil
+	}
+	if out.Action == "aborted" {
+		return out, nil
+	}
+
+	// Sync composition: DryRun never mutates. Non-dry-run Sync applies
+	// post-land FF bi-directional sync (CLI --merge-back --sync parity).
+	if opts.Sync && !opts.DryRun && out.Action != "dry-run" {
+		mainPath := out.TargetPath
+		if mainPath == "" {
+			mainPath, err = resolveMainRepo(source)
+			if err != nil {
+				return out, fmt.Errorf("workops: MergeBack sync resolve main: %w", err)
+			}
+		}
+		if err := syncLinkedWorktrees(mainPath, syncOptions{DryRun: false, Quiet: true}); err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+func toMergeBackResult(r *worktree.MergeBackResult) *MergeBackResult {
+	if r == nil {
+		return nil
+	}
+	return &MergeBackResult{
+		SourcePath: r.SourcePath,
+		TargetPath: r.TargetPath,
+		Branch:     r.Branch,
+		Relation:   r.Relation,
+		Action:     r.Action,
+		Message:    r.Message,
+	}
 }

@@ -6,27 +6,26 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
-	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/shell/interactive"
+	"github.com/xhd2015/wrk/workops"
 )
 
 // resolveMainRepoForWorkDir returns the main repository root for workDir.
 // Errors match runMain messaging when workDir is not a git checkout.
+// Delegates to workops.WhereMain.
 func resolveMainRepoForWorkDir(workDir string) (string, error) {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve cwd: %w", err)
 	}
-	if !worktree.IsInsideWorkTree(cwd) {
-		return "", fmt.Errorf("%s is not a git repository", cwd)
-	}
-	top, err := worktree.ShowToplevel(cwd)
+	mainRepo, err := workops.WhereMain(cwd)
 	if err != nil {
-		return "", fmt.Errorf("%s is not a git repository", cwd)
-	}
-	mainRepo, err := worktree.ResolveMainRepo(top)
-	if err != nil {
+		// Preserve historical messaging for non-git / not-a-repo paths.
+		if strings.Contains(err.Error(), "is not a git repository") {
+			return "", fmt.Errorf("%s is not a git repository", cwd)
+		}
 		return "", err
 	}
 	return mainRepo, nil

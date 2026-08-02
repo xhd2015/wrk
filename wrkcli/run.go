@@ -27,6 +27,7 @@ import (
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/resolve"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/pathfmt"
 	lessflags "github.com/xhd2015/less-flags"
+	"github.com/xhd2015/wrk/workops"
 	"github.com/xhd2015/wrk/wrkcli/storage"
 	"golang.org/x/term"
 )
@@ -2053,13 +2054,14 @@ func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync
 		return err
 	}
 
-	result, err := worktree.MergeBack(worktree.MergeBackOptions{
-		SourcePath: checkoutRoot,
-		TargetPath: "",
-		Remove:     false,
-		DryRun:     dryRun,
-		TmpDir:     filepath.Join(wrkHome, "worktrees"),
-		StashLabel: "wrk-merge-back",
+	// Land core via workops (Remove=false). Sync/tag-next/push compose stays
+	// in CLI so stage printing and dry-run tip pretends remain correct.
+	// workops Sync is not used here (would mute compose stdout).
+	mb, err := workops.MergeBackFull(context.Background(), workops.MergeBackOptions{
+		WorktreeDir: checkoutRoot,
+		Sync:        false,
+		DryRun:      dryRun,
+		WrkHome:     wrkHome,
 		Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
 			return worktree.PromptConfirmPlan(plan, confirmFromStdin, assumeYes)
 		},
@@ -2067,6 +2069,7 @@ func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync
 	if err != nil {
 		return mapMergeBackSharedError(err, "--merge-back")
 	}
+	result := worktreeMergeBackResultFromOps(mb)
 	// printDryRun already wrote planned commands (no trailing newline).
 	if result.Action == "dry-run" {
 		fmt.Println()
@@ -2081,6 +2084,22 @@ func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync
 		return err
 	}
 	return runComposeReinstallLocal(result, withReinstallLocal, dryRun, colorFlag)
+}
+
+// worktreeMergeBackResultFromOps adapts workops.MergeBackResult for existing
+// compose helpers typed on *worktree.MergeBackResult.
+func worktreeMergeBackResultFromOps(mb *workops.MergeBackResult) *worktree.MergeBackResult {
+	if mb == nil {
+		return &worktree.MergeBackResult{}
+	}
+	return &worktree.MergeBackResult{
+		SourcePath: mb.SourcePath,
+		TargetPath: mb.TargetPath,
+		Branch:     mb.Branch,
+		Relation:   mb.Relation,
+		Action:     mb.Action,
+		Message:    mb.Message,
+	}
 }
 
 // runComposeReinstallLocal runs the optional post-merge reinstall tail from main

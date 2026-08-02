@@ -1,11 +1,13 @@
 package wrkcli
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
+	"github.com/xhd2015/wrk/workops"
 )
 
 // runBarePush implements wrk --push [--dry-run]: push the current checkout's
@@ -29,6 +31,8 @@ func runBarePush(workDir string, dryRun bool) error {
 // (preferred) or origin + branch name (fallback). When tags is non-empty,
 // also pushes those tag refs to the same remote. dryRun prints would: lines
 // only and does not push. Human confirmation / would: lines are printed on stdout.
+//
+// Core network push is workops.Push; CLI keeps would:/pushed printing.
 func runPushMain(mainRepo string, dryRun bool, tags []string) error {
 	return runPushMainWithOutput(mainRepo, dryRun, tags, true)
 }
@@ -60,7 +64,12 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 					fmt.Printf("would: git push %s %s\n", remote, tag)
 				}
 			}
-			return nil
+			// workops.Push DryRun also no-ops when remote missing.
+			return workops.Push(context.Background(), workops.PushOptions{
+				Checkout: mainRepo,
+				DryRun:   true,
+				Tags:     tags,
+			})
 		}
 		return err
 	}
@@ -72,25 +81,20 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 				fmt.Printf("would: git push %s %s\n", remote, tag)
 			}
 		}
-		return nil
+		return workops.Push(context.Background(), workops.PushOptions{
+			Checkout: mainRepo,
+			DryRun:   true,
+			Tags:     tags,
+		})
 	}
 
-	if out, err := gitCombinedRunDir(mainRepo, nil, "push", remote, branch); err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg != "" {
-			return fmt.Errorf("wrk: git push %s %s failed: %s", remote, branch, msg)
-		}
-		return fmt.Errorf("wrk: git push %s %s failed: %w", remote, branch, err)
-	}
-
-	for _, tag := range tags {
-		if out, err := gitCombinedRunDir(mainRepo, nil, "push", remote, tag); err != nil {
-			msg := strings.TrimSpace(string(out))
-			if msg != "" {
-				return fmt.Errorf("wrk: git push %s %s failed: %s", remote, tag, msg)
-			}
-			return fmt.Errorf("wrk: git push %s %s failed: %w", remote, tag, err)
-		}
+	if err := workops.Push(context.Background(), workops.PushOptions{
+		Checkout: mainRepo,
+		DryRun:   false,
+		Tags:     tags,
+	}); err != nil {
+		// Map library errors to wrk: prefix for CLI consistency where useful.
+		return fmt.Errorf("wrk: %w", err)
 	}
 
 	if printOutput {

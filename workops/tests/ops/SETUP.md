@@ -218,6 +218,28 @@ func seedRootBumpRepo(t *testing.T, req *Request) string {
 	return repo
 }
 
+// seedMultiScopeBumpRepo: root v0.0.1 + sub/v0.2.3 at baseline; both scopes
+// owned files change at HEAD → plan v0.0.2 and sub/v0.2.4 (tagscope multi-scope).
+func seedMultiScopeBumpRepo(t *testing.T, req *Request) string {
+	t.Helper()
+	skipIfNoGit(t)
+	repo := filepath.Join(req.WorkRoot, "myrepo")
+	initGitRepoOnMain(t, repo)
+	writeFile(t, filepath.Join(repo, "README.md"), "# root\n")
+	writeFile(t, filepath.Join(repo, "sub", "lib.go"), "package sub\n")
+	runGitIsolated(t, repo, "add", "README.md", "sub/lib.go")
+	runGitIsolated(t, repo, "commit", "-m", "init root and sub")
+	createLightweightTag(t, repo, "v0.0.1", "")
+	createLightweightTag(t, repo, "sub/v0.2.3", "")
+	writeFile(t, filepath.Join(repo, "README.md"), "# root v2\n")
+	writeFile(t, filepath.Join(repo, "sub", "lib.go"), "package sub // changed\n")
+	runGitIsolated(t, repo, "add", "README.md", "sub/lib.go")
+	runGitIsolated(t, repo, "commit", "-m", "bump root and sub")
+	repo = resolvePath(t, repo)
+	req.MainRepo = repo
+	return repo
+}
+
 // seedPushRepoWithOrigin: main on main + bare origin with upstream tracking.
 func seedPushRepoWithOrigin(t *testing.T, req *Request) {
 	t.Helper()
@@ -305,6 +327,7 @@ func workopsEnsureHelpersUsed() {
 	_ = seedMainWithLinkedWorktree
 	_ = seedMainWithAheadWorktree
 	_ = seedRootBumpRepo
+	_ = seedMultiScopeBumpRepo
 	_ = seedPushRepoWithOrigin
 	_ = writeProjectsJSON
 	_ = tagRefExists

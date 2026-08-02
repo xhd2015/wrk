@@ -1,6 +1,7 @@
 package wrkcli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/tagscope"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
+	"github.com/xhd2015/wrk/workops"
 )
 
 // tagNextResult is the outcome of a tag-next plan/apply for composition.
@@ -23,8 +25,9 @@ type tagNextResult struct {
 
 // runTagNext plans/applies per-scope release tags at HEAD of the resolved main
 // repo. Returns created tag names (or planned names on dry-run). The push
-// parameter is passed to tagscope.Apply; bare --tag-next --push and pipeline
-// composition pass push=false and publish branch+tags via runPushMain instead.
+// parameter requests tag-only push after apply (legacy tagscope.Apply Push);
+// bare --tag-next --push and pipeline composition pass push=false and publish
+// branch+tags via runPushMain instead.
 func runTagNext(workDir string, dryRun, push, jsonOut bool) ([]string, error) {
 	res, err := runTagNextAtResult(workDir, "HEAD", dryRun, push, jsonOut)
 	if err != nil {
@@ -46,6 +49,9 @@ func runTagNextAt(workDir, headRef string, dryRun, push, jsonOut bool) ([]string
 
 // runTagNextAtResult is the full tag-next outcome including the plan for
 // composition with --propagate-tags dry-run (planned next releases).
+//
+// Core plan/apply is workops.TagNextAll; CLI keeps print/JSON formatting and
+// optional tag-only push (legacy push flag).
 func runTagNextAtResult(workDir, headRef string, dryRun, push, jsonOut bool) (tagNextResult, error) {
 	var out tagNextResult
 	cwd, err := filepath.Abs(workDir)
@@ -67,38 +73,67 @@ func runTagNextAtResult(workDir, headRef string, dryRun, push, jsonOut bool) (ta
 		headRef = "HEAD"
 	}
 
+	// Plan for human/JSON format and propagate composition (Plan field).
 	plan, collected, err := tagscope.Plan(mainRepo, headRef)
 	if err != nil {
 		return out, err
 	}
 	out.Plan = plan
 
-	result, err := tagscope.Apply(mainRepo, plan, headRef, tagscope.ApplyOptions{
-		DryRun: dryRun,
-		Push:   push,
+	// Core apply / dry-run multi-scope tags via workops.
+	core, err := workops.TagNextAll(context.Background(), workops.TagNextOptions{
+		Checkout: mainRepo,
+		DryRun:   dryRun,
+		HeadRef:  headRef,
 	})
 	if err != nil {
 		return out, err
 	}
+	if core.MainRepo != "" {
+		out.MainRepo = core.MainRepo
+	}
+	out.Tags = core.Tags
+	if len(out.Tags) == 0 && dryRun {
+		// Fallback to plan names if TagNextAll returned empty without error
+		// (should not happen; keeps compose resilient).
+		out.Tags = plannedTagNames(plan)
+	}
+
+	// Legacy: tagscope.Apply Push=true pushed tag refs only (not branch).
+	// Pipeline composition uses push=false + runPushMain for branch+tags.
+	if push && !dryRun {
+		for _, tag := range out.Tags {
+			if tag == "" {
+				continue
+			}
+			if pout, gerr := gitCombinedRunDir(mainRepo, nil, "push", "origin", tag); gerr != nil {
+				msg := strings.TrimSpace(string(pout))
+				if msg != "" {
+					return out, fmt.Errorf("wrk: git push origin %s failed: %s", tag, msg)
+				}
+				return out, fmt.Errorf("wrk: git push origin %s failed: %w", tag, gerr)
+			}
+		}
+	}
+
+	createdCount := 0
+	if !dryRun {
+		createdCount = len(out.Tags)
+	}
 
 	if jsonOut {
-		formatted, err := tagscope.FormatPlanJSON(plan, collected, dryRun, len(result.Created))
+		formatted, err := tagscope.FormatPlanJSON(plan, collected, dryRun, createdCount)
 		if err != nil {
 			return out, err
 		}
 		fmt.Print(formatted)
-		if dryRun {
-			out.Tags = plannedTagNames(plan)
-			return out, nil
-		}
-		out.Tags = result.Created
 		return out, nil
 	}
 
 	var b strings.Builder
 	b.WriteString(tagscope.FormatPlanHuman(plan, collected))
-	if !dryRun && len(result.Created) > 0 {
-		tagged, err := tagscope.FormatTaggedLines(mainRepo, headRef, result.Created)
+	if !dryRun && len(out.Tags) > 0 {
+		tagged, err := tagscope.FormatTaggedLines(mainRepo, headRef, out.Tags)
 		if err != nil {
 			return out, err
 		}
@@ -107,12 +142,6 @@ func runTagNextAtResult(workDir, headRef string, dryRun, push, jsonOut bool) (ta
 	b.WriteString(tagscope.FormatPlanSummary(plan, dryRun))
 	b.WriteByte('\n')
 	fmt.Fprint(os.Stdout, b.String())
-	if dryRun {
-		// Return planned names so composition --push --dry-run can list would: tag pushes.
-		out.Tags = plannedTagNames(plan)
-		return out, nil
-	}
-	out.Tags = result.Created
 	return out, nil
 }
 
