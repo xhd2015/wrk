@@ -129,6 +129,10 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	// Bare --gen-commit-msg (no pipeline partner): exclusive early path.
 	// With --done / --merge-back / other pipeline stages: peel library flags and
 	// run as stage 1 of activeRoot compose later.
+	// Message sources are XOR: AI (--gen-commit-msg) vs manual (-m/--message).
+	if hasArg(args, "--gen-commit-msg") && hasMessageFlag(args) {
+		return fmt.Errorf("wrk: --message is mutually exclusive with --gen-commit-msg")
+	}
 	// --main is never valid with --gen-commit-msg (named reject before bare gen path).
 	if hasArg(args, "--gen-commit-msg") && hasArg(args, "--main") {
 		return fmt.Errorf("wrk: --main is not valid with --gen-commit-msg")
@@ -185,6 +189,12 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var mainFlag bool
 	var unwind bool
 	var execArgs []string
+	// Manual commit message path: --commit -m/--message (wrk-owned; not AI gen).
+	// When --gen-commit-msg peels --commit/--no-verify/--add-all, those stay in genArgs.
+	var commitFlag bool
+	var commitMessage *string
+	var noVerify bool
+	var addAll bool
 	// Create UX one-shot flags.
 	var newFlag bool // --new: explicit create entry (former bare create)
 	var newWindow bool
@@ -244,6 +254,10 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		String("--comment", &prComment).
 		Bool("--json", &jsonFlag).
 		Bool("--dry-run", &dryRun).
+		Bool("--commit", &commitFlag).
+		String("-m,--message", &commitMessage).
+		Bool("--no-verify", &noVerify).
+		Bool("--add-all", &addAll).
 		Bool("--new", &newFlag).
 		Bool("--new-window", &newWindow).
 		Bool("--no-new-window", &noNewWindow).
@@ -284,6 +298,31 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if forceCd && noCd {
 		return fmt.Errorf("wrk: --force-cd and --no-cd are mutually exclusive")
 	}
+
+	// Manual commit message validation (order matches sealed commit-msg/validation intents).
+	// Gen path peels --commit/--no-verify/--add-all; those flags then stay off top-level.
+	// XOR with gen is checked early (before peel) when both appear on the raw argv.
+	if commitMessage != nil && !commitFlag {
+		return fmt.Errorf("wrk: -m/--message requires --commit")
+	}
+	if commitFlag && !genCommitMsg && commitMessage == nil {
+		return fmt.Errorf("wrk: --commit requires -m/--message or --gen-commit-msg")
+	}
+	manualMessage := ""
+	if commitMessage != nil {
+		manualMessage = *commitMessage
+		if strings.TrimSpace(manualMessage) == "" {
+			return fmt.Errorf("wrk: commit message must not be empty")
+		}
+	}
+	if noVerify && !commitFlag && !genCommitMsg {
+		return fmt.Errorf("wrk: --no-verify requires --commit")
+	}
+	if addAll && !commitFlag && !genCommitMsg {
+		return fmt.Errorf("wrk: --add-all requires --commit")
+	}
+	// True when wrk should run the manual commit stage (message source present + --commit).
+	manualCommit := commitFlag && commitMessage != nil && !genCommitMsg
 
 	taskFlagSet := taskDesc != nil
 	setTaskFlagSet := setTaskDesc != nil
@@ -834,7 +873,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			spawnTarget != "" || jsonFlag || fetchFlag
 		if done || mergeBack {
 			// Primary compose: post stages and done modifiers are allowed.
-		} else if !tagNext && !propagateTags && !syncFlag && !pushFlag && !genCommitMsg && !hasExec {
+		} else if !tagNext && !propagateTags && !syncFlag && !pushFlag && !genCommitMsg && !manualCommit && !hasExec {
 			// Bare / --main reinstall only: exclusive with primary-only modifiers.
 			otherMode = otherMode || confirmFromStdin || forceConfirm || noInModuleReplace || noCd || forceCd
 		} else {
@@ -914,14 +953,27 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if jsonFlag && !tagNext {
 		return fmt.Errorf("wrk: --json is only valid with --tag-next")
 	}
-	if jsonFlag && tagNext && (syncFlag || reinstallLocal || genCommitMsg || hasExec) {
+	if jsonFlag && tagNext && (syncFlag || reinstallLocal || genCommitMsg || manualCommit || hasExec) {
 		return fmt.Errorf("wrk: --json is not valid with multi-stage compose (only with bare --tag-next)")
 	}
 	// --dry-run is valid with bare --sync / --tag-next / --propagate-tags /
 	// --reinstall-local / --push, with --done / --merge-back composition (full multi-stage plan is later phases),
-	// with --unwind (stack peel plan), and with --gen-commit-msg (handled early via runGenCommitMsg).
-	if dryRun && !done && !mergeBack && !tagNext && !propagateTags && !syncFlag && !reinstallLocal && !pushFlag && !unwind {
-		return fmt.Errorf("wrk: --dry-run is only valid with --done, --merge-back, --tag-next, --propagate-tags, --sync, --reinstall-local, --push, --unwind, or --gen-commit-msg")
+	// with --unwind (stack peel plan), with --gen-commit-msg (handled early via runGenCommitMsg),
+	// and with manual --commit -m/--message.
+	if dryRun && !done && !mergeBack && !tagNext && !propagateTags && !syncFlag && !reinstallLocal && !pushFlag && !unwind && !manualCommit {
+		return fmt.Errorf("wrk: --dry-run is only valid with --done, --merge-back, --tag-next, --propagate-tags, --sync, --reinstall-local, --push, --unwind, --gen-commit-msg, or --commit -m/--message")
+	}
+
+	// Manual --commit -m is a pipeline stage (same partners as gen-commit-msg).
+	// Exclusive with non-pipeline modes (status/list/create/etc.).
+	if manualCommit {
+		otherMode := list || status || repos || projects || projectsDepGraph ||
+			addFlagSet || removeFlagSet || whereFlagSet || bringMode ||
+			taskFlagSet || setTaskFlagSet || cd || mainFlag ||
+			newFlag || webFlag || scanGitRepos || spawnTarget != "" || jsonFlag || fetchFlag
+		if otherMode {
+			return fmt.Errorf("wrk: --commit is mutually exclusive with other modes")
+		}
 	}
 
 	// spawnTarget only applies to the create path. Reject for any other mode.
@@ -1002,7 +1054,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	}
 	// Bare / --main --reinstall-local before bare --main so compose does not open a nested shell.
 	// Multi-stage reinstall is handled by activeRoot pipeline below.
-	if reinstallLocal && !done && !mergeBack && !genCommitMsg && !syncFlag && !tagNext && !pushFlag && !propagateTags && !hasExec {
+	if reinstallLocal && !done && !mergeBack && !genCommitMsg && !manualCommit && !syncFlag && !tagNext && !pushFlag && !propagateTags && !hasExec {
 		return runReinstallLocal(workDir, dryRun, mainFlag, colorFlag)
 	}
 	// --cd: resolve target (or with --main, main repo of cwd) then jump.
@@ -1051,19 +1103,22 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	}
 	// Prefer done / merge-back over bare tag-next / propagate / sync so composition
 	// runs the primary path (post-pipeline: sync → tag-next → push → propagate-tags → reinstall-local).
-	// Optional pre-stage: --gen-commit-msg --commit … on the source worktree.
+	// Optional pre-stage: --gen-commit-msg --commit … or manual --commit -m on the source worktree.
 	// After successful done/merge-back, activeRoot switches to main for later stages.
 	if done {
 		if err := runGenCommitMsgPreStage(workDir, genCommitMsg, genCommitArgs, dryRun, "--done"); err != nil {
+			return err
+		}
+		if err := runManualCommitPreStage(workDir, manualCommit, manualMessage, noVerify, addAll, dryRun); err != nil {
 			return err
 		}
 		runPrimary := func() error {
 			// Own keeps default auto-yes; cascade not-included requires -y or explicit confirm (D3).
 			return runDone(workDir, wrkHome, confirmFromStdin, assumeYes, forceConfirm, noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
 		}
-		// Dry-run gen-commit pre would commit staged dirt; MergeBack --rm still
+		// Dry-run gen/manual commit pre would commit staged dirt; MergeBack --rm still
 		// requires a clean tree today. Stash staged only for the dry plan, then restore.
-		if dryRun && genCommitMsg {
+		if dryRun && (genCommitMsg || manualCommit) {
 			return withStashedStagedForDryPlan(workDir, runPrimary)
 		}
 		return runPrimary()
@@ -1072,15 +1127,18 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		if err := runGenCommitMsgPreStage(workDir, genCommitMsg, genCommitArgs, dryRun, "--merge-back"); err != nil {
 			return err
 		}
+		if err := runManualCommitPreStage(workDir, manualCommit, manualMessage, noVerify, addAll, dryRun); err != nil {
+			return err
+		}
 		// merge-back keeps the worktree (Remove=false); dirty is allowed by MergeBack.
 		// Default auto-yes; --confirm restores prompts; -y still auto-yes.
 		return runMergeBack(workDir, wrkHome, confirmFromStdin, planAssumeYes(assumeYes, forceConfirm), syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
 	}
 	// Multi-stage without done/merge-back: fixed order on activeRoot (= cwd toplevel).
-	// Stages: gen-commit → sync → tag-next → push → pr → propagate-tags → reinstall-local → exec.
+	// Stages: gen-commit|manual-commit → sync → tag-next → push → pr → propagate-tags → reinstall-local → exec.
 	{
 		stageN := 0
-		if genCommitMsg {
+		if genCommitMsg || manualCommit {
 			stageN++
 		}
 		if syncFlag {
@@ -1117,7 +1175,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 					comment = *prComment
 				}
 			}
-			return runActiveRootPipeline(workDir, wrkHome, genCommitMsg, genCommitArgs, syncFlag, tagNext, pushFlag, prFlag, title, comment, propagateTags, reinstallLocal, dryRun, colorFlag, execArgs)
+			return runActiveRootPipeline(workDir, wrkHome, genCommitMsg, genCommitArgs, manualCommit, manualMessage, noVerify, addAll, syncFlag, tagNext, pushFlag, prFlag, title, comment, propagateTags, reinstallLocal, dryRun, colorFlag, execArgs)
 		}
 	}
 	// Bare compose: --tag-next --propagate-tags [--push] [--dry-run].
@@ -1169,6 +1227,11 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			return runPRComment(workDir, *prComment, colorFlag)
 		}
 		return runPR(workDir, *prTitle, *prComment, colorFlag)
+	}
+	// Bare manual commit: --commit -m/--message (no pipeline partners).
+	if manualCommit {
+		ctx.command = "commit"
+		return runManualCommitStage(workDir, manualMessage, noVerify, addAll, dryRun)
 	}
 	task := ""
 	if taskDesc != nil {
@@ -1242,12 +1305,12 @@ Positional arguments:
 
 Flags:
   --new                           create a worktree (explicit create entry)
-  --done [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm] [--confirm-from-stdin]
+  --done [--gen-commit-msg --commit … | --commit -m MSG] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm] [--confirm-from-stdin]
                                   merge worktree branch back and remove it (default auto-yes)
-                                  (optional pre: --gen-commit-msg --commit … on worktree; optional post-success: --sync, --tag-next, --push, --propagate-tags, --reinstall-local from main)
-  --merge-back [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm] [--confirm-from-stdin]
+                                  (optional pre: gen or manual --commit -m on worktree; optional post-success: --sync, --tag-next, --push, --propagate-tags, --reinstall-local from main)
+  --merge-back [--gen-commit-msg --commit … | --commit -m MSG] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] [--confirm] [--confirm-from-stdin]
                                   merge worktree branch back WITHOUT removing it (default auto-yes)
-                                  (optional pre: --gen-commit-msg --commit … on worktree; optional post-success: --sync, --tag-next, --push, --propagate-tags, --reinstall-local from main)
+                                  (optional pre: gen or manual --commit -m on worktree; optional post-success: --sync, --tag-next, --push, --propagate-tags, --reinstall-local from main)
   --done --no-in-module-replace   block --done on ANY local replace (strict)
   --list                          list worktrees (git worktree list)
   --status                        show status for git repos under this checkout
@@ -1287,7 +1350,7 @@ Flags:
                                   compose dry-run uses planned next tags when with --tag-next)
   --sync [--dry-run]              FF-only bi-directional sync main ↔ linked worktrees
                                   (also: after successful --done / --merge-back)
-  --dry-run                       with --done/--merge-back/--tag-next/--propagate-tags/--sync/--push/--reinstall-local/--unwind/--gen-commit-msg: plan only
+  --dry-run                       with --done/--merge-back/--tag-next/--propagate-tags/--sync/--push/--reinstall-local/--unwind/--gen-commit-msg/--commit -m: plan only
   --push                          push current checkout branch to upstream/origin;
                                   with --done/--merge-back: push main branch (and tags when with --tag-next);
                                   with --tag-next: also push newly created tags (branch + tags);
@@ -1299,8 +1362,8 @@ Flags:
                                   with --title and --comment: create or attach a PR (requires gh);
                                   ensures remote head branch on create/attach (push only if missing);
                                   new PR: title + comment as initial body; existing: title ignored, comment added;
-                                  compose: [--gen-commit-msg --commit …] [--push] --pr --title T --comment C
-                                  (order: gen-commit → push → pr; with --push full-pushes tip before PR path)
+                                  compose: [--gen-commit-msg --commit … | --commit -m MSG] [--push] --pr --title T --comment C
+                                  (order: commit → push → pr; with --push full-pushes tip before PR path)
   --title <title>                 with --pr create/attach: PR title (required, non-empty; only used on create)
   --comment <body>                with --pr: comment-only body, or create/attach initial body / additive comment
   --json                          with bare --tag-next only: machine-readable plan/result on stdout
@@ -1323,11 +1386,16 @@ Flags:
   --no-open-in-agent              disable agent UX for this run
   --no-config                     do not read $WRK_HOME/config.json for this run
   --exec <cmd> [args...]          after success, run command in the mode target directory
+  --commit -m, --message MSG      commit staged changes with MSG (manual; no AI); requires --commit;
+                                  exclusive with --gen-commit-msg; optional --no-verify, --add-all, --dry-run;
+                                  also: pre-stage before --done / --merge-back / --pr / pipeline partners
+  --no-verify                     with --commit: skip git commit hooks
+  --add-all                       with --commit: stage all (git add -A) before commit
   --gen-commit-msg [--dir DIR] [--model MODEL] [--agent-runner RUNNER]
                   [--agent-runner-binary PATH] [--commit] [--no-verify] [--dry-run]
                                   generate a commit message for staged changes (AI);
-                                  also: pre-stage before --done / --merge-back / --pr (requires --commit
-                                  with primary; --dir not valid when composed)
+                                  exclusive with -m/--message; also: pre-stage before --done /
+                                  --merge-back / --pr (requires --commit with primary; --dir not valid when composed)
 
   --web                           start local web UI (React SPA + API on 127.0.0.1)
   --port PORT                     listen port for --web only (default: free port from 8080)
@@ -1795,13 +1863,13 @@ func requireMainActiveRoot(workDir, flag string) error {
 
 // runActiveRootPipeline runs multi-stage compose without --done/--merge-back.
 // activeRoot stays the git toplevel of workDir for the whole run.
-// Stage order: gen-commit → sync → tag-next → push → pr → propagate-tags → reinstall-local → exec.
+// Stage order: gen-commit|manual-commit → sync → tag-next → push → pr → propagate-tags → reinstall-local → exec.
 // --tag-next is gated to main activeRoot; other stages OK on linked worktrees.
 // When withPush and withPR and title set: full branch push first, then runPR
 // (ensure-push is a no-op once remote tip already matches after the push stage).
 // When withPush and withPR and title empty: push-existing / push+comment —
 // list open PR first, then full tip push, then optional comment + URL.
-func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommitArgs []string, withSync, withTagNext, withPush, withPR bool, prTitle, prComment string, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool, execArgs []string) error {
+func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommitArgs []string, manualCommit bool, manualMessage string, noVerify, addAll, withSync, withTagNext, withPush, withPR bool, prTitle, prComment string, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool, execArgs []string) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -1837,6 +1905,12 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 
 	if genCommitMsg {
 		if err := runGenCommitMsgStage(activeRoot, genCommitArgs, dryRun); err != nil {
+			return err
+		}
+		printed = true
+	}
+	if manualCommit {
+		if err := runManualCommitStage(activeRoot, manualMessage, noVerify, addAll, dryRun); err != nil {
 			return err
 		}
 		printed = true
