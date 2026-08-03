@@ -10,7 +10,7 @@ stack (root + nested external/*) + go require edges
   -> missing pin flags with edges? Error naming --tag-next/--push
   -> else would: peel <display-path>… free-first among dirty pending
   -> gen-commit: would: git add -A and/or leave-N as flags/porcelain
-  -> apply (no --dry-run): peel free-first + pin; banner uses display-path
+  -> apply (no --dry-run): peel free-first + pin at in-scope Path (not MainRepo remap)
 ```
 
 ## Preconditions
@@ -22,12 +22,12 @@ stack (root + nested external/*) + go require edges
   `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/wrk` (file-locked) for fixture
   create / worktree helpers when needed.
 - Apply fixtures use local bare remotes + optional `file://` module proxy (no network).
-- New display/add-all/leave-N contracts are Classic TDD (**RED** until implementer lands).
+- Pin-on-linked-consumer contracts are Classic TDD (**RED** until pin uses Path).
 
 ## Steps
 
 1. Root `Setup` creates isolated `{WorkRoot}` and `{WorkRoot}/.wrk`.
-2. Leaves seed stack fixtures (single main, 3-repo chain, 2-repo apply, or 2-cycle)
+2. Leaves seed stack fixtures (single main, 3-repo chain, 2-repo apply, linked-consumer pin, or 2-cycle)
    and set `req.Args` / `req.RepoDir` / `req.PeelOrder` (display paths) / apply fields.
 3. Root `Run` invokes wrk via `wrkcli.Capture` when `InProcess` (default for leaves).
 
@@ -37,6 +37,10 @@ stack (root + nested external/*) + go require edges
   `RepoDir` / invocation cwd — e.g. `external/dot-pkgs-main-2026-06-30`, `.` for
   primary at cwd. Assert via `would: peel <display-path>` and apply banner.
 - DAG identity uses MainRepo abs; human pin short names remain basenames.
+- **Pin target** = in-scope StackMember **Path** (primary + nested externals).
+  Linked-consumer fixtures materialize **both** consumer main (baseline go.mod)
+  and consumer linked WT (require + replace); asserts prove main baseline
+  untouched and WT pinned.
 - Dirtiness v1: untracked file `DIRTY` under a stack checkout path (counts as N=1
   not-fully-staged for leave-N when not staged).
 - Apply leaf fixtures also commit **ahead-of-main** work on linked WTs so land
@@ -997,13 +1001,45 @@ func enableFileModuleProxy(t *testing.T, req *Request, proxyRoot string) {
 	)
 }
 
+// appendLocalReplace appends a relative replace directive to dir/go.mod.
+func appendLocalReplace(t *testing.T, dir, modulePath, relTarget string) {
+	t.Helper()
+	path := filepath.Join(dir, "go.mod")
+	content := readFile(t, path)
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += fmt.Sprintf("replace %s => %s\n", modulePath, filepath.ToSlash(relTarget))
+	writeFile(t, path, content)
+}
+
+// snapshotBaselineFile copies src into {WorkRoot}/_unwind_baseline/{name}.
+func snapshotBaselineFile(t *testing.T, req *Request, name, srcPath string) {
+	t.Helper()
+	dir := filepath.Join(req.WorkRoot, "_unwind_baseline")
+	mkdirAll(t, dir)
+	writeFile(t, filepath.Join(dir, name), readFile(t, srcPath))
+}
+
+// assertBaselineFileUnchanged fails if path content differs from the named snapshot.
+func assertBaselineFileUnchanged(t *testing.T, req *Request, name, path string) {
+	t.Helper()
+	want := readFile(t, filepath.Join(req.WorkRoot, "_unwind_baseline", name))
+	got := readFile(t, path)
+	if got != want {
+		t.Fatalf("%s mutated (expected baseline unchanged):\n--- want ---\n%s\n--- got ---\n%s",
+			path, want, got)
+	}
+}
+
 // setupApplyLeafPinStack builds a 2-repo apply fixture:
 //
 //	leaf (dot-pkgs) main: tagged v0.0.1, bare origin, post-tag content for v0.0.2
 //	leaf linked WT under root/external: commits ahead + DIRTY (pending + landable)
 //	root main: requires leaf@v0.0.1, imports package; stays on main (pin target)
 //
-// RepoDir = root main. Flags set by leaf. Seeds modproxy for tidy after pin.
+// RepoDir = root main (primary Path == MainRepo → pin-when-primary-is-main).
+// Flags set by leaf. Seeds modproxy for tidy after pin.
 func setupApplyLeafPinStack(t *testing.T, req *Request) {
 	t.Helper()
 
@@ -1080,6 +1116,99 @@ func setupApplyLeafPinStack(t *testing.T, req *Request) {
 	setPeelOrderDisplays(t, req, leafExt)
 }
 
+// setupApplyLinkedConsumerPinStack builds the key pin-scope fixture:
+//
+//	leaf main: tagged v0.0.1, bare origin; feature content for v0.0.2 on linked WT
+//	root **main** (outside scope when invoking from WT): require leaf@v0.0.1, **no**
+//	  replace — baseline go.mod snapshotted before run
+//	root **linked WT** (stack primary / RepoDir): require + replace → nested leaf
+//	  external; clean porcelain after fixture
+//	leaf linked WT under root-WT/external: ahead + DIRTY (pending peel)
+//
+// After peel+pin: Path (linked consumer) go.mod pinned; MainRepo go.mod unchanged.
+// Current product remaps pin to MainRepo → RED until Path is the pin target.
+func setupApplyLinkedConsumerPinStack(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- leaf main: baseline tag + origin ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+
+	bare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, bare)
+	runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	req.OriginBare = bare
+
+	// --- root consumer main: baseline require only (no replace) ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer main")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	// Snapshot main go.mod before linked WT diverges (pin must not mutate main).
+	snapshotBaselineFile(t, req, "consumer-main.go.mod", filepath.Join(rootMain, "go.mod"))
+
+	// Linked consumer worktree = stack primary (Path ≠ MainRepo).
+	wtDir := runWrkBin(t, req, rootMain, "--new")
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	// Nest leaf linked WT under consumer WT/external (in-scope nested external).
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate(), leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+
+	// Commit ahead on leaf WT (owned change → tag-next plans v0.0.2 after land).
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, leafExt, "add", "pkg.go")
+	runGitIsolated(t, leafExt, "commit", "-m", "leaf feature for next tag")
+	markDirty(t, leafExt)
+
+	// Linked consumer Path: stack replace to nested external (main has no replace).
+	relReplace := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, "./"+relReplace)
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	runGitIsolated(t, wtDir, "add", "go.mod", ".gitignore")
+	runGitIsolated(t, wtDir, "commit", "-m", "stack replace + ignore external")
+
+	// Offline module proxy for pin+tidy.
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyNextTag, leafExt)
+	oldSeed := filepath.Join(req.WorkRoot, "seed-old-"+unwindApplyOldTag)
+	mkdirAll(t, oldSeed)
+	writeGoModRequire(t, oldSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(oldSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyOldTag, oldSeed)
+	enableFileModuleProxy(t, req, proxyRoot)
+
+	req.RepoDir = wtDir
+	setPeelOrderDisplays(t, req, leafExt)
+}
+
 // setupApplyAlreadyMainRootBump: sole root main, tagged v0.0.1, owned change at HEAD,
 // bare origin, porcelain DIRTY for pending. No stack edges → no land flags required.
 // Args set by leaf: --unwind --tag-next --push.
@@ -1138,6 +1267,7 @@ func assertOriginMainEqualsLocalMain(t *testing.T, mainRepo, originBare string) 
 
 func assertConsumerPinned(t *testing.T, req *Request) {
 	t.Helper()
+	// pin-when-primary-is-main: Path == MainRepo == RepoDir; pin edits that go.mod.
 	if req.MainRepo == "" || req.LeafModulePath == "" {
 		t.Fatal("MainRepo and LeafModulePath required for pin assert")
 	}
@@ -1150,6 +1280,40 @@ func assertConsumerPinned(t *testing.T, req *Request) {
 	if goModHasReplace(t, goMod, req.LeafModulePath) {
 		t.Fatalf("consumer go.mod still has replace for %s:\n%s",
 			req.LeafModulePath, readFile(t, goMod))
+	}
+}
+
+// assertLinkedConsumerPathPinned checks pin on the linked consumer Path (WtDir),
+// not MainRepo. Require ExpectedPinVersion; no local replace for the leaf module.
+func assertLinkedConsumerPathPinned(t *testing.T, req *Request) {
+	t.Helper()
+	if req.WtDir == "" || req.LeafModulePath == "" {
+		t.Fatal("WtDir and LeafModulePath required for linked-consumer pin assert")
+	}
+	goMod := filepath.Join(req.WtDir, "go.mod")
+	got := requireVersionInGoMod(t, goMod, req.LeafModulePath)
+	if got != req.ExpectedPinVersion {
+		t.Fatalf("linked consumer Path go.mod require %s = %q, want %s\ngo.mod:\n%s",
+			req.LeafModulePath, got, req.ExpectedPinVersion, readFile(t, goMod))
+	}
+	if goModHasReplace(t, goMod, req.LeafModulePath) {
+		t.Fatalf("linked consumer Path go.mod still has replace for %s:\n%s",
+			req.LeafModulePath, readFile(t, goMod))
+	}
+}
+
+// assertConsumerMainGoModUnchanged proves MainRepo go.mod was not used as pin target.
+func assertConsumerMainGoModUnchanged(t *testing.T, req *Request) {
+	t.Helper()
+	if req.MainRepo == "" {
+		t.Fatal("MainRepo required for main go.mod baseline assert")
+	}
+	assertBaselineFileUnchanged(t, req, "consumer-main.go.mod", filepath.Join(req.MainRepo, "go.mod"))
+	// Extra surface: still at old require (baseline may only have old tag).
+	got := requireVersionInGoMod(t, filepath.Join(req.MainRepo, "go.mod"), req.LeafModulePath)
+	if req.OldRequireVersion != "" && got != req.OldRequireVersion {
+		t.Fatalf("consumer MainRepo go.mod require %s = %q, want baseline %s",
+			req.LeafModulePath, got, req.OldRequireVersion)
 	}
 }
 
@@ -1179,6 +1343,7 @@ func unwindEnsureHelpersUsed() {
 	_ = dirtyMidAndRoot
 	_ = setupTwoCycleStack
 	_ = setupApplyLeafPinStack
+	_ = setupApplyLinkedConsumerPinStack
 	_ = setupApplyAlreadyMainRootBump
 	_ = recordUnwindBaseline
 	_ = readBaselineSHA
@@ -1195,6 +1360,11 @@ func unwindEnsureHelpersUsed() {
 	_ = assertNotContains
 	_ = assertFileNotExists
 	_ = assertConsumerPinned
+	_ = assertLinkedConsumerPathPinned
+	_ = assertConsumerMainGoModUnchanged
+	_ = appendLocalReplace
+	_ = snapshotBaselineFile
+	_ = assertBaselineFileUnchanged
 	_ = assertLeafMainAdvancedAndTagged
 	_ = assertLocalTagAtMainHEAD
 	_ = assertOriginMainEqualsLocalMain

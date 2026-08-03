@@ -13,10 +13,11 @@ Decision tree for **stack unwind**:
 - **Apply:** non-dry-run peels free-first with **explicit** ship/land flags;
   after shipping a dep that has stack consumers, **Pin** consumers to live tags
   and `go mod tidy`. Soft reinstall remains P1.
-- **This cycle (Classic TDD):** peel **display path** = relative path of peel
-  **checkout** vs invocation cwd (same policy as status `Dir:`); dry-run
-  reflects `--add-all` / leave-N under gen-commit; apply stages only when
-  `--add-all`; apply banner uses the same display path.
+- **This cycle (Classic TDD):** **pin consumers at in-scope StackMember.Path**
+  (primary checkout + nested external repos under it — status scan), **not**
+  remapped to `MainRepo` when Path is a linked/nested checkout whose MainRepo
+  lies outside the current scope. Peel display / dry-run add-all / leave-N /
+  apply banner contracts from prior cycles remain.
 
 **Layer:** **L2** — in-process CLI via `wrkcli.Capture` (`req.InProcess=true`).
 Fixture setup may use session-built `wrk` for `--new` / worktree materialization.
@@ -77,8 +78,15 @@ non-unwind compose dry-run redesign.
      reinstall **soft** (P1).
   4. After peeling **U** that has stack consumers: for each consumer **C**
      depending on U, for each module of U that C requires/replaces:
-     `Pin(…)`; then `go mod tidy` in consumer module dirs.
+     `Pin(…)` at **C's in-scope StackMember.Path** (the checkout discovered
+     in the current stack inventory — primary ShowToplevel and nested
+     externals). **Do not** rewrite the pin target to `C.MainRepo` when
+     Path is a linked/nested checkout and MainRepo is outside this scope.
+     When the scope primary *is* main, Path is main (in scope) and pin
+     **does** edit that path. Then `go mod tidy` in those consumer module dirs.
   5. Prefer tags created by this peel's tag-next; else latest on main.
+     (Dep land/tag/push still use peeled dep **main** after merge — not changed
+     by this pin-path rule.)
   6. `--done` removes worktree as usual.
   7. Fail-fast on hard errors (land/tag/push/pin/tidy); reinstall soft.
   8. Apply banner: `==== unwind: peel <display-path> ====` (same display as dry-run).
@@ -100,9 +108,10 @@ non-unwind compose dry-run redesign.
   - Tail: `would: reinstall local binaries` when `--reinstall-local`.
   - Trailing newline on plan; exit **0**; **zero mutations**.
 - **Apply asserts** — side effects over multi-stage stdout. Prefer: tags on
-  leaf main / bare origin, consumer `go.mod` require version, worktree
-  presence/absence, main HEAD advanced, zero mutation on cycle reject, banner
-  display path, staging honor for `--add-all`.
+  leaf main / bare origin, consumer **Path** `go.mod` require version (and
+  separate consumer **MainRepo** `go.mod` baseline when Path ≠ MainRepo),
+  worktree presence/absence, main HEAD advanced, zero mutation on cycle reject,
+  banner display path, staging honor for `--add-all`.
 - **Error surfaces**  
   - Cycle: combined stderr/stdout contains `cycle`; exit ≠ 0; no mutations.  
   - Missing pin flags when edges exist: names `--tag-next` and `--push`; exit ≠ 0.
@@ -133,7 +142,8 @@ unwind/
 │       ├── leave-uncommitted/            # no --add-all + unstaged/untracked → leave-N
 │       └── leave-skipped-when-fully-staged/  # only staged → no leave-N line
 ├── apply/                                # non-dry-run peel / pin
-│   ├── leaf-then-pin/                    # peel + pin; banner uses rel display path
+│   ├── leaf-then-pin/                    # pin when primary Path == main (in scope)
+│   ├── pin-on-linked-consumer-not-main/  # pin Path=linked WT; MainRepo go.mod untouched
 │   ├── already-main-no-land/             # single main; tag-next+push; no land
 │   └── done-removes-leaf-wt/             # --done peels leaf; external path gone
 └── cycle/
@@ -145,25 +155,26 @@ Split factor (MECE, significance-first):
 
 1. **Mode** — dry-run plan | apply mutation | cycle preflight.
 2. Within dry-run: **order/skip/flags** | **gen-commit staging vocabulary**.
-3. Within apply: **pin-after-peel (+ banner path)** | **already-main no land** | **done removes WT**.
+3. Within apply: **pin target Path (main-primary | linked-primary)** | **already-main no land** | **done removes WT**.
 4. Cycle: dry-run vs apply-mode (same reject, no mutations).
 
 ## Test Case Index
 
 | # | Leaf | Description | Expect |
 |---|------|-------------|--------|
-| D1 | dry-run/free-first-order | 3-repo dirty; peel order external leaf → external mid → `.`; zero mutations | **RED** until rel display |
-| D2 | dry-run/single-repo-no-edges | sole main dirty; `would: peel .`; no pin flags | **RED** until rel display (was bare `root`) |
-| D3 | dry-run/clean-leaf-skipped | leaf clean; peel mid external then `.` only | **RED** until rel display |
-| D4 | dry-run/missing-flags-with-edges | edges + dry-run without tag/push → error | **GREEN** (error path; no peel display lock) |
-| D5 | dry-run/reinstall-local-tail | dirty main + `--reinstall-local`; peel `.`; no mutual-exclusion; zero mutation | **RED** until rel display |
-| D6 | dry-run/gen-commit/add-all-reflected | gen-commit + `--add-all` + dry-run → `would: git add -A` then generate | **RED** until add-all plan |
-| D7 | dry-run/gen-commit/leave-uncommitted | gen-commit, no add-all, untracked → leave-N line; exit 0; zero mutations | **RED** until leave-N |
-| D8 | dry-run/gen-commit/leave-skipped-when-fully-staged | gen-commit, no add-all, only staged → no leave-N | **RED** until leave-N gate |
+| D1 | dry-run/free-first-order | 3-repo dirty; peel order external leaf → external mid → `.`; zero mutations | **GREEN** (rel display) |
+| D2 | dry-run/single-repo-no-edges | sole main dirty; `would: peel .`; no pin flags | **GREEN** |
+| D3 | dry-run/clean-leaf-skipped | leaf clean; peel mid external then `.` only | **GREEN** |
+| D4 | dry-run/missing-flags-with-edges | edges + dry-run without tag/push → error | **GREEN** |
+| D5 | dry-run/reinstall-local-tail | dirty main + `--reinstall-local`; peel `.`; no mutual-exclusion; zero mutation | **GREEN** |
+| D6 | dry-run/gen-commit/add-all-reflected | gen-commit + `--add-all` + dry-run → `would: git add -A` then generate | **GREEN** |
+| D7 | dry-run/gen-commit/leave-uncommitted | gen-commit, no add-all, untracked → leave-N line; exit 0; zero mutations | **GREEN** |
+| D8 | dry-run/gen-commit/leave-skipped-when-fully-staged | gen-commit, no add-all, only staged → no leave-N | **GREEN** |
 | C1 | cycle/two-cycle | A↔B dry-run → cycle error; zero mutations | **GREEN** |
-| A1 | apply/leaf-then-pin | peel leaf + pin; stdout banner `==== unwind: peel external/… ====`; pin require | **RED** until banner display path (side effects already land) |
-| A2 | apply/already-main-no-land | single main dirty + tag-next+push; no land | **GREEN** (no display path assert) |
-| A3 | apply/done-removes-leaf-wt | `--done` peels leaf; external path gone; pin on root | **GREEN** (path absence, not banner string) |
+| A1 | apply/leaf-then-pin | primary is main (Path == MainRepo); peel leaf + pin **that** Path go.mod; banner rel display | **GREEN** (pin-when-primary-is-main) |
+| A4 | apply/pin-on-linked-consumer-not-main | primary is **linked** consumer WT; pin WT go.mod; consumer **MainRepo** go.mod baseline unchanged | **RED** until pin uses Path not MainRepo |
+| A2 | apply/already-main-no-land | single main dirty + tag-next+push; no land | **GREEN** |
+| A3 | apply/done-removes-leaf-wt | `--done` peels leaf; external path gone; pin on root Path (main) | **GREEN** |
 | C2 | cycle/apply-two-cycle | A↔B apply-mode; cycle error before mutation | **GREEN** |
 
 ## How to Run
@@ -171,15 +182,13 @@ Split factor (MECE, significance-first):
 ```sh
 doctest vet ./cmd/wrk/tests/unwind
 doctest test -count=1 ./cmd/wrk/tests/unwind
-doctest test -count=1 ./cmd/wrk/tests/unwind/dry-run/free-first-order
-doctest test -count=1 ./cmd/wrk/tests/unwind/dry-run/gen-commit/add-all-reflected
+doctest test -count=1 ./cmd/wrk/tests/unwind/apply/pin-on-linked-consumer-not-main
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/leaf-then-pin
 doctest test -count=1 ./cmd/wrk/tests/unwind/cycle/apply-two-cycle
 ```
 
-Expected **RED** until implementer lands rel peel display, gen-commit dry-run
-add-all/leave-N, and apply banner display path. Error/cycle leaves and side-effect-only
-apply leaves stay **GREEN**.
+Expected **RED** only on **A4** until implementer pins at in-scope `StackMember.Path`
+instead of remapping consumers to `MainRepo`. Prior display/add-all/apply leaves stay **GREEN**.
 
 ```go
 import (

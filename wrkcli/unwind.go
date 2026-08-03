@@ -771,18 +771,14 @@ func pinConsumersOfPeeled(peeledLabel, depMainPath, version string, members []St
 	}
 	sort.Strings(consumerLabels)
 
-	// Prefer main-repo path for each consumer label (pin target / assert surface).
-	mainByLabel := make(map[string]string, len(members))
-	for _, m := range members {
-		if m.MainRepo == "" {
-			continue
-		}
-		if _, ok := mainByLabel[m.Label]; !ok {
-			mainByLabel[m.Label] = m.MainRepo
-		}
-		// Prefer non-linked (main checkout) when available.
-		if !m.Linked {
-			mainByLabel[m.Label] = m.MainRepo
+	// Prefer in-scope Path for each consumer label (linked over main, dirty over clean).
+	// Scope inventory already limits members to primary + nested under cwd; pin that
+	// checkout, not out-of-scope MainRepo when a linked Path is present.
+	byLabel := pickPeelMembersByLabel(members)
+	pathByLabel := make(map[string]string, len(byLabel))
+	for label, m := range byLabel {
+		if m.Path != "" {
+			pathByLabel[label] = m.Path
 		}
 	}
 
@@ -796,7 +792,7 @@ func pinConsumersOfPeeled(peeledLabel, depMainPath, version string, members []St
 	}
 
 	for _, cl := range consumerLabels {
-		consumerDir := mainByLabel[cl]
+		consumerDir := pathByLabel[cl]
 		if consumerDir == "" {
 			return fmt.Errorf("wrk: pin consumer %s: no stack path", cl)
 		}
