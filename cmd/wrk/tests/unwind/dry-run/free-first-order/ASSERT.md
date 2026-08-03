@@ -1,21 +1,24 @@
 ## Expected Output
 
-Dry-run peel plan (labels = main-repo basenames), free-first:
+Dry-run peel plan (display = checkout relpath vs cwd), free-first:
 
 ```
 ==== unwind (dry-run) ====
-would: peel dot-pkgs
-would: peel agent-pro
-would: peel root
+would: peel external/dot-pkgs-main-2026-06-30
+would: peel external/agent-pro-main-2026-06-30
+would: peel .
 ```
 
-(Banner punctuation implementer-owned; asserts lock `would: peel <label>` order
-and unwind/dry-run intent. Optional per-flag ship `would:` lines allowed.)
+(Banner punctuation implementer-owned; asserts lock `would: peel <display-path>`
+order and external/ / `.` vocabulary. Optional per-flag ship `would:` lines allowed.)
 
 ## Expected
 
 - Exit code 0.
-- Stdout contains peel lines in order: `dot-pkgs` → `agent-pro` → `root`.
+- Stdout contains peel lines in free-first order with **relative display paths**
+  (nested `external/…` then primary `.`).
+- Stdout does **not** use bare MainRepo basename alone as the full peel path
+  for nested members (must include `external/`).
 - Stdout mentions unwind (banner or plan).
 - Zero mutations: worktrees still linked; HEADs match baseline; dirty files remain.
 
@@ -37,6 +40,9 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
 	assertPeelOrder(t, resp.Stdout, req.PeelOrder)
+	for _, display := range req.PeelOrder {
+		assertPeelUsesRelDisplay(t, resp.Stdout, display)
+	}
 	assertUnwindZeroMutations(t, req)
 }
 ```

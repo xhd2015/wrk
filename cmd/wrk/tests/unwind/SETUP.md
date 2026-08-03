@@ -1,15 +1,16 @@
 # Scenario
 
-**Feature**: wrk --unwind dry-run (P3) + apply peel/pin (P4) over checkout stack DAG
+**Feature**: wrk --unwind dry-run + apply peel/pin over checkout stack DAG
 
 ```
 # isolated WRK_HOME + multi-repo stack under consumer checkout
 stack (root + nested external/*) + go require edges
-  -> wrk --unwind --dry-run [+ --tag-next --push --done]
+  -> wrk --unwind --dry-run [+ ship/land + gen-commit flags]
   -> cycle? Error mentioning cycle (no mutations)
   -> missing pin flags with edges? Error naming --tag-next/--push
-  -> else would: peel <label>… free-first among dirty pending
-  -> apply (no --dry-run): peel free-first + pin consumers + optional push to bare remotes
+  -> else would: peel <display-path>… free-first among dirty pending
+  -> gen-commit: would: git add -A and/or leave-N as flags/porcelain
+  -> apply (no --dry-run): peel free-first + pin; banner uses display-path
 ```
 
 ## Preconditions
@@ -20,22 +21,24 @@ stack (root + nested external/*) + go require edges
 - Session wrk binary is built once per doctest run to
   `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/wrk` (file-locked) for fixture
   create / worktree helpers when needed.
-- P3 dry-run/cycle leaves are **GREEN**. P4 apply leaves are Classic TDD (**RED**
-  until non-dry-run apply lands). Apply fixtures use local bare remotes + optional
-  `file://` module proxy (no network push).
+- Apply fixtures use local bare remotes + optional `file://` module proxy (no network).
+- New display/add-all/leave-N contracts are Classic TDD (**RED** until implementer lands).
 
 ## Steps
 
 1. Root `Setup` creates isolated `{WorkRoot}` and `{WorkRoot}/.wrk`.
 2. Leaves seed stack fixtures (single main, 3-repo chain, 2-repo apply, or 2-cycle)
-   and set `req.Args` / `req.RepoDir` / `req.PeelOrder` / apply fields.
+   and set `req.Args` / `req.RepoDir` / `req.PeelOrder` (display paths) / apply fields.
 3. Root `Run` invokes wrk via `wrkcli.Capture` when `InProcess` (default for leaves).
 
 ## Context
 
-- Stack labels for peel lines are **main-repo basenames**: `root`, `agent-pro`,
-  `dot-pkgs` (see DSN). Assert order via `would: peel <label>` substrings.
-- Dirtiness v1: untracked file `DIRTY` under a stack checkout path.
+- Peel **display paths** (not bare MainRepo basenames): relative checkout path vs
+  `RepoDir` / invocation cwd — e.g. `external/dot-pkgs-main-2026-06-30`, `.` for
+  primary at cwd. Assert via `would: peel <display-path>` and apply banner.
+- DAG identity uses MainRepo abs; human pin short names remain basenames.
+- Dirtiness v1: untracked file `DIRTY` under a stack checkout path (counts as N=1
+  not-fully-staged for leave-N when not staged).
 - Apply leaf fixtures also commit **ahead-of-main** work on linked WTs so land
   has content; pin leaves seed `{WorkRoot}/modproxy` + `ExtraEnv` for tidy.
 - After materializing nested externals, consumer porcelain is cleaned before
@@ -349,7 +352,7 @@ func commitAllAllowEmpty(t *testing.T, dir, msg string) {
 }
 
 // setupSingleMainDirty: main-only repo basename "root", dirty, no externals.
-// RepoDir = main. Peel label = root. Already on main → no land/pin flags needed.
+// RepoDir = main. Peel display = "." (checkout is cwd). Already on main → no land/pin flags needed.
 func setupSingleMainDirty(t *testing.T, req *Request) {
 	t.Helper()
 	mainRepo := filepath.Join(req.WorkRoot, labelRoot)
@@ -362,7 +365,72 @@ func setupSingleMainDirty(t *testing.T, req *Request) {
 	req.MainRepo = mainRepo
 	req.RepoDir = mainRepo
 	markDirty(t, mainRepo)
-	req.PeelOrder = []string{labelRoot}
+	req.PeelOrder = []string{"."}
+}
+
+// peelDisplay returns statusDirLine-style relative path of checkout vs req.RepoDir.
+// Mirrors wrkcli.statusDirLine: slash form; abs if Rel fails or leading ".." > 2.
+func peelDisplay(t *testing.T, req *Request, checkout string) string {
+	t.Helper()
+	if req.RepoDir == "" {
+		t.Fatal("peelDisplay: RepoDir must be set")
+	}
+	base := resolvePath(t, req.RepoDir)
+	target := resolvePath(t, checkout)
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return target
+	}
+	rel = filepath.Clean(rel)
+	slash := filepath.ToSlash(rel)
+	leading := 0
+	for _, p := range strings.Split(slash, "/") {
+		if p == ".." {
+			leading++
+			continue
+		}
+		break
+	}
+	if leading > 2 {
+		return target
+	}
+	return slash
+}
+
+// setPeelOrderDisplays fills PeelOrder from free-first checkout paths relative to RepoDir.
+func setPeelOrderDisplays(t *testing.T, req *Request, checkouts ...string) {
+	t.Helper()
+	order := make([]string, 0, len(checkouts))
+	for _, c := range checkouts {
+		order = append(order, peelDisplay(t, req, c))
+	}
+	req.PeelOrder = order
+}
+
+// stageAll stages all paths in checkout (git add -A) for fully-staged leave-N fixtures.
+func stageAll(t *testing.T, checkout string) {
+	t.Helper()
+	runGitIsolated(t, checkout, "add", "-A")
+}
+
+// leaveLine builds the locked leave-N dry-run vocabulary for N not-fully-staged paths.
+func leaveLine(n int) string {
+	if n == 1 {
+		return "would: leave 1 file uncommitted (use --add-all if necessary)"
+	}
+	return fmt.Sprintf("would: leave %d files uncommitted (use --add-all if necessary)", n)
+}
+
+func assertContainsInOrder(t *testing.T, s string, parts ...string) {
+	t.Helper()
+	at := 0
+	for _, p := range parts {
+		i := strings.Index(s[at:], p)
+		if i < 0 {
+			t.Fatalf("missing %q (in order) in:\n%s", p, s)
+		}
+		at += i + len(p)
+	}
 }
 
 // setupThreeRepoChain creates:
@@ -647,13 +715,19 @@ func assertNotContains(t *testing.T, s, substr string) {
 	}
 }
 
-func peelLine(label string) string {
-	return "would: peel " + label
+// peelLine returns the locked dry-run peel line for a display path (not bare MainRepo basename).
+func peelLine(displayPath string) string {
+	return "would: peel " + displayPath
 }
 
-// assertPeelOrder checks free-first would: peel lines appear in order.
+// applyBannerLine returns the locked apply peel banner for a display path.
+func applyBannerLine(displayPath string) string {
+	return "==== unwind: peel " + displayPath + " ===="
+}
+
+// assertPeelOrder checks free-first would: peel <display-path> lines appear in order.
 // Also requires a dry-run/unwind banner somewhere in stdout.
-func assertPeelOrder(t *testing.T, stdout string, labels []string) {
+func assertPeelOrder(t *testing.T, stdout string, displayPaths []string) {
 	t.Helper()
 	lower := strings.ToLower(stdout)
 	if !strings.Contains(lower, "unwind") {
@@ -666,16 +740,40 @@ func assertPeelOrder(t *testing.T, stdout string, labels []string) {
 		}
 	}
 	var prev int = -1
-	for i, label := range labels {
-		line := peelLine(label)
+	for i, display := range displayPaths {
+		line := peelLine(display)
 		idx := strings.Index(stdout, line)
 		if idx < 0 {
 			t.Fatalf("missing peel line %q (step %d)\nstdout:\n%s", line, i+1, stdout)
 		}
 		if idx <= prev {
-			t.Fatalf("peel order wrong at %q: idx=%d prev=%d\nstdout:\n%s", label, idx, prev, stdout)
+			t.Fatalf("peel order wrong at %q: idx=%d prev=%d\nstdout:\n%s", display, idx, prev, stdout)
 		}
 		prev = idx
+	}
+}
+
+// assertNoBareBasenamePeelAlone fails if stdout uses bare MainRepo basename as the
+// full peel path when a nested external display was expected (covers free-first RED).
+func assertPeelUsesRelDisplay(t *testing.T, stdout, displayPath string) {
+	t.Helper()
+	if !strings.Contains(stdout, peelLine(displayPath)) {
+		t.Fatalf("want peel display %q\nstdout:\n%s", peelLine(displayPath), stdout)
+	}
+	if displayPath == "." {
+		// Primary at cwd must not be printed only as bare main-repo basename "root".
+		if strings.Contains(stdout, peelLine(labelRoot)) {
+			t.Fatalf("primary peel must be %q, not bare basename %q\nstdout:\n%s",
+				peelLine("."), peelLine(labelRoot), stdout)
+		}
+		return
+	}
+	if strings.HasPrefix(displayPath, "external/") {
+		// Nested external must include external/ prefix, not bare label alone as full path.
+		// Bare "would: peel dot-pkgs" must not be the only form — require external/ fragment.
+		if !strings.Contains(stdout, "would: peel external/") {
+			t.Fatalf("nested peel must use external/ relative display, got:\n%s", stdout)
+		}
 	}
 }
 
@@ -979,7 +1077,7 @@ func setupApplyLeafPinStack(t *testing.T, req *Request) {
 	enableFileModuleProxy(t, req, proxyRoot)
 
 	req.RepoDir = rootMain
-	req.PeelOrder = []string{labelDotPkgs}
+	setPeelOrderDisplays(t, req, leafExt)
 }
 
 // setupApplyAlreadyMainRootBump: sole root main, tagged v0.0.1, owned change at HEAD,
@@ -1012,7 +1110,7 @@ func setupApplyAlreadyMainRootBump(t *testing.T, req *Request) {
 	req.OriginBare = bare
 
 	markDirty(t, mainRepo)
-	req.PeelOrder = []string{labelRoot}
+	req.PeelOrder = []string{"."}
 	req.ExpectedPinVersion = unwindApplyNextTag
 	req.OldRequireVersion = unwindApplyOldTag
 }
@@ -1086,6 +1184,7 @@ func unwindEnsureHelpersUsed() {
 	_ = readBaselineSHA
 	_ = assertUnwindZeroMutations
 	_ = assertPeelOrder
+	_ = assertPeelUsesRelDisplay
 	_ = assertCycleError
 	_ = assertMissingPinFlagsError
 	_ = assertNoSuccessfulPeelPlan
@@ -1100,6 +1199,12 @@ func unwindEnsureHelpersUsed() {
 	_ = assertLocalTagAtMainHEAD
 	_ = assertOriginMainEqualsLocalMain
 	_ = peelLine
+	_ = applyBannerLine
+	_ = peelDisplay
+	_ = setPeelOrderDisplays
+	_ = stageAll
+	_ = leaveLine
+	_ = assertContainsInOrder
 	_ = assert.Output
 }
 ```

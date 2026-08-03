@@ -2,17 +2,17 @@
 
 ```
 ==== unwind (dry-run) ====
-would: peel agent-pro
-would: peel root
+would: peel external/agent-pro-main-2026-06-30
+would: peel .
 ```
 
-(No `would: peel dot-pkgs` — clean leaf skipped from pending.)
+(No peel line for clean leaf external/dot-pkgs-….)
 
 ## Expected
 
 - Exit code 0.
-- Peel order: `agent-pro` then `root`.
-- Stdout does **not** contain `would: peel dot-pkgs`.
+- Peel order: mid external display path then primary `.`.
+- Stdout does **not** contain a peel line for the clean leaf checkout display path.
 - Zero mutations.
 
 ## Side Effects
@@ -33,7 +33,12 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
 	assertPeelOrder(t, resp.Stdout, req.PeelOrder)
-	assertNotContains(t, resp.Stdout, peelLine(labelDotPkgs))
+	for _, display := range req.PeelOrder {
+		assertPeelUsesRelDisplay(t, resp.Stdout, display)
+	}
+	// Clean leaf must not appear as a peel (use full display path of leaf external).
+	skipped := peelDisplay(t, req, req.DepsLinkedWtDir)
+	assertNotContains(t, resp.Stdout, peelLine(skipped))
 	assertUnwindZeroMutations(t, req)
 }
 ```

@@ -21,7 +21,7 @@ type StackMember struct {
 	Path string
 	// MainRepo is the main repository directory for this checkout.
 	MainRepo string
-	// Label is filepath.Base(MainRepo) — stable peel label used in dry-run plans.
+	// Label is filepath.Base(MainRepo) — DAG/pin short name (not peel display path).
 	Label string
 	// Dirty is true when porcelain status is non-empty (untracked counts).
 	Dirty bool
@@ -405,17 +405,35 @@ func ValidateUnwindFlags(plan *UnwindPlan, flags UnwindFlags) error {
 }
 
 // FormatUnwindDryRun returns the dry-run plan text (trailing newline).
-func FormatUnwindDryRun(plan *UnwindPlan, flags ...UnwindFlags) string {
+// Peel lines use statusDirLine-style relative checkout paths vs workDir.
+// When members is non-nil, gen-commit plans reflect --add-all and leave-N
+// based on each peel checkout's porcelain (not flags alone).
+func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string, flags ...UnwindFlags) string {
 	var b strings.Builder
 	var f UnwindFlags
 	if len(flags) > 0 {
 		f = flags[0]
 	}
+	byLabel := pickPeelMembersByLabel(members)
+	addAll := genArgsHasFlag(f.GenCommitArgs, "--add-all")
 	b.WriteString("==== unwind (dry-run) ====\n")
 	if plan != nil {
 		for _, label := range plan.PeelOrder {
-			fmt.Fprintf(&b, "would: peel %s\n", label)
+			display := label
+			var peelPath string
+			if m, ok := byLabel[label]; ok {
+				display = peelDisplayPath(workDir, m.Path)
+				peelPath = m.Path
+			}
+			fmt.Fprintf(&b, "would: peel %s\n", display)
 			if f.GenCommitMsg {
+				if addAll {
+					b.WriteString("  would: git add -A\n")
+				} else if peelPath != "" {
+					if n, err := countNotFullyStagedPaths(peelPath); err == nil && n > 0 {
+						b.WriteString("  " + formatLeaveUncommittedLine(n) + "\n")
+					}
+				}
 				b.WriteString("  would: generate commit message and commit staged changes\n")
 			}
 			if f.Done || f.MergeBack {
@@ -437,6 +455,43 @@ func FormatUnwindDryRun(plan *UnwindPlan, flags ...UnwindFlags) string {
 		b.WriteString("would: reinstall local binaries\n")
 	}
 	return b.String()
+}
+
+// peelDisplayPath formats a peel checkout path for dry-run/apply banners.
+// Same policy as statusDirLine (slash form; abs if Rel fails or leading ".." > 2).
+func peelDisplayPath(workDir, checkoutPath string) string {
+	return statusDirLine(workDir, checkoutPath)
+}
+
+// formatLeaveUncommittedLine is the locked dry-run leave-N vocabulary.
+func formatLeaveUncommittedLine(n int) string {
+	if n == 1 {
+		return "would: leave 1 file uncommitted (use --add-all if necessary)"
+	}
+	return fmt.Sprintf("would: leave %d files uncommitted (use --add-all if necessary)", n)
+}
+
+// countNotFullyStagedPaths counts porcelain paths that are not fully staged
+// (unstaged modifications and untracked). Fully staged (index change, clean
+// worktree) paths are excluded so leave-N is omitted when only staged dirt remains.
+func countNotFullyStagedPaths(repoPath string) (int, error) {
+	out, err := gitOutputDir(repoPath, "status", "--porcelain")
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		x, y := line[0], line[1]
+		// Fully staged: non-space/non-? index status and clean worktree.
+		if x != ' ' && x != '?' && y == ' ' {
+			continue
+		}
+		n++
+	}
+	return n, nil
 }
 
 // runUnwind implements wrk --unwind [flags]. Dry-run prints the free-first plan;
@@ -462,7 +517,7 @@ func runUnwind(workDir string, flags UnwindFlags) error {
 		return err
 	}
 	if flags.DryRun {
-		_, err = fmt.Fprint(os.Stdout, FormatUnwindDryRun(plan, flags))
+		_, err = fmt.Fprint(os.Stdout, FormatUnwindDryRun(plan, members, workDir, flags))
 		return err
 	}
 	return ApplyUnwind(workDir, wrkHome, members, edges, plan, flags)
@@ -495,15 +550,16 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 	}
 
 	for i, label := range plan.PeelOrder {
-		if i > 0 {
-			fmt.Println()
-		}
-		fmt.Printf("==== unwind: peel %s ====\n", label)
-
 		m, ok := byLabel[label]
 		if !ok {
 			return fmt.Errorf("wrk: peel target %s not found in stack inventory", label)
 		}
+		if i > 0 {
+			fmt.Println()
+		}
+		// Banner uses checkout Path relative to invocation workDir (statusDirLine policy).
+		fmt.Printf("==== unwind: peel %s ====\n", peelDisplayPath(workDir, m.Path))
+
 		mainPath := m.MainRepo
 		if mainPath == "" {
 			mainPath = m.Path
@@ -517,18 +573,23 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 			}
 			if flags.GenCommitMsg {
 				fmt.Println("---- generate commit message ----")
-				// Unwind operates on a dirty peel, while the message generator works
-				// from the index. Stage the peel before invoking its existing commit
-				// stage so untracked changes are included just as --done would include
-				// them before removing a worktree.
-				if err := gitRunDir(m.Path, "add", "-A"); err != nil {
-					return fmt.Errorf("wrk: stage unwind peel before generated commit: %w", err)
-				}
+				// Stage only when --add-all is in GenCommitArgs (library honors
+				// it). Do not unconditional git add -A before gen-commit so
+				// untracked dirt is not forced into the AI commit.
 				if err := runGenCommitMsgStage(m.Path, flags.GenCommitArgs, false); err != nil {
-					return err
+					// Empty index without --add-all: AI gen-commit has nothing
+					// to work on. Soft-skip and let auto-commit / land handle
+					// remaining dirt (fixtures with only untracked dirt).
+					if genArgsHasFlag(flags.GenCommitArgs, "--add-all") || !isNoStagedGenCommitErr(err) {
+						return err
+					}
+					if err := autoCommitIfDirty(m.Path); err != nil {
+						return err
+					}
 				}
 			}
-			// --done (Remove) refuses dirty porcelain; auto-commit pending dirt.
+			// --done (Remove) refuses dirty porcelain; auto-commit pending dirt
+			// (including leftover untracked after a staged-only gen-commit).
 			if flags.Done {
 				if err := autoCommitIfDirty(m.Path); err != nil {
 					return err
@@ -637,6 +698,15 @@ func pickPeelMembersByLabel(members []StackMember) map[string]StackMember {
 		}
 	}
 	return out
+}
+
+// isNoStagedGenCommitErr reports the library "no staged changes" failure so
+// unwind can soft-skip AI gen-commit when the index is empty without --add-all.
+func isNoStagedGenCommitErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "no staged")
 }
 
 // autoCommitIfDirty stages and commits porcelain dirt so --done MergeBack can

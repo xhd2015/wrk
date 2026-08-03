@@ -132,4 +132,36 @@ func unwindGenCommitArgs(t *testing.T, req *Request, stages ...string) []string 
 	args := []string{"--unwind", "--gen-commit-msg", "--commit", "--agent-runner", "opencode", "--agent-runner-binary", req.FakeOpencode}
 	return append(args, stages...)
 }
+
+// pathInHEAD reports whether path is present in the commit at ref (default HEAD).
+func pathInHEAD(t *testing.T, repo, path string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "-c", "core.hooksPath=/dev/null", "-C", repo, "ls-tree", "-r", "--name-only", "HEAD")
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=doctest", "GIT_AUTHOR_EMAIL=doctest@example.invalid", "GIT_COMMITTER_NAME=doctest", "GIT_COMMITTER_EMAIL=doctest@example.invalid")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ls-tree HEAD: %v\n%s", err, out)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == path {
+			return true
+		}
+	}
+	return false
+}
+
+// isUntracked reports whether path is untracked in repo (git status --porcelain).
+func isUntracked(t *testing.T, repo, path string) bool {
+	t.Helper()
+	out := git(t, repo, "status", "--porcelain", "--", path)
+	// "?? path" for untracked
+	return strings.HasPrefix(strings.TrimSpace(out), "??")
+}
+
+// isTrackedModified reports whether path has staged or unstaged tracked changes.
+func porcelainFor(t *testing.T, repo, path string) string {
+	t.Helper()
+	return strings.TrimSpace(git(t, repo, "status", "--porcelain", "--", path))
+}
 ```
+

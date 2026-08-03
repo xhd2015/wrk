@@ -1,18 +1,20 @@
 # Scenario
 
-**Feature**: acyclic `--unwind --dry-run` plan paths (order, skip, flags)
+**Feature**: acyclic `--unwind --dry-run` plan paths (order, skip, flags, gen-commit)
 
 ```
-# residual DAG among dirty pending → free-first would: peel lines
+# residual DAG among dirty pending → free-first would: peel <display-path>
 # missing pin flags with edges → hard Error before plan apply
+# gen-commit subtree: add-all / leave-N vocabulary
 stack (acyclic) -> wrk --unwind --dry-run [flags] -> plan or flag error
 ```
 
 ## Preconditions
 
 - Parent `unwind/` helpers: `setupThreeRepoChain`, `setupSingleMainDirty`,
-  `dirtyAllThree`, `dirtyMidAndRoot`, baseline zero-mutation asserts.
+  `dirtyAllThree`, `dirtyMidAndRoot`, `setPeelOrderDisplays`, baseline asserts.
 - Leaves set `req.InProcess = true` and full `req.Args` (including `--unwind`).
+- PeelOrder holds **display paths** (external/…, `.`), not bare MainRepo basenames.
 
 ## Steps
 

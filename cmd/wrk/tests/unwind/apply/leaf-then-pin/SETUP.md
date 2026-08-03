@@ -1,13 +1,14 @@
 # Scenario
 
-**Feature**: peel dirty leaf WT free-first then Pin consumer require to new tag
+**Feature**: peel dirty leaf WT free-first then Pin consumer; banner uses rel path
 
 ```
 # root (main) requires example.com/dot-pkgs@v0.0.1
 # leaf linked WT under root/external: ahead + DIRTY; bare origin on leaf main
 root main + leaf ext
   -> wrk --unwind --done --tag-next --push
-  -> peel dot-pkgs: land → tag v0.0.2 → push bare
+  -> banner: ==== unwind: peel external/dot-pkgs-main-2026-06-30 ====
+  -> peel leaf: land → tag v0.0.2 → push bare
   -> Pin root go.mod require → v0.0.2 (no replace); tidy
   -> leaf main advanced; origin has tag+main
 ```

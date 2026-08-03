@@ -5,7 +5,8 @@
 ```
 # dirty primary repo; no stack edges and no linked-worktree land required
 root (dirty, main) -> wrk --unwind --dry-run --reinstall-local
-  -> ordinary unwind peel plan
+  -> would: peel .
+  -> would: reinstall local binaries (tail)
   -> exit 0; no mutation and no mutual-exclusion rejection
 ```
 

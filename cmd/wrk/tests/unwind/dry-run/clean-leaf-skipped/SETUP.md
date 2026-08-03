@@ -1,14 +1,14 @@
 # Scenario
 
-**Feature**: clean leaf is omitted from pending; peel starts at dirty mid then root
+**Feature**: clean leaf omitted from pending; peel mid external then primary `.`
 
 ```
 # same 3-repo chain; only agent-pro + root dirty; dot-pkgs clean
 dot-pkgs (clean) · agent-pro (dirty) · root (dirty)
   -> wrk --unwind --dry-run --tag-next --push --done
-  -> would: peel agent-pro
-  -> would: peel root
-  -> no would: peel dot-pkgs
+  -> would: peel external/agent-pro-main-2026-06-30
+  -> would: peel .
+  -> no would: peel external/dot-pkgs-…
 ```
 
 ## Steps
@@ -16,6 +16,7 @@ dot-pkgs (clean) · agent-pro (dirty) · root (dirty)
 1. Build three-repo chain.
 2. Dirtify mid + root only; leave leaf clean.
 3. Run unwind dry-run with pin + land flags.
+4. PeelOrder = mid external display + primary `.`.
 
 ```go
 import (
@@ -27,7 +28,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.InProcess = true
 	setupThreeRepoChain(t, req)
 	dirtyMidAndRoot(t, req)
-	req.PeelOrder = []string{labelAgentPro, labelRoot}
+	setPeelOrderDisplays(t, req, req.ExternalWtDir, req.WtDir)
 	req.Args = []string{"--unwind", "--dry-run", "--tag-next", "--push", "--done"}
 	recordUnwindBaseline(t, req)
 	return nil

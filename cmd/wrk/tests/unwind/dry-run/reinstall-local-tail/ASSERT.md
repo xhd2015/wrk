@@ -4,13 +4,14 @@ The ordinary dry-run peel plan ends with a newline:
 
 ```
 ==== unwind (dry-run) ====
-would: peel root
+would: peel .
+would: reinstall local binaries
 ```
 
 ## Expected
 
 - Exit code 0.
-- The ordinary single-repository peel plan contains `would: peel root`.
+- Ordinary single-repository peel plan contains `would: peel .` (not bare `root`).
 - `--reinstall-local` is accepted with `--unwind`; diagnostics do not describe it as mutually exclusive.
 - Zero mutations: HEAD is unchanged and the dirty marker remains.
 
@@ -34,6 +35,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
 	assertPeelOrder(t, resp.Stdout, req.PeelOrder)
+	assertPeelUsesRelDisplay(t, resp.Stdout, ".")
 	combined := strings.ToLower(resp.Stdout + "\n" + resp.Stderr)
 	if strings.Contains(combined, "mutually exclusive") {
 		t.Fatalf("unwind+reinstall-local must be accepted; stderr=%q stdout=%q", resp.Stderr, resp.Stdout)
