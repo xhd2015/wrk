@@ -2113,10 +2113,11 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 		return err
 	}
 	if forceCd {
+		// --force-cd bypasses cwd-missing and foreign-repo ancestor gates.
 		if err := forceLandInDir(result.TargetPath); err != nil {
 			return err
 		}
-	} else if err := writeFollowupCDIfCwdMissing(noCd, shellCwd, result.TargetPath); err != nil {
+	} else if err := writeFollowupCDAfterDoneRemove(noCd, shellCwd, result.TargetPath); err != nil {
 		return err
 	}
 	return nil

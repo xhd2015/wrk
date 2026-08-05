@@ -6,7 +6,8 @@
 linked wt + WRK_FOLLOWUP_FILE
 wrk --done -> follow-up: cd <main-repo-abs>
 
-# --force-cd bypasses cwd-missing gate from surviving sibling
+# foreign parent (different git main within 3 levels) -> no follow-up
+# --force-cd bypasses cwd-missing and foreign-repo gates
 sibling A (cwd); wrk --done B --force-cd + env -> cd <main>
 sibling A; wrk --done B --force-cd (no channel) -> shell @ main
 ```

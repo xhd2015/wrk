@@ -5,7 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 )
+
+// followupForeignRepoMaxLevels is how many parent directories of shellCwd
+// --done inspects before writing auto-cd. If any existing parent resolves to
+// a different git main than the land dest, auto-cd is suppressed.
+const followupForeignRepoMaxLevels = 3
 
 // writeFollowupCD appends a single "cd /absolute/path" line to WRK_FOLLOWUP_FILE
 // when the channel is set and follow-ups are not disabled via --no-cd.
@@ -103,12 +110,83 @@ func shouldWriteCwdGatedFollowup(shellCwdAtStart string) bool {
 }
 
 // writeFollowupCDIfCwdMissing writes cd dest only when shellCwd no longer exists.
-// Used after successful --done remove / --set-task move so a surviving sibling
-// or main checkout is not yanked by auto-cd. Create paths must use
-// writeFollowupCDIfCwdIsHome instead.
+// Used after successful --set-task move so a surviving sibling or main checkout
+// is not yanked by auto-cd. --done uses writeFollowupCDAfterDoneRemove instead.
+// Create paths must use writeFollowupCDIfCwdIsHome.
 func writeFollowupCDIfCwdMissing(disabled bool, shellCwd, dest string) error {
 	if !shouldWriteCwdGatedFollowup(shellCwd) {
 		return nil
 	}
 	return writeFollowupCD(disabled, dest)
+}
+
+// writeFollowupCDAfterDoneRemove writes cd dest after a successful --done remove
+// only when shellCwd no longer exists and none of up to
+// followupForeignRepoMaxLevels parents of shellCwd is a different git repository
+// than dest. Silent no-op when suppressed (same as the cwd-missing gate).
+// --force-cd bypasses this helper entirely via forceLandInDir.
+func writeFollowupCDAfterDoneRemove(disabled bool, shellCwd, dest string) error {
+	if !shouldWriteCwdGatedFollowup(shellCwd) {
+		return nil
+	}
+	if hasForeignGitRepoAncestor(shellCwd, dest, followupForeignRepoMaxLevels) {
+		return nil
+	}
+	return writeFollowupCD(disabled, dest)
+}
+
+// hasForeignGitRepoAncestor reports whether any of the first maxLevels parents
+// of shellCwd is inside a git repository whose main checkout differs from dest's
+// main. Missing parents are skipped (walk continues). Non-git or unresolvable
+// parents are skipped (fail open for that level). dest unresolvable → false.
+func hasForeignGitRepoAncestor(shellCwd, dest string, maxLevels int) bool {
+	shellCwd = strings.TrimSpace(shellCwd)
+	dest = strings.TrimSpace(dest)
+	if shellCwd == "" || dest == "" || maxLevels <= 0 {
+		return false
+	}
+	destMain, err := resolveMainRepoNormalized(dest)
+	if err != nil || destMain == "" {
+		return false
+	}
+	p := shellCwd
+	for i := 0; i < maxLevels; i++ {
+		parent := filepath.Dir(p)
+		if parent == p {
+			break
+		}
+		p = parent
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		parentMain, err := resolveMainRepoNormalized(p)
+		if err != nil || parentMain == "" {
+			continue
+		}
+		if parentMain != destMain {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveMainRepoNormalized returns the normalized main-repo path for path, or
+// an error when path is not inside a git work tree / cannot be resolved.
+func resolveMainRepoNormalized(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("empty path")
+	}
+	if !worktree.IsInsideWorkTree(path) {
+		return "", fmt.Errorf("not a git work tree")
+	}
+	top, err := worktree.ShowToplevel(path)
+	if err != nil {
+		return "", err
+	}
+	main, err := worktree.ResolveMainRepo(top)
+	if err != nil {
+		return "", err
+	}
+	return normalizeDirPath(main), nil
 }

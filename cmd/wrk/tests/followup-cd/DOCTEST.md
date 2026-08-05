@@ -60,14 +60,23 @@ with `--no-cd`.
   wrapper does not yank the shell. Dest when writing: main repo
   (`TargetPath`) for `--done`; `newPath` for `--set-task` move. Unchanged
   by the create home-gate feature.
+- **Foreign-repo ancestor gate (`--done` only)** — after the cwd-missing gate
+  opens, `--done` also walks up to **3** parents of the captured shell cwd.
+  If any **existing** parent is inside a git repository whose **main**
+  (`ResolveMainRepo`) differs from the land dest main, do **not** write
+  follow-up (silent). Missing parents are skipped; non-git / unresolvable
+  parents are skipped. Default `~/.wrk/worktrees/…` layouts stay unaffected.
+  **`--set-task` is not gated** this way. **`--force-cd`** still bypasses
+  both the cwd-missing and foreign-repo gates.
 - **`--no-cd`** — real binary flag (listed in help and `--complete` flags);
   when set, never write follow-ups even if `WRK_FOLLOWUP_FILE` is set.
   Harmless no-op for follow-ups on other modes. Independent of the home gate.
   **Mutually exclusive** with `--force-cd` (hard error; no follow-up, no shell).
 - **`--force-cd`** — long-only Bool modifier (listed in help and `--complete`);
   applies to successful create, `--done` (remove), and `--set-task` when the
-  path actually moves. **Bypasses** create home-gate and done/set-task
-  cwd-missing gate so land always runs. Destinations: create → new worktree;
+  path actually moves. **Bypasses** create home-gate, done/set-task
+  cwd-missing gate, and the `--done` foreign-repo ancestor gate so land
+  always runs. Destinations: create → new worktree;
   `--done` → main `TargetPath`; `--set-task` move → `newPath`. **Branch A**
   (`WRK_FOLLOWUP_FILE` set): write one `cd /absolute/dest\n` (ungated); no
   nested shell. **Branch B** (channel unset/empty): stderr warning mentioning
