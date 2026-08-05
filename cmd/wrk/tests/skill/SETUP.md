@@ -22,8 +22,8 @@ wrk skill list|show|install (subcommand) -> non-zero exit
 ## Preconditions
 
 - In-process L2 via `wrkcli.Capture` (no product binary rebuild).
-- Embedded skill content lives in `wrkcli/SKILL.md` (compiled into the package
-  under test); doctest `show/basic` asserts `WRK_SKILL_DOCTEST_MARKER` and
+- Embedded skill content lives in `docs/skills/wrk/SKILL.md` (//go:embed via
+  package `wrkskill`); doctest `show/basic` asserts `WRK_SKILL_DOCTEST_MARKER` and
   `name: wrk` in stdout.
 
 ## Steps

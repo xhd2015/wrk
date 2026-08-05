@@ -15,8 +15,8 @@ directories. No git checkout is required.
   `skill` is mutually exclusive with all other wrk modes/flags (`--done`,
   create, etc.). Skill-local flags (`--list`/`-l`, `--show`, `--install`) are
   skill actions, not wrk project-list modes.
-- **Embedded SKILL.md** — `wrkcli/SKILL.md` is compiled into the package via
-  `//go:embed`; no filesystem skills project lookup at runtime.
+- **Embedded SKILL.md** — `docs/skills/wrk/SKILL.md` is compiled via
+  `//go:embed` (`docs/skills/wrk` package); no filesystem skills lookup at runtime.
 - **Run** — `wrkcli.Capture` with `Dir=RepoDir` and `WRK_HOME` env only.
 - **Shape 1 single skill** — no skill name argument; one embedded skill (`wrk`).
 - **Action flags (exactly one)** — `--list` / `-l`, `--show`, or `--install`

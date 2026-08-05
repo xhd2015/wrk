@@ -1,18 +1,13 @@
 package wrkcli
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
 	"strings"
 
-	lessflags "github.com/xhd2015/less-flags"
-	"github.com/xhd2015/skills/install"
-	"github.com/xhd2015/skills/skill_file"
+	"github.com/xhd2015/skills/skillcmd"
+	wrkskill "github.com/xhd2015/wrk/docs/skills/wrk"
 )
-
-//go:embed SKILL.md
-var skillContent string
 
 const skillSubcommandName = "wrk"
 
@@ -102,78 +97,47 @@ Examples:
 `
 }
 
+func wrkSingleSkill() *skillcmd.SingleSkill {
+	content := wrkskill.SkillContent
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return &skillcmd.SingleSkill{
+		Name:        skillSubcommandName,
+		RootContent: content,
+		Usage:       "wrk skill --install",
+		Help:        skillUsage(),
+	}
+}
+
 func runSkill(origWd string, args []string, wrkHome string) error {
+	_ = origWd
+	_ = wrkHome
+
 	if flag, found := findConflictingWrkModeFlag(args); found {
 		return fmt.Errorf("wrk: %s is mutually exclusive with skill", flag)
 	}
 
-	if len(args) == 0 || isSkillHelpOnly(args) {
+	// skillcmd errors on empty argv; bare `wrk skill` prints skill-level help.
+	if len(args) == 0 {
 		fmt.Print(skillUsage())
 		return nil
 	}
 
-	list, show, installAction, rest := peelSkillActionFlags(args)
-	actionCount := 0
-	if list {
-		actionCount++
-	}
-	if show {
-		actionCount++
-	}
-	if installAction {
-		actionCount++
-	}
-	if actionCount == 0 {
-		if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
-			return fmt.Errorf("wrk: unknown skill subcommand %q (expected --list, --show, or --install)", rest[0])
+	// skillcmd resolves relative install roots via filepath.Abs / os.Getwd.
+	// Under Capture, pin real cwd to captureDir for the install call only so
+	// dry-run/install paths match subprocess Dir=RepoDir without holding a
+	// virtual-only cwd for third-party Abs.
+	if captureDir != "" {
+		old, err := os.Getwd()
+		if err == nil {
+			if err := os.Chdir(captureDir); err == nil {
+				defer func() { _ = os.Chdir(old) }()
+			}
 		}
-		if len(rest) > 0 {
-			return fmt.Errorf("wrk: unknown option %s (expected --list, --show, or --install)", rest[0])
-		}
-		return fmt.Errorf("wrk: skill requires exactly one of --list, --show, --install")
-	}
-	if actionCount > 1 {
-		return fmt.Errorf("wrk: skill requires exactly one of --list, --show, --install")
 	}
 
-	switch {
-	case list:
-		return runSkillList(rest)
-	case show:
-		return runSkillShow(rest)
-	default:
-		return runSkillInstall(rest)
-	}
-}
-
-func isSkillHelpOnly(args []string) bool {
-	if len(args) == 0 {
-		return true
-	}
-	for _, a := range args {
-		if a != "-h" && a != "--help" {
-			return false
-		}
-	}
-	return true
-}
-
-// peelSkillActionFlags removes skill action flags from args, leaving action-local
-// flags and positionals (e.g. --header for show, install options for install).
-func peelSkillActionFlags(args []string) (list, show, installAction bool, rest []string) {
-	for _, a := range args {
-		switch a {
-		case "-l", "--list":
-			list = true
-		case "--show":
-			show = true
-		case "--install":
-			installAction = true
-		default:
-			rest = append(rest, a)
-		}
-	}
-	return list, show, installAction, rest
+	return wrkSingleSkill().Handle(args)
 }
 
 // findConflictingWrkModeFlag reports a wrk mode flag present in skill args.
@@ -219,65 +183,4 @@ func findWrkModeFlag(args []string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func runSkillList(args []string) error {
-	if len(args) > 0 {
-		return fmt.Errorf("wrk: unexpected arguments")
-	}
-	fmt.Println(skillSubcommandName)
-	return nil
-}
-
-func runSkillShow(args []string) error {
-	headerOnly, err := parseSkillShowArgs(args)
-	if err != nil {
-		return err
-	}
-	content := skillContent
-	if headerOnly {
-		out, err := skill_file.FormatHeaderWithDelimiters(content)
-		if err != nil {
-			return fmt.Errorf("wrk: parse skill header: %w", err)
-		}
-		fmt.Print(out)
-		return nil
-	}
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	fmt.Print(content)
-	return nil
-}
-
-func parseSkillShowArgs(args []string) (headerOnly bool, err error) {
-	var header bool
-	remaining, err := lessflags.Bool("--header", &header).Parse(args)
-	if err != nil {
-		return false, err
-	}
-	if len(remaining) > 0 {
-		return false, fmt.Errorf("wrk: unknown option %s", remaining[0])
-	}
-	return header, nil
-}
-
-func runSkillInstall(args []string) error {
-	// skillcmd resolves relative install roots via filepath.Abs / os.Getwd.
-	// Under Capture, pin real cwd to captureDir for the install call only so
-	// dry-run/install paths match subprocess Dir=RepoDir without holding a
-	// virtual-only cwd for third-party Abs.
-	if captureDir != "" {
-		old, err := os.Getwd()
-		if err == nil {
-			if err := os.Chdir(captureDir); err == nil {
-				defer func() { _ = os.Chdir(old) }()
-			}
-		}
-	}
-	return install.HandleInstall(install.InstallOptions{
-		SkillDirName: skillSubcommandName,
-		SkillContent: skillContent,
-		Usage:        "wrk skill --install",
-	}, args)
 }
