@@ -1,6 +1,6 @@
 # Scenario
 
-**Feature**: wrk --where basename lookup in projects.json (Bool flag + positional)
+**Feature**: wrk --where basename lookup + optional `--pr` compose (Bool flags + positional)
 
 ```
 # Bool("--where") + exactly one basename positional (either order)
@@ -20,8 +20,13 @@ wrk --where              -> wrk: --where requires a path argument
 wrk --where=spl          -> fail (equals form; no treat-as-basename)
 wrk --where --main       -> compose: print main of cwd (see main-mode/compose/where)
 
+# compose: --where --pr <full-github-pr-url> (see where/pr/)
+wrk --where --pr https://github.com/owner/repo/pull/N
+  -> gh pr view headRefName; local worktree path(s) on head (projects.json + cwd main)
+
 # standalone mode
-mutually exclusive with other modes; no extra positionals beyond the one basename
+mutually exclusive with other modes (except allowed compose partners);
+no extra positionals beyond the one basename / PR URL
 ```
 
 ## Preconditions
@@ -30,19 +35,22 @@ mutually exclusive with other modes; no extra positionals beyond the one basenam
 - Tests seed saved projects via `wrk --add`.
 - Lookup uses basename `spl` unless a descendant overrides `WhereBasename`.
 - `--where` is a **Bool** flag; operand is a remaining positional (breaking: was String-bound).
+- **PR compose** lives under `where/pr/` (classic TDD until implemented).
 
 ## Steps
 
 - Descendants configure saved project paths, cwd, and CLI form
   (`req.Args = []string{"--where", <basename>}` or basename-then-flag via `TargetDir`).
 - Cwd is a neutral directory unless the scenario requires a local `./spl` entry.
+- `where/pr/` leaves use full GitHub PR URL positionals and fake `gh`.
 
 ## Context
 
 - Basename: no path separator, not absolute (`spl` yes; `sub/spl`, `/abs/spl`, `../spl` no).
-- Unlike create-mode basename fallback, `--where` never stats cwd or resolves paths on disk.
+- Unlike create-mode basename fallback, basename `--where` never stats cwd or resolves paths on disk.
 - Multi-match prints all paths (no TTY prompt); candidates sorted lexicographically.
 - Operand-then-flag mirrors `--cd`: `wrk <basename> --where` is valid.
+- `--where --pr` is location lookup by PR head branch (full URL only); not basename mode.
 
 ```go
 import (

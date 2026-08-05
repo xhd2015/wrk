@@ -90,6 +90,18 @@ func rejectWhereEqualsForm(args []string) error {
 	return nil
 }
 
+// rejectPrEqualsForm fails on --pr=value. --pr is Bool; PR URL is a separate
+// positional when composed with --where (or bare --pr has no value). Equals form
+// would otherwise silently clear the flag (non-"true" values → false).
+func rejectPrEqualsForm(args []string) error {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--pr=") {
+			return fmt.Errorf("wrk: --pr does not take equals form (=value); pass a full GitHub pull request URL as a positional argument")
+		}
+	}
+	return nil
+}
+
 func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) error {
 	if len(args) > 0 && args[0] == "skill" {
 		wrkHome, err := resolveWrkHome()
@@ -148,6 +160,9 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	}
 
 	if err := rejectWhereEqualsForm(parseArgs); err != nil {
+		return err
+	}
+	if err := rejectPrEqualsForm(parseArgs); err != nil {
 		return err
 	}
 
@@ -505,7 +520,23 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		}
 	}
 	if whereFlagSet {
-		if mainFlag {
+		if prFlag {
+			// --where --pr: exactly one full GitHub PR URL positional.
+			if len(remaining) == 0 {
+				ctx.workDir = origWd
+				if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
+					return err
+				}
+				return errWherePRNeedsFullURL
+			}
+			if len(remaining) > 1 {
+				ctx.workDir = origWd
+				if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
+					return err
+				}
+				return fmt.Errorf("wrk: unexpected arguments")
+			}
+		} else if mainFlag {
 			if len(remaining) > 0 {
 				ctx.workDir = origWd
 				if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
@@ -737,12 +768,14 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		return fmt.Errorf("wrk: --title and --comment are only valid with --pr")
 	}
 	// --pr is a primary that may compose with peel partners --push and
-	// --gen-commit-msg (fixed order: gen-commit → push → pr), and with
-	// --status for read-only PR status. Still exclusive with other modes
-	// (--done, --merge-back, --list, --main, etc.).
+	// --gen-commit-msg (fixed order: gen-commit → push → pr), with
+	// --status for read-only PR status, and with --where for location lookup
+	// (full GitHub PR URL → local worktree path). Still exclusive with other
+	// modes (--done, --merge-back, --list, --main, etc.).
 	// Modes:
 	//   bare --pr (no --title/--comment): show open PR URL (or empty)
 	//   --pr --status: print open PR metadata + checks/reviews rollup
+	//   --where --pr <url>: print local worktree path(s) for PR head branch
 	//   --pr --comment C (no --title): comment-only on existing open PR
 	//   --pr --push (no --title/--comment): push-existing (open PR required → full push → URL)
 	//   --pr --push --comment C (no --title): push then comment on open PR
@@ -752,15 +785,30 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	//   --pr --status + --title/--comment/--push: invalid combination
 	if prFlag {
 		// status is allowed with --pr (PR status mode); validated below.
+		// --where is a compose partner for location lookup (not otherMode).
 		otherMode := done || mergeBack || list || repos || projects || projectsDepGraph ||
-			addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext ||
+			addFlagSet || removeFlagSet || bringMode || reinstallLocal || tagNext ||
 			propagateTags || syncFlag || dryRun || jsonFlag || taskFlagSet || setTaskFlagSet ||
 			spawnTarget != "" || cd || mainFlag || unwind || fetchFlag || hasExec || newFlag ||
 			confirmFromStdin || forceConfirm || noInModuleReplace || noCd || forceCd
 		if otherMode {
 			return fmt.Errorf("wrk: --pr is mutually exclusive with other modes")
 		}
-		if status {
+		if whereFlagSet {
+			// --where --pr location lookup: no create/attach, comment, push, status.
+			if status {
+				return fmt.Errorf("wrk: --where is mutually exclusive with other modes")
+			}
+			if prTitle != nil || prComment != nil {
+				return fmt.Errorf("wrk: --where --pr cannot be combined with --title or --comment")
+			}
+			if pushFlag {
+				return fmt.Errorf("wrk: --where --pr cannot be combined with --push")
+			}
+			if genCommitMsg {
+				return fmt.Errorf("wrk: --where --pr cannot be combined with --gen-commit-msg")
+			}
+		} else if status {
 			// PR status is read-only: no create/attach, comment, or push.
 			if prTitle != nil || prComment != nil {
 				return fmt.Errorf("wrk: --pr --status cannot be combined with --title or --comment")
@@ -824,8 +872,10 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if removeFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag || unwind) {
 		return fmt.Errorf("wrk: --rm is mutually exclusive with other modes")
 	}
-	// --where composes with --main (print main path). Still exclusive with --cd and other modes.
-	if whereFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || cd || unwind) {
+	// --where composes with --main (print main path) and --pr (PR URL → worktree path).
+	// Still exclusive with --cd and other modes. prFlag is carved out here; invalid
+	// --where --pr + title/comment/push/status is checked in the prFlag block above.
+	if whereFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || cd || unwind) {
 		return fmt.Errorf("wrk: --where is mutually exclusive with other modes")
 	}
 	// --cd composes with --main (runCd main). Still exclusive with --where and other modes.
@@ -1022,7 +1072,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if removeFlagSet {
 		return runRemove(wrkHome, *removePath)
 	}
-	// --where: basename lookup, or with --main print main abs path of cwd checkout.
+	// --where: basename lookup, --main print main abs path, or --pr full URL → worktree path(s).
 	if whereFlagSet {
 		if mainFlag {
 			mainRepo, err := resolveMainRepoForWorkDir(workDir)
@@ -1031,6 +1081,9 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			}
 			fmt.Println(mainRepo)
 			return nil
+		}
+		if prFlag {
+			return runWherePR(wrkHome, workDir, remaining[0])
 		}
 		return runWhere(wrkHome, remaining[0])
 	}
