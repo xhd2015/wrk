@@ -21,7 +21,6 @@ import (
 )
 
 func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
-	_ = d
 	assertErrIsNil(t, err)
 	if resp.ExitCode == 0 {
 		t.Fatalf("expected non-zero when head not checked out; stdout=%q stderr=%q",

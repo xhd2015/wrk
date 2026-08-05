@@ -15,7 +15,6 @@ workspace/ -> wrk --where --pr 390
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
 	req.InProcess = true
 	req.RepoDir = initNeutralCwd(t, req.WorkRoot, "workspace")
 	req.Args = []string{"--where", "--pr", "390"}

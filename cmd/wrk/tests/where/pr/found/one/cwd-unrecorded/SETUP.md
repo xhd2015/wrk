@@ -17,7 +17,6 @@ cwd linked wt (unrecorded main)
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
 	req.InProcess = true
 	wherePrSetupUnrecordedLinked(t, req)
 	req.Args = wherePrArgs(wherePrURL)

@@ -15,7 +15,6 @@ workspace/ -> wrk --where --pr=https://github.com/acme/app/pull/42
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
 	req.InProcess = true
 	req.RepoDir = initNeutralCwd(t, req.WorkRoot, "workspace")
 	req.Args = []string{"--where", "--pr=" + wherePrURL}

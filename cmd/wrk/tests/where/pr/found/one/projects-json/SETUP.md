@@ -18,7 +18,6 @@ projects.json + neutral cwd
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
 	req.InProcess = true
 	wherePrSetupRecordedLinked(t, req)
 	req.Args = wherePrArgs(wherePrURL)

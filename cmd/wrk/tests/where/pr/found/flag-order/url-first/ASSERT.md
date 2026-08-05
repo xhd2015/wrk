@@ -18,7 +18,6 @@ Same single linked worktree path as flag-first form.
 
 ```go
 func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
-	_ = d
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)

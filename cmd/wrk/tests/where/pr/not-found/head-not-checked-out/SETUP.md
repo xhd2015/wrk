@@ -17,7 +17,6 @@ recorded main (origin acme/app) on main only; no feature-pr worktree
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
 	req.InProcess = true
 	wherePrSetupRecordedMainOnly(t, req)
 	req.Args = wherePrArgs(wherePrURL)

@@ -15,7 +15,6 @@ workspace/ -> wrk --where --pr URL
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
 	req.InProcess = true
 	wherePrSetupTwoClonesOnHead(t, req)
 	req.Args = wherePrArgs(wherePrURL)

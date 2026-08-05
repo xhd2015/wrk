@@ -17,7 +17,6 @@ recorded linked + fake gh view exits 1
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
 	req.InProcess = true
 	wherePrSetupRecordedLinked(t, req)
 	setWherePrViewExit(t, req, 1)

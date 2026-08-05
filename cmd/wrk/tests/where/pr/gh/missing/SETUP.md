@@ -17,7 +17,6 @@ recorded linked + PATH without gh
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
 	// Subprocess: ExtraEnv PATH=<git-only> must not os.Setenv process PATH under Capture.
 	req.InProcess = false
 	// Seed git layout without fake gh install.

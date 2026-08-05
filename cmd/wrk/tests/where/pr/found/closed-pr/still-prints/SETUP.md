@@ -16,7 +16,6 @@ recorded linked wt on feature-pr; FAKE_GH_VIEW_JSON state=CLOSED
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
 	req.InProcess = true
 	wherePrSetupRecordedLinked(t, req)
 	setWherePrViewJSON(t, req, wherePrViewJSON(wherePrHeadBranch, "CLOSED"))

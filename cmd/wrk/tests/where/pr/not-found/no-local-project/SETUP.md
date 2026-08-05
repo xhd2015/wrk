@@ -16,7 +16,6 @@ unrelated non-github project only; neutral cwd
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
 	req.InProcess = true
 	wherePrSetupNoMatchingProject(t, req)
 	req.Args = wherePrArgs(wherePrURL)

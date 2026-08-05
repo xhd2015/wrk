@@ -63,9 +63,7 @@ const (
 )
 
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
 	skipIfNoGit(t)
-	wherePrEnsureHelpersUsed()
 	return nil
 }
 
@@ -355,29 +353,4 @@ func setWherePrURLFirst(req *Request, url string) {
 	req.Args = []string{"--where", "--pr"}
 }
 
-func wherePrEnsureHelpersUsed() {
-	_ = installWherePrFakeGh
-	_ = installWherePrPathWithoutGh
-	_ = setWherePrViewJSON
-	_ = setWherePrViewExit
-	_ = wherePrViewJSON
-	_ = wherePrSetupBareOrigin
-	_ = wherePrConfigureGithubOrigin
-	_ = wherePrSetupMainWithOrigin
-	_ = wherePrAddLinkedOnHead
-	_ = wherePrSetupRecordedLinked
-	_ = wherePrSetupUnrecordedLinked
-	_ = wherePrSetupTwoClonesOnHead
-	_ = wherePrSetupRecordedMainOnly
-	_ = wherePrSetupNoMatchingProject
-	_ = wherePrArgs
-	_ = wherePrThenWhereArgs
-	_ = setWherePrURLFirst
-	_ = wherePrURL
-	_ = wherePrURLTrailing
-	_ = wherePrOwner
-	_ = wherePrRepo
-	_ = wherePrNumber
-	_ = wherePrHeadBranch
-}
 ```

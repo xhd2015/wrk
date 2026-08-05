@@ -20,7 +20,6 @@ import (
 )
 
 func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
-	_ = d
 	assertErrIsNil(t, err)
 	if resp.ExitCode == 0 {
 		t.Fatalf("bare number must fail; stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
