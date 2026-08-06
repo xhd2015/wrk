@@ -59,5 +59,8 @@ type TagNextOptions struct {
 type PushOptions struct {
 	Checkout string
 	DryRun   bool
-	Tags     []string
+	// Force uses git push --force-with-lease for the branch only.
+	// Tags are always pushed without force.
+	Force bool
+	Tags  []string
 }

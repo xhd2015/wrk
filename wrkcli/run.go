@@ -190,6 +190,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var propagateTags bool
 	var syncFlag bool
 	var pushFlag bool
+	var forcePush bool // -f/--force: modifier of --push only (force-with-lease)
 	var prFlag bool
 	var prTitle *string
 	var prComment *string
@@ -264,6 +265,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--propagate-tags", &propagateTags).
 		Bool("--sync", &syncFlag).
 		Bool("--push", &pushFlag).
+		Bool("-f,--force", &forcePush).
 		Bool("--pr", &prFlag).
 		String("--title", &prTitle).
 		String("--comment", &prComment).
@@ -1013,6 +1015,10 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if dryRun && !done && !mergeBack && !tagNext && !propagateTags && !syncFlag && !reinstallLocal && !pushFlag && !unwind && !manualCommit {
 		return fmt.Errorf("wrk: --dry-run is only valid with --done, --merge-back, --tag-next, --propagate-tags, --sync, --reinstall-local, --push, --unwind, --gen-commit-msg, or --commit -m/--message")
 	}
+	// -f/--force is a push modifier only (D5): never a bare primary.
+	if forcePush && !pushFlag {
+		return fmt.Errorf("wrk: -f/--force is only valid with --push")
+	}
 
 	// Manual --commit -m is a pipeline stage (same partners as gen-commit-msg).
 	// Exclusive with non-pipeline modes (status/list/create/etc.).
@@ -1049,6 +1055,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			DryRun:         dryRun,
 			TagNext:        tagNext,
 			Push:           pushFlag,
+			Force:          forcePush,
 			Done:           done,
 			MergeBack:      mergeBack,
 			ReinstallLocal: reinstallLocal,
@@ -1167,7 +1174,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		}
 		runPrimary := func() error {
 			// Own keeps default auto-yes; cascade not-included requires -y or explicit confirm (D3).
-			return runDone(workDir, wrkHome, confirmFromStdin, assumeYes, forceConfirm, noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
+			return runDone(workDir, wrkHome, confirmFromStdin, assumeYes, forceConfirm, noInModuleReplace, noCd, forceCd, execArgs, syncFlag, tagNext, pushFlag, forcePush, propagateTags, reinstallLocal, dryRun, colorFlag)
 		}
 		// Dry-run gen/manual commit pre would commit staged dirt; MergeBack --rm still
 		// requires a clean tree today. Stash staged only for the dry plan, then restore.
@@ -1185,7 +1192,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		}
 		// merge-back keeps the worktree (Remove=false); dirty is allowed by MergeBack.
 		// Default auto-yes; --confirm restores prompts; -y still auto-yes.
-		return runMergeBack(workDir, wrkHome, confirmFromStdin, planAssumeYes(assumeYes, forceConfirm), syncFlag, tagNext, pushFlag, propagateTags, reinstallLocal, dryRun, colorFlag)
+		return runMergeBack(workDir, wrkHome, confirmFromStdin, planAssumeYes(assumeYes, forceConfirm), syncFlag, tagNext, pushFlag, forcePush, propagateTags, reinstallLocal, dryRun, colorFlag)
 	}
 	// Multi-stage without done/merge-back: fixed order on activeRoot (= cwd toplevel).
 	// Stages: gen-commit|manual-commit → sync → tag-next → push → pr → propagate-tags → reinstall-local → exec.
@@ -1228,7 +1235,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 					comment = *prComment
 				}
 			}
-			return runActiveRootPipeline(workDir, wrkHome, genCommitMsg, genCommitArgs, manualCommit, manualMessage, noVerify, addAll, syncFlag, tagNext, pushFlag, prFlag, title, comment, propagateTags, reinstallLocal, dryRun, colorFlag, execArgs)
+			return runActiveRootPipeline(workDir, wrkHome, genCommitMsg, genCommitArgs, manualCommit, manualMessage, noVerify, addAll, syncFlag, tagNext, pushFlag, forcePush, prFlag, title, comment, propagateTags, reinstallLocal, dryRun, colorFlag, execArgs)
 		}
 	}
 	// Bare compose: --tag-next --propagate-tags [--push] [--dry-run].
@@ -1237,7 +1244,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		if err := requireMainActiveRoot(workDir, "--tag-next"); err != nil {
 			return err
 		}
-		return runTagNextPropagateCompose(workDir, wrkHome, dryRun, pushFlag)
+		return runTagNextPropagateCompose(workDir, wrkHome, dryRun, pushFlag, forcePush)
 	}
 	if tagNext {
 		if err := requireMainActiveRoot(workDir, "--tag-next"); err != nil {
@@ -1254,7 +1261,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 				fmt.Println() // blank line between tag-next block and push confirm
 			}
 			// With --json: still push branch+tags, but keep stdout JSON-clean.
-			if err := runPushMainWithOutput(tagRes.MainRepo, dryRun, tagRes.Tags, !jsonFlag); err != nil {
+			if err := runPushMainWithOutput(tagRes.MainRepo, dryRun, forcePush, tagRes.Tags, !jsonFlag); err != nil {
 				return err
 			}
 		}
@@ -1267,9 +1274,9 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		return runSync(workDir, dryRun)
 	}
 	// Bare --push: option R — push current checkout branch (linked worktree →
-	// that worktree's branch; main → main's branch).
+	// that worktree's branch; main → main's branch). -f/--force → force-with-lease.
 	if pushFlag {
-		return runBarePush(workDir, dryRun)
+		return runBarePush(workDir, dryRun, forcePush)
 	}
 	// Bare --pr: show / comment-only / create-attach depending on flags.
 	if prFlag {
@@ -1408,6 +1415,8 @@ Flags:
                                   with --done/--merge-back: push main branch (and tags when with --tag-next);
                                   with --tag-next: also push newly created tags (branch + tags);
                                   with --pr: full-push branch tip then run PR path
+  -f, --force                     with --push: force-with-lease branch push (tags stay non-force);
+                                  only valid with --push
   --pr                            show open GitHub PR URL for current linked-worktree branch (or empty);
                                   with --status: print open PR metadata + checks/reviews rollup (or empty);
                                   with --comment only: add comment to existing open PR (error if none);
@@ -1922,7 +1931,7 @@ func requireMainActiveRoot(workDir, flag string) error {
 // (ensure-push is a no-op once remote tip already matches after the push stage).
 // When withPush and withPR and title empty: push-existing / push+comment —
 // list open PR first, then full tip push, then optional comment + URL.
-func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommitArgs []string, manualCommit bool, manualMessage string, noVerify, addAll, withSync, withTagNext, withPush, withPR bool, prTitle, prComment string, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool, execArgs []string) error {
+func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommitArgs []string, manualCommit bool, manualMessage string, noVerify, addAll, withSync, withTagNext, withPush, forcePush, withPR bool, prTitle, prComment string, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool, execArgs []string) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -1994,7 +2003,7 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 	pushExisting := withPush && withPR && strings.TrimSpace(prTitle) == ""
 	if pushExisting {
 		blankBefore()
-		if err := runPRPushExisting(activeRoot, prComment, dryRun, colorFlag); err != nil {
+		if err := runPRPushExisting(activeRoot, prComment, dryRun, forcePush, colorFlag); err != nil {
 			return err
 		}
 		printed = true
@@ -2005,7 +2014,7 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 			if withTagNext {
 				tags = createdTags
 			}
-			if err := runPushMain(activeRoot, dryRun, tags); err != nil {
+			if err := runPushMain(activeRoot, dryRun, forcePush, tags); err != nil {
 				return err
 			}
 			printed = true
@@ -2056,7 +2065,7 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 	return nil
 }
 
-func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool) error {
+func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, noInModuleReplace, noCd, forceCd bool, execArgs []string, withSync, withTagNext, withPush, forcePush, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool) error {
 	// Shell process cwd (inherited from interactive shell), not merely workDir.
 	// Used after remove to decide whether auto-cd is needed.
 	shellCwd, _ := processCwd()
@@ -2151,12 +2160,12 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 	// Dry-run: still print post stages in dry mode; skip exec/land.
 	// Real success: apply post stages then exec/land.
 	if dryRun {
-		if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, withPropagateTags, true); err != nil {
+		if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, forcePush, withPropagateTags, true); err != nil {
 			return err
 		}
 		return runComposeReinstallLocal(result, withReinstallLocal, true, colorFlag)
 	}
-	if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, withPropagateTags, false); err != nil {
+	if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, forcePush, withPropagateTags, false); err != nil {
 		return err
 	}
 	if err := runComposeReinstallLocal(result, withReinstallLocal, false, colorFlag); err != nil {
@@ -2176,7 +2185,7 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 	return nil
 }
 
-func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync, withTagNext, withPush, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool) error {
+func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync, withTagNext, withPush, forcePush, withPropagateTags, withReinstallLocal, dryRun bool, colorFlag bool) error {
 	checkoutRoot, err := requireLinkedWorktree(workDir, "--merge-back")
 	if err != nil {
 		return err
@@ -2208,7 +2217,7 @@ func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync
 		return nil
 	}
 	// Post-pipeline same order as runDone (no exec/land). Worktree kept.
-	if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, withPropagateTags, dryRun); err != nil {
+	if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, forcePush, withPropagateTags, dryRun); err != nil {
 		return err
 	}
 	return runComposeReinstallLocal(result, withReinstallLocal, dryRun, colorFlag)
@@ -2270,7 +2279,7 @@ func runComposeReinstallLocal(result *worktree.MergeBackResult, withReinstallLoc
 // includes --tag-next and --propagate-tags, planned next tags are threaded into
 // the propagate plan (same as bare --tag-next --propagate-tags --dry-run).
 // Blank line between major stdout stages.
-func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome string, withSync, withTagNext, withPush, withPropagateTags, dryRun bool) error {
+func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome string, withSync, withTagNext, withPush, forcePush, withPropagateTags, dryRun bool) error {
 	if !withSync && !withTagNext && !withPush && !withPropagateTags {
 		return nil
 	}
@@ -2322,7 +2331,7 @@ func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome 
 		if withTagNext {
 			tags = createdTags
 		}
-		if err := runPushMain(mainPath, dryRun, tags); err != nil {
+		if err := runPushMain(mainPath, dryRun, forcePush, tags); err != nil {
 			return err
 		}
 	}

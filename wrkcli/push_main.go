@@ -10,9 +10,10 @@ import (
 	"github.com/xhd2015/wrk/workops"
 )
 
-// runBarePush implements wrk --push [--dry-run]: push the current checkout's
-// branch (option R — ShowToplevel of cwd, not always main).
-func runBarePush(workDir string, dryRun bool) error {
+// runBarePush implements wrk --push [--force] [--dry-run]: push the current
+// checkout's branch (option R — ShowToplevel of cwd, not always main).
+// force uses git push --force-with-lease for the branch only.
+func runBarePush(workDir string, dryRun, force bool) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -24,23 +25,25 @@ func runBarePush(workDir string, dryRun bool) error {
 	if err != nil {
 		return fmt.Errorf("%s is not a git repository", cwd)
 	}
-	return runPushMain(checkoutRoot, dryRun, nil)
+	return runPushMain(checkoutRoot, dryRun, force, nil)
 }
 
 // runPushMain pushes the current branch of mainRepo to its upstream remote
 // (preferred) or origin + branch name (fallback). When tags is non-empty,
 // also pushes those tag refs to the same remote. dryRun prints would: lines
-// only and does not push. Human confirmation / would: lines are printed on stdout.
+// only and does not push. force uses --force-with-lease for the branch only
+// (tags stay non-force). Human confirmation / would: lines are printed on stdout.
 //
 // Core network push is workops.Push; CLI keeps would:/pushed printing.
-func runPushMain(mainRepo string, dryRun bool, tags []string) error {
-	return runPushMainWithOutput(mainRepo, dryRun, tags, true)
+// Confirm line stays "pushed … → …" even when force is set (not "force-pushed").
+func runPushMain(mainRepo string, dryRun, force bool, tags []string) error {
+	return runPushMainWithOutput(mainRepo, dryRun, force, tags, true)
 }
 
 // runPushMainWithOutput is like runPushMain. When printOutput is false (e.g.
 // --tag-next --push --json), git push still runs but stdout stays clean of
 // human would:/pushed lines so JSON output is not mixed with confirmations.
-func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOutput bool) error {
+func runPushMainWithOutput(mainRepo string, dryRun, force bool, tags []string, printOutput bool) error {
 	branch, err := gitOutputDir(mainRepo, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return fmt.Errorf("wrk: resolve current branch for push: %w", err)
@@ -59,15 +62,13 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 			remote = "origin"
 			remoteBranch = branch
 			if printOutput {
-				fmt.Printf("would: git push %s %s\n", remote, branch)
-				for _, tag := range tags {
-					fmt.Printf("would: git push %s %s\n", remote, tag)
-				}
+				printWouldPushLines(remote, branch, tags, force)
 			}
 			// workops.Push DryRun also no-ops when remote missing.
 			return workops.Push(context.Background(), workops.PushOptions{
 				Checkout: mainRepo,
 				DryRun:   true,
+				Force:    force,
 				Tags:     tags,
 			})
 		}
@@ -76,14 +77,12 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 
 	if dryRun {
 		if printOutput {
-			fmt.Printf("would: git push %s %s\n", remote, branch)
-			for _, tag := range tags {
-				fmt.Printf("would: git push %s %s\n", remote, tag)
-			}
+			printWouldPushLines(remote, branch, tags, force)
 		}
 		return workops.Push(context.Background(), workops.PushOptions{
 			Checkout: mainRepo,
 			DryRun:   true,
+			Force:    force,
 			Tags:     tags,
 		})
 	}
@@ -91,6 +90,7 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 	if err := workops.Push(context.Background(), workops.PushOptions{
 		Checkout: mainRepo,
 		DryRun:   false,
+		Force:    force,
 		Tags:     tags,
 	}); err != nil {
 		// Map library errors to wrk: prefix for CLI consistency where useful.
@@ -98,9 +98,23 @@ func runPushMainWithOutput(mainRepo string, dryRun bool, tags []string, printOut
 	}
 
 	if printOutput {
+		// Stable confirm line — never "force-pushed" (D3).
 		fmt.Printf("pushed %s → %s/%s\n", branch, remote, remoteBranch)
 	}
 	return nil
+}
+
+// printWouldPushLines emits dry-run plan lines for branch (force-with-lease when
+// force) and non-force tag pushes.
+func printWouldPushLines(remote, branch string, tags []string, force bool) {
+	if force {
+		fmt.Printf("would: git push --force-with-lease %s %s\n", remote, branch)
+	} else {
+		fmt.Printf("would: git push %s %s\n", remote, branch)
+	}
+	for _, tag := range tags {
+		fmt.Printf("would: git push %s %s\n", remote, tag)
+	}
 }
 
 // resolvePushRemote returns remote and remote branch for pushing mainRepo's

@@ -276,7 +276,7 @@ func runPRComment(workDir, comment string, colorFlag bool) error {
 //
 //	[comment added]
 //	https://...
-func runPRPushExisting(workDir, comment string, dryRun bool, colorFlag bool) error {
+func runPRPushExisting(workDir, comment string, dryRun, force bool, colorFlag bool) error {
 	comment = strings.TrimSpace(comment)
 
 	checkoutRoot, headBranch, err := prSharedGates(workDir)
@@ -293,7 +293,7 @@ func runPRPushExisting(workDir, comment string, dryRun bool, colorFlag bool) err
 	}
 
 	// Full tip push (same as bare --push / compose push stage).
-	if err := runPushMain(checkoutRoot, dryRun, nil); err != nil {
+	if err := runPushMain(checkoutRoot, dryRun, force, nil); err != nil {
 		return err
 	}
 

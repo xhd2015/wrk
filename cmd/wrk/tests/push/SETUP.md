@@ -15,11 +15,18 @@ git checkout (main or linked wt) + bare origin
   -> would: git push origin <branch>
   -> no remote mutation
 
+# force (see force/): -f/--force only with --push → git push --force-with-lease
+  -> wrk --push -f [--dry-run]
+  -> would: git push --force-with-lease origin <branch>  (dry-run)
+  -> confirm stays: pushed <branch> → origin/<branch>
+  -> without --push: wrk: -f/--force is only valid with --push
+
 # errors
   -> no origin/upstream -> non-zero, clear stderr
   -> --push --json alone -> still invalid (json only with --tag-next)
   -> --push --list -> mutually exclusive
 ```
+
 
 ## Preconditions
 

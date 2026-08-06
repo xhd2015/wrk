@@ -46,8 +46,15 @@ func Push(ctx context.Context, opts PushOptions) error {
 		return nil
 	}
 
-	if err := gitRun(checkout, "push", remote, branch); err != nil {
-		return fmt.Errorf("workops: git push %s %s: %w", remote, branch, err)
+	// Branch: optional --force-with-lease (never bare --force). Tags stay non-force.
+	if opts.Force {
+		if err := gitRun(checkout, "push", "--force-with-lease", remote, branch); err != nil {
+			return fmt.Errorf("workops: git push --force-with-lease %s %s: %w", remote, branch, err)
+		}
+	} else {
+		if err := gitRun(checkout, "push", remote, branch); err != nil {
+			return fmt.Errorf("workops: git push %s %s: %w", remote, branch, err)
+		}
 	}
 	for _, tag := range opts.Tags {
 		if tag == "" {

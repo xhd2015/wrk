@@ -161,7 +161,7 @@ func plannedTagNames(plan tagscope.ChangePlan) []string {
 //
 // Flag order is free; stage order is fixed. --json is rejected at the flag layer.
 // Matches done-pipeline: tags created locally, then runPushMain for branch+tags.
-func runTagNextPropagateCompose(workDir, wrkHome string, dryRun, push bool) error {
+func runTagNextPropagateCompose(workDir, wrkHome string, dryRun, push, force bool) error {
 	// Create tags locally only; push (if any) is via runPushMain with tag list.
 	tagRes, err := runTagNextAtResult(workDir, "HEAD", dryRun, false, false)
 	if err != nil {
@@ -170,7 +170,7 @@ func runTagNextPropagateCompose(workDir, wrkHome string, dryRun, push bool) erro
 
 	if push {
 		fmt.Println() // blank line before push confirmation
-		if err := runPushMain(tagRes.MainRepo, dryRun, tagRes.Tags); err != nil {
+		if err := runPushMain(tagRes.MainRepo, dryRun, force, tagRes.Tags); err != nil {
 			return err
 		}
 	}

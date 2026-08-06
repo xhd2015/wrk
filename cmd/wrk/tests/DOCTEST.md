@@ -269,7 +269,15 @@ wrk tests
 │   ├── from-linked-worktree/     # option R: push worktree branch tip
 │   ├── exclusive-with-list/      # --push --list mutually exclusive
 │   ├── json-rejected/            # --push --json alone still invalid
-│   └── events/                   # events.jsonl command=push
+│   ├── events/                   # events.jsonl command=push
+│   └── force/                    # -f/--force → --force-with-lease (classic TDD RED)
+│       ├── without-push/         # -f / --force alone → only valid with --push
+│       ├── dry-run/              # would: git push --force-with-lease …
+│       ├── accepted/             # --push -f / --force on FF-ok tips
+│       ├── non-ff/               # diverged: bare fails; -f succeeds
+│       ├── from-linked-worktree/ # option R + force from feature wt
+│       └── flag-order-force-first/ # -f --push ≡ --push -f
+
 ├── done-pipeline/                # done post-pipeline sync → tag-next → push → propagate-tags
 │   ├── tag-next-local/           # --done -y --tag-next → local v0.0.2 at main HEAD
 │   ├── tag-next-push/            # --done -y --tag-next --push → local+origin tags + branch

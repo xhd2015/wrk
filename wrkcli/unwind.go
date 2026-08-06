@@ -41,6 +41,7 @@ type UnwindFlags struct {
 	DryRun         bool
 	TagNext        bool
 	Push           bool
+	Force          bool // with Push: force-with-lease branch push
 	Done           bool
 	MergeBack      bool
 	ReinstallLocal bool
@@ -641,7 +642,7 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		if flags.Push {
 			fmt.Println()
 			// Publish branch + tags created by this peel's tag-next (if any).
-			if err := runPushMain(mainPath, false, createdTags); err != nil {
+			if err := runPushMain(mainPath, false, flags.Force, createdTags); err != nil {
 				return err
 			}
 		}
