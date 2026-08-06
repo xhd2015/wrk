@@ -7,18 +7,21 @@
 dirty pending free-first
   -> cycle/flag validation before any mutation
   -> peel each free dirty repo: optional commit → land (if linked) → tag/push/…
-  -> after peeling dep U: Pin consumers at in-scope Path + go mod tidy
+  -> after peeling dep U: Pin only modules C requires/replaces at in-scope Path
+  -> go mod tidy (failures include go child stderr)
   -> --done removes linked WT; reinstall soft on fail
 ```
 
 ## Preconditions
 
 - Parent helpers: `setupApplyLeafPinStack`, `setupApplyLinkedConsumerPinStack`,
+  `setupApplyMultiModuleRootOnlyPinStack`, `setupApplyTidyErrorPinStack`,
   `setupApplyAlreadyMainRootBump`, pin/tag/origin asserts, local bare remotes,
   optional `file://` modproxy.
 - Leaves set `req.InProcess = true` and full `req.Args` **without** `--dry-run`.
-- Pin target Path ≠ MainRepo leaf expects **RED** until implementer stops remapping
-  consumers to MainRepo; pin-when-primary-is-main (leaf-then-pin) stays **GREEN**.
+- **RED** until implementer: pin Path≠MainRepo (A4); multi-module require-root-only
+  pin selectivity (A5); tidy go-child stderr (A6). leaf-then-pin / already-main /
+  done-removes stay **GREEN**.
 
 ## Steps
 

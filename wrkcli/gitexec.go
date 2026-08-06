@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,7 +40,8 @@ func logGoCommand(args []string) {
 
 // goModTidy runs `go mod tidy` in dir. Under -v: timestamped pre-line on stderr
 // then streams child stdout+stderr to process stderr (so wrk stdout stays clean).
-// Without -v: silent (no pre-line, discard child streams).
+// Without -v: silent success (no pre-line). Always captures child streams so
+// failure wraps include the go diagnostic body, not only exit status 1.
 func goModTidy(dir string) error {
 	absDir := dir
 	if abs, err := filepath.Abs(dir); err == nil {
@@ -50,12 +52,22 @@ func goModTidy(dir string) error {
 	}
 	cmd := exec.Command("go", "mod", "tidy")
 	cmd.Dir = absDir
+	var buf bytes.Buffer
 	if invocationVerbose {
-		// Route both streams to process stderr so path-only stdout stays clean.
-		cmd.Stdout = os.Stderr
-		cmd.Stderr = os.Stderr
+		// Stream and capture so path-only stdout stays clean and failures
+		// still carry the go diagnostic body.
+		mw := io.MultiWriter(os.Stderr, &buf)
+		cmd.Stdout = mw
+		cmd.Stderr = mw
+	} else {
+		cmd.Stdout = &buf
+		cmd.Stderr = &buf
 	}
 	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(buf.String())
+		if msg != "" {
+			return fmt.Errorf("failed to execute go mod tidy: %w\n%s", err, msg)
+		}
 		return fmt.Errorf("failed to execute go mod tidy: %w", err)
 	}
 	return nil

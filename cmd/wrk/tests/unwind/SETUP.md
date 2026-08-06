@@ -11,6 +11,7 @@ stack (root + nested external/*) + go require edges
   -> else would: peel <display-path>… free-first among dirty pending
   -> gen-commit: would: git add -A and/or leave-N as flags/porcelain
   -> apply (no --dry-run): peel free-first + pin at in-scope Path (not MainRepo remap)
+  -> multi-mod dep: pin only modules C requires/replaces; tidy errors include go stderr
 ```
 
 ## Preconditions
@@ -22,13 +23,15 @@ stack (root + nested external/*) + go require edges
   `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/wrk` (file-locked) for fixture
   create / worktree helpers when needed.
 - Apply fixtures use local bare remotes + optional `file://` module proxy (no network).
-- Pin-on-linked-consumer contracts are Classic TDD (**RED** until pin uses Path).
+- Pin-on-linked-consumer, multi-module pin selectivity, and tidy-stderr contracts are
+  Classic TDD (**RED** until implementer lands).
 
 ## Steps
 
 1. Root `Setup` creates isolated `{WorkRoot}` and `{WorkRoot}/.wrk`.
-2. Leaves seed stack fixtures (single main, 3-repo chain, 2-repo apply, linked-consumer pin, or 2-cycle)
-   and set `req.Args` / `req.RepoDir` / `req.PeelOrder` (display paths) / apply fields.
+2. Leaves seed stack fixtures (single main, 3-repo chain, 2-repo apply, linked-consumer
+   pin, multi-module dep pin, tidy-error pin, or 2-cycle) and set `req.Args` /
+   `req.RepoDir` / `req.PeelOrder` (display paths) / apply fields.
 3. Root `Run` invokes wrk via `wrkcli.Capture` when `InProcess` (default for leaves).
 
 ## Context
@@ -41,10 +44,14 @@ stack (root + nested external/*) + go require edges
   Linked-consumer fixtures materialize **both** consumer main (baseline go.mod)
   and consumer linked WT (require + replace); asserts prove main baseline
   untouched and WT pinned.
+- **Pin module selectivity** — multi-module dep fixtures have root + nested go.mod
+  under one dep main; consumer requires **only root**. After peel+pin, consumer
+  must not gain a nested-module require (Cartesian pin is the production bug).
 - Dirtiness v1: untracked file `DIRTY` under a stack checkout path (counts as N=1
   not-fully-staged for leave-N when not staged).
 - Apply leaf fixtures also commit **ahead-of-main** work on linked WTs so land
   has content; pin leaves seed `{WorkRoot}/modproxy` + `ExtraEnv` for tidy.
+  Tidy-error leaf seeds **old** proxy only so tidy fails after pin to next.
 - After materializing nested externals, consumer porcelain is cleaned before
   intentional dirtify so dirty-filter tests stay intentional.
 - L2: leave `req.InProcess = true` on every leaf.
@@ -75,16 +82,23 @@ const (
 	unwindDotPkgsModule  = "example.com/dot-pkgs"
 	unwindCycleAModule   = "example.com/cycle-a"
 	unwindCycleBModule   = "example.com/cycle-b"
+	// Multi-module dep (A5): root + nested under one git main.
+	unwindDepModule       = "example.com/dep"
+	unwindDepNestedModule = "example.com/dep/nested"
+	unwindDepNestedDir    = "nested" // rel path under dep main
 
 	labelRoot     = "root"
 	labelAgentPro = "agent-pro"
 	labelDotPkgs  = "dot-pkgs"
 	labelCycleA   = "cycle-a"
 	labelCycleB   = "cycle-b"
+	labelDep      = "dep"
 
 	// Apply pin baseline / next tags (root-bump style on leaf module).
 	unwindApplyOldTag  = "v0.0.1"
 	unwindApplyNextTag = "v0.0.2"
+	// Nested-scope baseline tag for multi-module dep (path-prefixed).
+	unwindNestedOldTag = "nested/v0.0.1"
 )
 
 // harnessDoctest holds inject fields from d (no os.Setenv — Parallel-safe).
@@ -958,6 +972,12 @@ func writeModuleZip(zipPath, modulePath, version, srcDir string) error {
 			if path != srcDir && (base == ".git" || base == "sub") {
 				return filepath.SkipDir
 			}
+			// Nested Go modules must not be packed into a parent module zip.
+			if path != srcDir {
+				if _, statErr := os.Stat(filepath.Join(path, "go.mod")); statErr == nil {
+					return filepath.SkipDir
+				}
+			}
 			return nil
 		}
 		rel, err := filepath.Rel(srcDir, path)
@@ -994,10 +1014,25 @@ func enableFileModuleProxy(t *testing.T, req *Request, proxyRoot string) {
 		t.Fatalf("abs proxy: %v", err)
 	}
 	proxyURL := "file://" + abs
+	// Per-WorkRoot module cache so leaves cannot share GOMODCACHE artifacts
+	// (e.g. tidy-error must not see next versions downloaded by other leaves).
+	modcache := filepath.Join(req.WorkRoot, "gomodcache")
+	mkdirAll(t, modcache)
+	// Go module cache writes read-only files; unlock so t.TempDir cleanup succeeds.
+	t.Cleanup(func() {
+		_ = filepath.Walk(modcache, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info == nil {
+				return nil
+			}
+			_ = os.Chmod(path, info.Mode()|0o200)
+			return nil
+		})
+	})
 	req.ExtraEnv = append(req.ExtraEnv,
 		"GOPROXY="+proxyURL,
 		"GOSUMDB=off",
 		"GONOSUMDB=*",
+		"GOMODCACHE="+modcache,
 	)
 }
 
@@ -1209,6 +1244,186 @@ func setupApplyLinkedConsumerPinStack(t *testing.T, req *Request) {
 	setPeelOrderDisplays(t, req, leafExt)
 }
 
+// setupApplyMultiModuleRootOnlyPinStack builds multi-module dep + root-only consumer:
+//
+//	dep multi-module main:
+//	  example.com/dep (root) + nested/ → example.com/dep/nested
+//	  tags: v0.0.1 (root) and nested/v0.0.1; bare origin
+//	  linked WT under root/external: only root pkg bumped for next tag (nested clean)
+//	consumer main (RepoDir = MainRepo): requires ONLY example.com/dep@v0.0.1
+//	  (imports root package; never requires nested)
+//
+// modproxy seeds root@v0.0.1 + root@v0.0.2 and nested@v0.0.1 only (no nested next).
+// Current product Cartesian-pins nested@root-next → tidy fails / nested force-added.
+// Expected after fix: root require → v0.0.2; nested never appears; tidy OK; exit 0.
+func setupApplyMultiModuleRootOnlyPinStack(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDepModule
+	req.NestedModulePath = unwindDepNestedModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- multi-module dep main ---
+	depMain := filepath.Join(req.WorkRoot, labelDep)
+	initGitRepoOnMain(t, depMain)
+	writeGoModRequire(t, depMain, unwindDepModule)
+	writeFile(t, filepath.Join(depMain, "pkg.go"),
+		"package dep\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	// Nested module under nested/ (independent go.mod; not required by consumer).
+	nestedDir := filepath.Join(depMain, unwindDepNestedDir)
+	mkdirAll(t, nestedDir)
+	writeGoModRequire(t, nestedDir, unwindDepNestedModule)
+	writeFile(t, filepath.Join(nestedDir, "pkg.go"),
+		"package nested\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, depMain, "add", "go.mod", "pkg.go",
+		filepath.Join(unwindDepNestedDir, "go.mod"),
+		filepath.Join(unwindDepNestedDir, "pkg.go"))
+	runGitIsolated(t, depMain, "commit", "-m", "add multi-module dep")
+	createLightweightTag(t, depMain, unwindApplyOldTag, "")
+	createLightweightTag(t, depMain, unwindNestedOldTag, "")
+	depMain = resolvePath(t, depMain)
+	req.SecondRepo = depMain
+	req.DepPath = depMain
+
+	bare := setupBareOrigin(t, req.WorkRoot, "dep-origin")
+	attachOriginAndPushMain(t, depMain, bare)
+	runGitIsolated(t, depMain, "push", "origin", unwindApplyOldTag)
+	runGitIsolated(t, depMain, "push", "origin", unwindNestedOldTag)
+	req.OriginBare = bare
+
+	// --- root consumer on main: require only root dep module ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindDepModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindDepModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer require-root-only")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	// Nest dep linked WT under root/external (stack member).
+	extDir := filepath.Join(rootMain, "external")
+	mkdirAll(t, extDir)
+	depExt := filepath.Join(extDir, labelDep+"-"+branchNameMainDate())
+	runGitIsolated(t, depMain, "worktree", "add", "-b", branchNameMainDate(), depExt)
+	depExt = resolvePath(t, depExt)
+	req.DepsLinkedWtDir = depExt
+	req.WtBranch = branchNameMainDate()
+
+	// Owned change on root module only (nested untouched → tag-next plans root next).
+	writeFile(t, filepath.Join(depExt, "pkg.go"),
+		"package dep\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, depExt, "add", "pkg.go")
+	runGitIsolated(t, depExt, "commit", "-m", "dep root feature for next tag")
+	markDirty(t, depExt)
+
+	writeFile(t, filepath.Join(rootMain, ".gitignore"), "/external\n")
+	runGitIsolated(t, rootMain, "add", ".gitignore")
+	runGitIsolated(t, rootMain, "commit", "-m", "ignore external stack members")
+
+	// Offline proxy: root old+next; nested old only (no nested@next → spurious pin fails tidy).
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	seedDepRootProxy(t, proxyRoot, unwindApplyOldTag, "old")
+	seedDepRootProxy(t, proxyRoot, unwindApplyNextTag, "next")
+	seedDepNestedProxy(t, proxyRoot, unwindApplyOldTag)
+	enableFileModuleProxy(t, req, proxyRoot)
+
+	req.RepoDir = rootMain
+	setPeelOrderDisplays(t, req, depExt)
+}
+
+// seedDepRootProxy writes a single-module root seed for example.com/dep@version.
+func seedDepRootProxy(t *testing.T, proxyRoot, version, label string) {
+	t.Helper()
+	seed := filepath.Join(filepath.Dir(proxyRoot), "seed-dep-root-"+label+"-"+version)
+	mkdirAll(t, seed)
+	writeGoModRequire(t, seed, unwindDepModule)
+	writeFile(t, filepath.Join(seed, "pkg.go"),
+		"package dep\n\nfunc Version() string { return \""+version+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDepModule, version, seed)
+}
+
+// seedDepNestedProxy writes example.com/dep/nested@version (single-module seed).
+func seedDepNestedProxy(t *testing.T, proxyRoot, version string) {
+	t.Helper()
+	seed := filepath.Join(filepath.Dir(proxyRoot), "seed-dep-nested-"+version)
+	mkdirAll(t, seed)
+	writeGoModRequire(t, seed, unwindDepNestedModule)
+	writeFile(t, filepath.Join(seed, "pkg.go"),
+		"package nested\n\nfunc Version() string { return \""+version+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDepNestedModule, version, seed)
+}
+
+// setupApplyTidyErrorPinStack is like leaf-then-pin but omits next-tag from
+// modproxy so after peel+pin, go mod tidy fails resolving the new require.
+// Used to assert tidy error surfaces go child stderr (not only exit status 1).
+func setupApplyTidyErrorPinStack(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+
+	bare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, bare)
+	runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	req.OriginBare = bare
+
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	extDir := filepath.Join(rootMain, "external")
+	mkdirAll(t, extDir)
+	leafExt := filepath.Join(extDir, labelDotPkgs+"-"+branchNameMainDate())
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate(), leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+	req.WtBranch = branchNameMainDate()
+
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, leafExt, "add", "pkg.go")
+	runGitIsolated(t, leafExt, "commit", "-m", "leaf feature for next tag")
+	markDirty(t, leafExt)
+
+	writeFile(t, filepath.Join(rootMain, ".gitignore"), "/external\n")
+	runGitIsolated(t, rootMain, "add", ".gitignore")
+	runGitIsolated(t, rootMain, "commit", "-m", "ignore external stack members")
+
+	// Proxy: old version only — pin will require next; tidy must fail with go diagnostic.
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	oldSeed := filepath.Join(req.WorkRoot, "seed-old-"+unwindApplyOldTag)
+	mkdirAll(t, oldSeed)
+	writeGoModRequire(t, oldSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(oldSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyOldTag, oldSeed)
+	enableFileModuleProxy(t, req, proxyRoot)
+
+	req.RepoDir = rootMain
+	setPeelOrderDisplays(t, req, leafExt)
+}
+
 // setupApplyAlreadyMainRootBump: sole root main, tagged v0.0.1, owned change at HEAD,
 // bare origin, porcelain DIRTY for pending. No stack edges → no land flags required.
 // Args set by leaf: --unwind --tag-next --push.
@@ -1336,6 +1551,70 @@ func assertLeafMainAdvancedAndTagged(t *testing.T, req *Request) {
 	}
 }
 
+// assertConsumerPinnedRootOnly checks multi-module pin selectivity:
+// root LeafModulePath bumped to ExpectedPinVersion; NestedModulePath must not
+// appear as a require. Also asserts exactly one pin log line for the consumer←dep
+// pairing (Cartesian pin of root+nested prints the basename line twice — RED surface
+// even when go mod tidy later drops an unused force-added nested require).
+func assertConsumerPinnedRootOnly(t *testing.T, req *Request) {
+	t.Helper()
+	assertConsumerPinned(t, req)
+	if req.NestedModulePath == "" {
+		t.Fatal("NestedModulePath required for multi-module root-only pin assert")
+	}
+	goMod := filepath.Join(req.MainRepo, "go.mod")
+	if ver := requireVersionInGoMod(t, goMod, req.NestedModulePath); ver != "" {
+		t.Fatalf("consumer must NOT require nested module %s (got version %q) — pin must not force-add non-required dep modules:\n%s",
+			req.NestedModulePath, ver, readFile(t, goMod))
+	}
+	// Also reject replace of nested (should never have been introduced).
+	if goModHasReplace(t, goMod, req.NestedModulePath) {
+		t.Fatalf("consumer go.mod must not replace nested module %s:\n%s",
+			req.NestedModulePath, readFile(t, goMod))
+	}
+}
+
+// assertExactlyOnePinLine fails unless combined out has exactly one
+// "pin <consumer> <- <dep>" line (version suffix optional). Cartesian multi-module
+// pin spam prints the same basename line once per dep module dir.
+func assertExactlyOnePinLine(t *testing.T, out, consumerLabel, depLabel string) {
+	t.Helper()
+	needle := "pin " + consumerLabel + " <- " + depLabel
+	count := strings.Count(out, needle)
+	if count != 1 {
+		t.Fatalf("want exactly 1 pin line containing %q (only modules C requires/replaces), got %d — cartesian multi-module pin is the bug\nout:\n%s",
+			needle, count, out)
+	}
+}
+
+// assertTidyErrorSurfacesGoStderr checks pin-phase tidy failure includes a concrete
+// go child diagnostic body, not only "exit status 1".
+func assertTidyErrorSurfacesGoStderr(t *testing.T, resp *Response) {
+	t.Helper()
+	assertExitNonZero(t, resp)
+	combined := resp.Stdout + "\n" + resp.Stderr
+	lower := strings.ToLower(combined)
+	if !strings.Contains(lower, "go mod tidy") && !strings.Contains(lower, "mod tidy") {
+		t.Fatalf("tidy failure must mention go mod tidy; combined:\n%s", combined)
+	}
+	// Concrete go diagnostics (file proxy / git / sum) — any one is enough.
+	// RED today: message is only "failed to execute go mod tidy: exit status 1"
+	// with child streams discarded when -v is off.
+	hasDiag := strings.Contains(lower, "unknown revision") ||
+		strings.Contains(lower, "no such file") ||
+		strings.Contains(lower, "missing go.sum") ||
+		strings.Contains(lower, "invalid version") ||
+		strings.Contains(lower, "not found") ||
+		strings.Contains(lower, "reading ") ||
+		strings.Contains(lower, "unrecognized import") ||
+		strings.Contains(combined, "404") ||
+		strings.Contains(combined, ".zip") ||
+		strings.Contains(combined, ".info")
+	if !hasDiag {
+		t.Fatalf("tidy failure must surface go child diagnostic (e.g. unknown revision / no such file / reading …), not only exit status; combined:\n%s", combined)
+	}
+}
+
 func unwindEnsureHelpersUsed() {
 	_ = setupSingleMainDirty
 	_ = setupThreeRepoChain
@@ -1344,7 +1623,11 @@ func unwindEnsureHelpersUsed() {
 	_ = setupTwoCycleStack
 	_ = setupApplyLeafPinStack
 	_ = setupApplyLinkedConsumerPinStack
+	_ = setupApplyMultiModuleRootOnlyPinStack
+	_ = setupApplyTidyErrorPinStack
 	_ = setupApplyAlreadyMainRootBump
+	_ = seedDepRootProxy
+	_ = seedDepNestedProxy
 	_ = recordUnwindBaseline
 	_ = readBaselineSHA
 	_ = assertUnwindZeroMutations
@@ -1360,6 +1643,9 @@ func unwindEnsureHelpersUsed() {
 	_ = assertNotContains
 	_ = assertFileNotExists
 	_ = assertConsumerPinned
+	_ = assertConsumerPinnedRootOnly
+	_ = assertExactlyOnePinLine
+	_ = assertTidyErrorSurfacesGoStderr
 	_ = assertLinkedConsumerPathPinned
 	_ = assertConsumerMainGoModUnchanged
 	_ = appendLocalReplace

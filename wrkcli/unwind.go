@@ -647,8 +647,7 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		}
 
 		// After peeling U: Pin every stack consumer that depends on U, then tidy.
-		version := pinVersionFromCreatedTags(createdTags)
-		if err := pinConsumersOfPeeled(label, mainPath, version, members, edges); err != nil {
+		if err := pinConsumersOfPeeled(label, mainPath, createdTags, members, edges); err != nil {
 			return err
 		}
 		addReinstallMainPath(mainPath)
@@ -730,6 +729,8 @@ func autoCommitIfDirty(path string) error {
 
 // pinVersionFromCreatedTags picks a go require version from tag-next results.
 // Prefers root tags (vN.N.N without path prefix); else strips scope prefix.
+// Kept for single-version fallbacks; prefer pinVersionsFromCreatedTags for
+// multi-module peels so nested modules do not inherit the root tag version.
 func pinVersionFromCreatedTags(tags []string) string {
 	for _, t := range tags {
 		if t == "" {
@@ -751,9 +752,170 @@ func pinVersionFromCreatedTags(tags []string) string {
 	return ""
 }
 
-// pinConsumersOfPeeled pins each stack consumer repo that depends on peeledLabel
-// to the given version (or latest tag when version is empty), then go mod tidy.
-func pinConsumersOfPeeled(peeledLabel, depMainPath, version string, members []StackMember, edges []RepoEdge) error {
+// pinVersionsFromCreatedTags maps dep module paths to go require versions from
+// this peel's created tags. Root tags (vN.N.N, no path prefix) apply only to the
+// root module under depMainPath. Path tags (nested/vN.N.N) apply only to the
+// module whose directory relative to depMainPath matches the tag path prefix.
+// Modules without a matching created tag are omitted (Pin falls back to latest).
+func pinVersionsFromCreatedTags(tags []string, depMainPath string, depModByPath map[string]string) map[string]string {
+	if len(tags) == 0 || len(depModByPath) == 0 {
+		return nil
+	}
+	// relDir (slash, "" for root) → module path
+	byRel := make(map[string]string, len(depModByPath))
+	for modPath, dir := range depModByPath {
+		rel, err := filepath.Rel(depMainPath, dir)
+		if err != nil {
+			continue
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			rel = ""
+		}
+		byRel[rel] = modPath
+	}
+	out := make(map[string]string)
+	for _, tag := range tags {
+		if tag == "" {
+			continue
+		}
+		if !strings.Contains(tag, "/") {
+			if strings.HasPrefix(tag, "v") {
+				if mp, ok := byRel[""]; ok {
+					out[mp] = tag
+				}
+			}
+			continue
+		}
+		// Path-scoped tag: <rel>/vN.N.N (possibly multi-segment rel).
+		i := strings.LastIndex(tag, "/")
+		if i < 0 || i+1 >= len(tag) {
+			continue
+		}
+		rel := tag[:i]
+		ver := tag[i+1:]
+		if !strings.HasPrefix(ver, "v") || strings.Contains(ver, "/") {
+			continue
+		}
+		if mp, ok := byRel[rel]; ok {
+			out[mp] = ver
+		}
+	}
+	return out
+}
+
+// depModuleDirsByPath scans peeled main for go.mod modules: module path → dir.
+func depModuleDirsByPath(depMainPath string) (map[string]string, error) {
+	scanned, err := scan.Scan(depMainPath, scan.Options{})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string)
+	for _, sm := range scanned {
+		if sm.Path == "" {
+			continue
+		}
+		dir := depMainPath
+		if sm.Dir != "" && sm.Dir != "." {
+			dir = filepath.Join(depMainPath, filepath.FromSlash(sm.Dir))
+		}
+		out[sm.Path] = dir
+	}
+	if len(out) == 0 {
+		if p, err := readModulePath(depMainPath); err == nil && p != "" {
+			out[p] = depMainPath
+		} else {
+			// Last resort: anonymous root so single-module fixtures still pin.
+			out[""] = depMainPath
+		}
+	}
+	return out, nil
+}
+
+// consumerReferencedModulePaths returns require + replace old-paths from cMod's
+// go.mod. Only those that match a peeled dep module are candidates for Pin
+// (avoids force-adding modules the consumer never needed).
+func consumerReferencedModulePaths(cMod string) (map[string]struct{}, error) {
+	goModPath := filepath.Join(cMod, "go.mod")
+	data, err := os.ReadFile(goModPath)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]struct{})
+	if f, err := modfile.Parse(goModPath, data, nil); err == nil {
+		for _, r := range f.Require {
+			if r.Mod.Path != "" {
+				out[r.Mod.Path] = struct{}{}
+			}
+		}
+		for _, r := range f.Replace {
+			if r.Old.Path != "" {
+				out[r.Old.Path] = struct{}{}
+			}
+		}
+		return out, nil
+	}
+	// Tolerant require fallback when strict parse rejects versions.
+	if reqs, err := parseRequiresTolerant(goModPath); err == nil {
+		for _, r := range reqs {
+			if r.Path != "" {
+				out[r.Path] = struct{}{}
+			}
+		}
+	}
+	// Light replace scrape for OldPath when full parse failed.
+	scrapeReplaceOldPaths(string(data), out)
+	return out, nil
+}
+
+// scrapeReplaceOldPaths adds replace old-paths from go.mod text into out.
+func scrapeReplaceOldPaths(content string, out map[string]struct{}) {
+	inBlock := false
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(raw)
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = strings.TrimSpace(line[:i])
+		}
+		if line == "" {
+			continue
+		}
+		if !inBlock {
+			if line == "replace (" {
+				inBlock = true
+				continue
+			}
+			if strings.HasPrefix(line, "replace ") && !strings.HasPrefix(line, "replace (") {
+				rest := strings.TrimSpace(strings.TrimPrefix(line, "replace "))
+				if old := firstPathToken(rest); old != "" {
+					out[old] = struct{}{}
+				}
+			}
+			continue
+		}
+		if line == ")" {
+			inBlock = false
+			continue
+		}
+		if old := firstPathToken(line); old != "" {
+			out[old] = struct{}{}
+		}
+	}
+}
+
+func firstPathToken(line string) string {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+// pinConsumersOfPeeled pins each stack consumer that depends on peeledLabel.
+// For each consumer module, only dep modules that module requires or replaces
+// are pinned (no Cartesian force-add of multi-module dep trees). Per-module
+// version comes from this peel's created tags when available; empty Version
+// lets update.Pin resolve the latest matching tag.
+func pinConsumersOfPeeled(peeledLabel, depMainPath string, createdTags []string, members []StackMember, edges []RepoEdge) error {
 	consumerLabels := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, e := range edges {
@@ -782,14 +944,11 @@ func pinConsumersOfPeeled(peeledLabel, depMainPath, version string, members []St
 		}
 	}
 
-	// Dep modules under the peeled main: Pin each module dir (fixtures: one root).
-	depModDirs, err := moduleDirsUnder(depMainPath)
+	depModByPath, err := depModuleDirsByPath(depMainPath)
 	if err != nil {
 		return err
 	}
-	if len(depModDirs) == 0 {
-		depModDirs = []string{depMainPath}
-	}
+	versions := pinVersionsFromCreatedTags(createdTags, depMainPath, depModByPath)
 
 	for _, cl := range consumerLabels {
 		consumerDir := pathByLabel[cl]
@@ -805,16 +964,42 @@ func pinConsumersOfPeeled(peeledLabel, depMainPath, version string, members []St
 			consumerMods = []string{consumerDir}
 		}
 		for _, cMod := range consumerMods {
-			for _, dMod := range depModDirs {
+			wanted, err := consumerReferencedModulePaths(cMod)
+			if err != nil {
+				// No go.mod / unreadable — skip this consumer module.
+				continue
+			}
+			// Stable pin order by module path.
+			var toPin []string
+			for mp := range depModByPath {
+				if mp == "" {
+					// Anonymous fallback when go.mod path could not be read:
+					// pin only for single-module dep trees.
+					if len(depModByPath) == 1 {
+						toPin = append(toPin, mp)
+					}
+					continue
+				}
+				if _, ok := wanted[mp]; ok {
+					toPin = append(toPin, mp)
+				}
+			}
+			sort.Strings(toPin)
+			if len(toPin) == 0 {
+				continue
+			}
+			for _, mp := range toPin {
+				dMod := depModByPath[mp]
+				ver := versions[mp]
 				fmt.Printf("pin %s <- %s", cl, peeledLabel)
-				if version != "" {
-					fmt.Printf(" @ %s", version)
+				if ver != "" {
+					fmt.Printf(" @ %s", ver)
 				}
 				fmt.Println()
 				_, err := update.Pin(update.PinOptions{
 					ConsumerDir: cMod,
 					DepDir:      dMod,
-					Version:     version,
+					Version:     ver,
 				})
 				if err != nil {
 					return fmt.Errorf("wrk: pin %s <- %s: %w", cl, peeledLabel, err)

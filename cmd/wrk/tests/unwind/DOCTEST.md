@@ -13,11 +13,16 @@ Decision tree for **stack unwind**:
 - **Apply:** non-dry-run peels free-first with **explicit** ship/land flags;
   after shipping a dep that has stack consumers, **Pin** consumers to live tags
   and `go mod tidy`. Soft reinstall remains P1.
-- **This cycle (Classic TDD):** **pin consumers at in-scope StackMember.Path**
+- **Pin path (prior cycle):** **pin consumers at in-scope StackMember.Path**
   (primary checkout + nested external repos under it — status scan), **not**
   remapped to `MainRepo` when Path is a linked/nested checkout whose MainRepo
-  lies outside the current scope. Peel display / dry-run add-all / leave-N /
-  apply banner contracts from prior cycles remain.
+  lies outside the current scope.
+- **This cycle (Classic TDD):** (1) multi-module dep peel pins **only** dep
+  modules the consumer **requires or replaces** (no force-add of nested module
+  paths the consumer never needed); per-module pin version from this peel's
+  created tags when available. (2) `go mod tidy` failures always surface
+  **trimmed go child stderr** (not only `exit status 1`). Peel display /
+  dry-run add-all / leave-N / apply banner / pin-Path contracts remain.
 
 **Layer:** **L2** — in-process CLI via `wrkcli.Capture` (`req.InProcess=true`).
 Fixture setup may use session-built `wrk` for `--new` / worktree materialization.
@@ -77,19 +82,31 @@ non-unwind compose dry-run redesign.
   3. `--sync` / `--tag-next` / `--push` / `--reinstall-local` as flags;
      reinstall **soft** (P1).
   4. After peeling **U** that has stack consumers: for each consumer **C**
-     depending on U, for each module of U that C requires/replaces:
+     depending on U, for each module of U that **C requires or replaces**
+     (module-path match — **not** a Cartesian product of every dep module dir
+     into every consumer module dir):
      `Pin(…)` at **C's in-scope StackMember.Path** (the checkout discovered
      in the current stack inventory — primary ShowToplevel and nested
      externals). **Do not** rewrite the pin target to `C.MainRepo` when
      Path is a linked/nested checkout and MainRepo is outside this scope.
      When the scope primary *is* main, Path is main (in scope) and pin
-     **does** edit that path. Then `go mod tidy` in those consumer module dirs.
-  5. Prefer tags created by this peel's tag-next; else latest on main.
+     **does** edit that path. **Do not** force-add a nested dep module path
+     the consumer never required/replaced. Then `go mod tidy` in those
+     consumer module dirs.
+  5. Prefer **per-module** versions from this peel's tag-next created tags
+     when available; do not invent a nested version from the root tag when
+     that nested scope was not tagged this peel (prefer skip / leave that
+     require alone). Else latest on main for modules that are actually pinned.
      (Dep land/tag/push still use peeled dep **main** after merge — not changed
-     by this pin-path rule.)
+     by this pin-path / pin-selectivity rule.)
   6. `--done` removes worktree as usual.
   7. Fail-fast on hard errors (land/tag/push/pin/tidy); reinstall soft.
+     On tidy failure: error must include **trimmed go child stderr** (concrete
+     diagnostic such as `unknown revision` / missing proxy file / module path),
+     not only `exit status 1`. Quiet success without `-v` (no spam on OK tidy).
   8. Apply banner: `==== unwind: peel <display-path> ====` (same display as dry-run).
+  9. Pin log: basename short form; one line per **real** pin (no cartesian spam
+     for non-matching modules).
 - **Dry-run stdout vocabulary (locked)**  
   - Banner: `==== unwind (dry-run) ====`.  
   - One peel line per pending repo in free-first order:
@@ -115,9 +132,13 @@ non-unwind compose dry-run redesign.
 - **Error surfaces**  
   - Cycle: combined stderr/stdout contains `cycle`; exit ≠ 0; no mutations.  
   - Missing pin flags when edges exist: names `--tag-next` and `--push`; exit ≠ 0.
+  - Tidy fail: mentions `go mod tidy` (and consumer path); **includes go child
+    diagnostic body** (not only `exit status 1`).
 - **Local remotes / offline tidy** — apply leaves attach **local bare** origins
   for `--push` (no network). Pin+tidy leaves may set `GOPROXY=file://…` via
-  `req.ExtraEnv` and seed `{WorkRoot}/modproxy`.
+  `req.ExtraEnv` and seed `{WorkRoot}/modproxy`. Multi-module pin leaves seed
+  only modules/versions that should resolve; nested-not-required fixtures omit
+  nested next-tag proxy entries so a spurious nested pin fails tidy today.
 - **WRK_HOME** — isolated per leaf at `{WorkRoot}/.wrk`.
 - **WRK_DATE** — tests set `2026-06-30` for deterministic naming when creating
   worktrees.
@@ -144,6 +165,8 @@ unwind/
 ├── apply/                                # non-dry-run peel / pin
 │   ├── leaf-then-pin/                    # pin when primary Path == main (in scope)
 │   ├── pin-on-linked-consumer-not-main/  # pin Path=linked WT; MainRepo go.mod untouched
+│   ├── multi-module-pin-require-root-only/ # multi-mod dep; consumer root-only → no nested pin
+│   ├── tidy-error-surfaces-go-stderr/    # tidy fail must include go child diagnostic
 │   ├── already-main-no-land/             # single main; tag-next+push; no land
 │   └── done-removes-leaf-wt/             # --done peels leaf; external path gone
 └── cycle/
@@ -155,7 +178,8 @@ Split factor (MECE, significance-first):
 
 1. **Mode** — dry-run plan | apply mutation | cycle preflight.
 2. Within dry-run: **order/skip/flags** | **gen-commit staging vocabulary**.
-3. Within apply: **pin target Path (main-primary | linked-primary)** | **already-main no land** | **done removes WT**.
+3. Within apply: **pin target Path** | **pin module selectivity (multi-mod)** |
+   **tidy error surfacing** | **already-main no land** | **done removes WT**.
 4. Cycle: dry-run vs apply-mode (same reject, no mutations).
 
 ## Test Case Index
@@ -173,6 +197,8 @@ Split factor (MECE, significance-first):
 | C1 | cycle/two-cycle | A↔B dry-run → cycle error; zero mutations | **GREEN** |
 | A1 | apply/leaf-then-pin | primary is main (Path == MainRepo); peel leaf + pin **that** Path go.mod; banner rel display | **GREEN** (pin-when-primary-is-main) |
 | A4 | apply/pin-on-linked-consumer-not-main | primary is **linked** consumer WT; pin WT go.mod; consumer **MainRepo** go.mod baseline unchanged | **RED** until pin uses Path not MainRepo |
+| A5 | apply/multi-module-pin-require-root-only | multi-mod dep (root+nested); consumer requires **only root**; peel tags root next; **must not** force-add nested require; tidy OK | **RED** until pin matches require/replace only |
+| A6 | apply/tidy-error-surfaces-go-stderr | pin then tidy fails (next version missing from modproxy); stderr includes **go child diagnostic**, not only exit status 1 | **RED** until goModTidy captures child output |
 | A2 | apply/already-main-no-land | single main dirty + tag-next+push; no land | **GREEN** |
 | A3 | apply/done-removes-leaf-wt | `--done` peels leaf; external path gone; pin on root Path (main) | **GREEN** |
 | C2 | cycle/apply-two-cycle | A↔B apply-mode; cycle error before mutation | **GREEN** |
@@ -182,13 +208,15 @@ Split factor (MECE, significance-first):
 ```sh
 doctest vet ./cmd/wrk/tests/unwind
 doctest test -count=1 ./cmd/wrk/tests/unwind
+doctest test -count=1 ./cmd/wrk/tests/unwind/apply/multi-module-pin-require-root-only
+doctest test -count=1 ./cmd/wrk/tests/unwind/apply/tidy-error-surfaces-go-stderr
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/pin-on-linked-consumer-not-main
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/leaf-then-pin
-doctest test -count=1 ./cmd/wrk/tests/unwind/cycle/apply-two-cycle
 ```
 
-Expected **RED** only on **A4** until implementer pins at in-scope `StackMember.Path`
-instead of remapping consumers to `MainRepo`. Prior display/add-all/apply leaves stay **GREEN**.
+Expected **RED** on **A4** (pin Path), **A5** (multi-module pin selectivity), and **A6**
+(tidy go stderr) until implementer lands. Prior display/add-all/single-module pin
+leaves stay **GREEN**.
 
 ```go
 import (
@@ -231,7 +259,10 @@ type Request struct {
 	OriginBare         string // bare remote for leaf or single-main push
 	ExpectedPinVersion string // e.g. v0.0.2 after peel tag-next
 	OldRequireVersion  string // e.g. v0.0.1 pre-pin require
-	LeafModulePath     string // e.g. example.com/dot-pkgs
+	LeafModulePath     string // e.g. example.com/dot-pkgs or example.com/dep
+	// NestedModulePath is the nested multi-module dep path (e.g. example.com/dep/nested).
+	// Empty for single-module fixtures. A5 asserts this must NOT appear in consumer go.mod.
+	NestedModulePath string
 }
 
 type Response struct {
