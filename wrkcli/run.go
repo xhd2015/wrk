@@ -2912,6 +2912,89 @@ func findLiveLinkedWorktrees(mainRepo string) ([]string, error) {
 	return paths, nil
 }
 
+// planNamedSpawnPath is a read-only planner for named create intended spawn path.
+//   - absTarget exists and is a file → error
+//   - absTarget exists and is a linked worktree → intended = absTarget (caller treats as occupied)
+//   - absTarget exists as a plain directory (container) → first free
+//     {basename}-{token}-{date}[-N] path under it (path occupancy only; branch checked at create)
+//   - absTarget missing, parent exists → intended = absTarget
+//   - parent missing → error
+func planNamedSpawnPath(absTarget, basename, pathToken, date, slug string) (string, error) {
+	info, err := os.Stat(absTarget)
+	if err == nil {
+		if !info.IsDir() {
+			return "", fmt.Errorf("wrk: %s is not a directory", absTarget)
+		}
+		// Existing linked worktree: treat as exact spawn path already taken (do not nest under it).
+		if worktree.IsLinked(absTarget) {
+			return absTarget, nil
+		}
+		// Container dir: first free named subdir under absTarget.
+		for suffix := 0; suffix < 100; suffix++ {
+			wtPath, _ := candidateNames(absTarget, basename, pathToken, date, slug, suffix)
+			if _, serr := os.Stat(wtPath); serr == nil {
+				continue
+			} else if serr != nil && !os.IsNotExist(serr) {
+				return "", fmt.Errorf("stat candidate path: %w", serr)
+			}
+			return wtPath, nil
+		}
+		return "", fmt.Errorf("could not find available worktree name after 99 attempts")
+	}
+	if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat target dir: %w", err)
+	}
+	parentDir := filepath.Dir(absTarget)
+	if _, perr := os.Stat(parentDir); perr != nil {
+		if os.IsNotExist(perr) {
+			return "", fmt.Errorf("wrk: %s does not exist", parentDir)
+		}
+		return "", fmt.Errorf("stat target parent: %w", perr)
+	}
+	return absTarget, nil
+}
+
+// findReusableSiblingWorktrees returns live linked worktrees of mainRepo that are
+// direct siblings under spawnParent, porcelain-clean, and at the same HEAD as
+// sourceCheckout. Paths are absolute, cleaned, and sorted lexicographically
+// (primary = first). Dirty or clean-but-differs siblings are omitted; other-parent
+// worktrees are omitted.
+func findReusableSiblingWorktrees(mainRepo, sourceCheckout, spawnParent string) ([]string, error) {
+	spawnParent = filepath.Clean(spawnParent)
+	if abs, err := filepath.Abs(spawnParent); err == nil {
+		spawnParent = filepath.Clean(abs)
+	}
+	all, err := findLiveLinkedWorktrees(mainRepo)
+	if err != nil {
+		return nil, err
+	}
+	srcHEAD, err := gitOutputDir(sourceCheckout, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("rev-parse HEAD at source: %w", err)
+	}
+	srcHEAD = strings.TrimSpace(srcHEAD)
+	var reusable []string
+	for _, p := range all {
+		if filepath.Clean(filepath.Dir(p)) != spawnParent {
+			continue
+		}
+		// Clean: porcelain empty (untracked counts as dirty).
+		if err := worktree.IsClean(p); err != nil {
+			continue
+		}
+		head, err := gitOutputDir(p, "rev-parse", "HEAD")
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(head) != srcHEAD {
+			continue
+		}
+		reusable = append(reusable, p)
+	}
+	// all is already sorted; reusable preserves that order.
+	return reusable, nil
+}
+
 // findExistingExternalForDep returns live linked worktrees of depMain whose
 // paths lie under {consumerTop}/external/, sorted lexicographically (lex-smallest
 // first). Identity is the cleaned absolute path of each worktree.
@@ -3286,26 +3369,50 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 // resolved against origWd (the process/shell cwd), NOT the repo dir that Run
 // chdir'd into.
 //
-// Policy B (named bring): if source mainRepo already has any live linked
-// worktree (anywhere, not only under target/external), prompt to skip (TTY,
-// default Y) or hard-error (non-TTY). Skip prints the existing path on stdout
-// and does not create. Answering n proceeds with create as today.
+// Policy B (named create, scoped same-parent reuse): after resolving the intended
+// spawn path, if that path already exists → error (no create). Else consider only
+// live linked worktrees of mainRepo that are direct siblings under
+// parent(intendedSpawn), porcelain-clean, and HEAD==source checkout. TTY: prompt
+// skip (default Y, wording "would reuse" / "skip creating"); non-TTY: create
+// without refuse. No reusable siblings → create as today with no banner.
 func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, branchBase, pathToken, date, slug string, noCd, forceCd bool, execArgs []string, taskDesc string, ux createUXPlan) error {
 	// Resolve <target-dir> against the shell cwd (origWd), not the repo dir.
+	// Abs-normalize so parent comparisons match live worktree paths (macOS
+	// /var → /private/var).
 	absTarget := targetDir
 	if !filepath.IsAbs(absTarget) {
 		absTarget = filepath.Join(origWd, absTarget)
 	}
+	if abs, aerr := filepath.Abs(absTarget); aerr == nil {
+		absTarget = abs
+	}
 	absTarget = filepath.Clean(absTarget)
 
-	// Policy B: any live linked worktree of the source main repo.
-	if existing, err := findLiveLinkedWorktrees(mainRepo); err != nil {
+	// Read-only plan of intended spawn path (no create yet).
+	intendedSpawn, err := planNamedSpawnPath(absTarget, basename, pathToken, date, slug)
+	if err != nil {
 		return err
-	} else if len(existing) > 0 {
-		primary := existing[0]
-		if !term.IsTerminal(int(os.Stdin.Fd())) {
-			return fmt.Errorf("wrk: %s already has a linked worktree at %s; refusing non-interactive create (default is skip; re-run in a TTY)", basename, primary)
-		}
+	}
+	// Exact path occupied: intended spawn already on disk (dir/file/linked WT).
+	if _, err := os.Stat(intendedSpawn); err == nil {
+		return fmt.Errorf("wrk: %s already exists", intendedSpawn)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat intended spawn: %w", err)
+	}
+
+	// Policy B: reusable same-parent siblings only (not global linked scan).
+	spawnParent := filepath.Dir(intendedSpawn)
+	if abs, aerr := filepath.Abs(spawnParent); aerr == nil {
+		spawnParent = filepath.Clean(abs)
+	} else {
+		spawnParent = filepath.Clean(spawnParent)
+	}
+	reusable, err := findReusableSiblingWorktrees(mainRepo, checkoutRoot, spawnParent)
+	if err != nil {
+		return err
+	}
+	if len(reusable) > 0 && term.IsTerminal(int(os.Stdin.Fd())) {
+		primary := reusable[0]
 		// Color on stderr only when interactive terminal and NO_COLOR is unset.
 		colorOn := term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == ""
 		warnTok := "warning:"
@@ -3318,14 +3425,14 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 			}
 			return p
 		}
-		if len(existing) > 1 {
-			fmt.Fprintf(os.Stderr, "wrk: %s %s already has %d linked worktrees; reusing candidate %s\n", warnTok, basename, len(existing), pathDisp(primary))
-			for _, p := range existing[1:] {
+		if len(reusable) > 1 {
+			fmt.Fprintf(os.Stderr, "wrk: %s %s would reuse %s\n", warnTok, basename, pathDisp(primary))
+			for _, p := range reusable[1:] {
 				fmt.Fprintf(os.Stderr, "wrk: %s also present: %s\n", warnTok, pathDisp(p))
 			}
 		}
 		// Prompt on stderr; default is skip (Y/empty). No trailing newline before read.
-		fmt.Fprintf(os.Stderr, "wrk: %s %s already has a linked worktree at %s, skip creating another? [Y/n] ", warnTok, basename, pathDisp(primary))
+		fmt.Fprintf(os.Stderr, "wrk: %s %s would reuse %s, skip creating another? [Y/n] ", warnTok, basename, pathDisp(primary))
 		line, err := readStdinLineForPrompt()
 		if err != nil {
 			return fmt.Errorf("wrk: read skip confirmation: %w", err)
@@ -3351,6 +3458,7 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 			return fmt.Errorf("wrk: invalid input %q (expected y/n)", strings.TrimSpace(line))
 		}
 	}
+	// Non-TTY + reusable: create (no refuse). Empty reusable: create with no banner.
 
 	info, err := os.Stat(absTarget)
 	if err == nil {

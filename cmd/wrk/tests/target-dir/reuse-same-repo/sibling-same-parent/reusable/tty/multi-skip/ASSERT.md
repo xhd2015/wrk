@@ -1,15 +1,16 @@
 ---
 label: e2e, tty
-explanation: requires `script` fake TTY for skip prompt; platform-specific
+explanation: requires `script` fake TTY for Policy B multi skip prompt; platform-specific
 ---
 
 ## Expected
 
 - Exit code 0.
-- Stdout refers to the lex-smallest existing path (`…/myrepo-main-{date}`, not `…-1`).
-- No new worktree under `{WorkRoot}/target/`.
-- Both prior worktrees remain.
-- Combined output mentions Policy B skip prompt (`already has a linked worktree`, `skip creating`) and primary (lex-smallest) path; multi case may include also-present / "more" style text listing the other path.
+- Stdout refers to the lex-smallest reusable path (`worktree-A`, not `worktree-B`).
+- No new worktree under `{WorkRoot}/target/myrepo-main-{date}`.
+- Both prior siblings remain.
+- Combined output: `wrk: warning:`, `would reuse`, `skip creating`, primary path;
+  multi: `also present` (or equivalent) listing the other reusable path.
 
 ## Exit Code
 
@@ -17,12 +18,14 @@ explanation: requires `script` fake TTY for skip prompt; platform-specific
 
 ```go
 import (
-	"github.com/xhd2015/doctest/session"
 	"path/filepath"
 	"strings"
+
+	"github.com/xhd2015/doctest/session"
 )
 
 func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
@@ -31,7 +34,6 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	smallest := req.WtDir
 	other := req.ExternalWtDir2
 	if smallest > other {
-		// Defensive: identity is lex order of abs paths.
 		smallest, other = other, smallest
 	}
 
@@ -39,7 +41,6 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if got != smallest && !strings.Contains(resp.Stdout, smallest) {
 		t.Fatalf("stdout should be/include lex-smallest %q; stdout=%q stderr=%q", smallest, resp.Stdout, resp.Stderr)
 	}
-	// Must not report the larger path as the sole/primary stdout path when clean.
 	if got == other {
 		t.Fatalf("stdout must not be the non-smallest path %q", other)
 	}
@@ -48,16 +49,18 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertFileExists(t, other)
 	assertFileNotExists(t, filepath.Join(req.WorkRoot, "target", "myrepo-main-"+wrkDate))
 	assertFileNotExists(t, filepath.Join(req.WorkRoot, "target", "myrepo-main-"+wrkDate+"-1"))
-	assertFileNotExists(t, filepath.Join(req.WorkRoot, "target", "myrepo-main-"+wrkDate+"-2"))
 
 	combined := resp.Stdout + resp.Stderr
-	assertContains(t, combined, "already has a linked worktree")
-	assertContains(t, combined, "skip creating")
 	assertContains(t, combined, "wrk: warning:")
+	assertContains(t, combined, "would reuse")
+	assertContains(t, combined, "skip creating")
 	assertContains(t, combined, smallest)
-	// Multi awareness: either explicit also-present / "more" wording, or at least other path mentioned.
-	if !strings.Contains(combined, other) && !strings.Contains(combined, "more") && !strings.Contains(combined, "also") {
-		t.Fatalf("expected multi-linked awareness (other path or also/more); combined=%q", combined)
+	// Multi awareness: also present wording and/or other path.
+	if !strings.Contains(combined, other) {
+		t.Fatalf("expected other reusable path in multi output; combined=%q", combined)
+	}
+	if !strings.Contains(combined, "also present") && !strings.Contains(combined, "also-present") && !strings.Contains(combined, "also") {
+		t.Fatalf("expected multi also-present style wording; combined=%q", combined)
 	}
 }
 ```

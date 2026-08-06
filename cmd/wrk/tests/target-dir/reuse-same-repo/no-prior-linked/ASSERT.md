@@ -3,7 +3,8 @@
 - Exit code 0.
 - Stdout is `{WorkRoot}/target/myrepo-main-{WRK_DATE}`.
 - New linked worktree exists at that path with branch `main-{date}`.
-- Stderr does **not** contain Policy B skip prompt tokens: `already has a linked worktree`, `skip creating`, or legacy `already exists` / `skip?`.
+- Stderr does **not** contain Policy B skip/reuse tokens: `would reuse`, `skip creating`,
+  `already has a linked worktree`, `refusing non-interactive`.
 
 ## Exit Code
 
@@ -11,11 +12,13 @@
 
 ```go
 import (
-	"github.com/xhd2015/doctest/session"
 	"path/filepath"
+
+	"github.com/xhd2015/doctest/session"
 )
 
 func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
@@ -28,10 +31,6 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertBranchCheckedOutInWorktree(t, wantPath, branchName("main", wrkDate, 0))
 	assertWorktreeListContains(t, req.TargetDir, wantPath)
 
-	// Policy B must not fire when source has no prior linked worktree.
-	assertNotContains(t, resp.Stderr, "already has a linked worktree")
-	assertNotContains(t, resp.Stderr, "skip creating")
-	assertNotContains(t, resp.Stderr, "already exists")
-	assertNotContains(t, resp.Stderr, "skip?")
+	assertNoPolicyBBanner(t, resp.Stdout+resp.Stderr)
 }
 ```

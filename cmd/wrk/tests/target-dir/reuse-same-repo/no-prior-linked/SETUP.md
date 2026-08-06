@@ -1,10 +1,10 @@
 # Scenario
 
-**Feature**: named bring with no prior linked worktree of source creates as today (no skip prompt)
+**Feature**: named create with no prior linked worktree of source creates as today (no Policy B)
 
 ```
 # no live linked WT of myrepo -> wrk myrepo <target> creates new WT under target
-# no Policy B prompt: no "already has a linked worktree" / "skip creating" on stderr
+# no Policy B banner: no "would reuse" / "skip creating"
 myrepo (main only) -> wrk myrepo {WorkRoot}/target -> {WorkRoot}/target/myrepo-main-{date}
 ```
 
@@ -17,17 +17,17 @@ myrepo (main only) -> wrk myrepo {WorkRoot}/target -> {WorkRoot}/target/myrepo-m
 
 ```go
 import (
-	"github.com/xhd2015/doctest/session"
 	"path/filepath"
+
+	"github.com/xhd2015/doctest/session"
 )
 
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = d
 	req.InProcess = true
 	ensureNamedBringReuseHelpersUsed()
-	target := filepath.Join(req.WorkRoot, "target")
-	mkdirAll(t, target)
-	req.SpawnDir = target
+	policyBPrepareExistingTargetDir(t, req)
+	_ = filepath.Join
 	return nil
 }
 ```
