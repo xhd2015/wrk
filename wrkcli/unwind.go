@@ -60,41 +60,65 @@ type UnwindPlan struct {
 	NeedsLand bool
 }
 
+// StackInventory is the expanded checkout stack for --unwind, including
+// synthetic follow edges and soft warnings from local filesystem replaces.
+type StackInventory struct {
+	Members        []StackMember
+	SyntheticEdges []RepoEdge // C→D when follow maps consumer C into dep checkout D
+	Warnings       []string   // lines with warning: prefix (missing/non-git targets)
+}
+
 // BuildStackInventory discovers the checkout stack under workDir: primary git
-// toplevel plus nested independent repos (status-like scan), with dirtiness
-// and stable main-repo labels.
+// toplevel plus nested independent repos (status-like scan), expanded via local
+// filesystem replace BFS, with dirtiness and stable main-repo labels.
 func BuildStackInventory(workDir string) ([]StackMember, error) {
+	inv, err := CollectStackInventory(workDir)
+	if err != nil {
+		return nil, err
+	}
+	return inv.Members, nil
+}
+
+// CollectStackInventory is BuildStackInventory plus synthetic follow edges and
+// soft warnings from missing/non-git local replace targets.
+func CollectStackInventory(workDir string) (StackInventory, error) {
+	var empty StackInventory
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
-		return nil, fmt.Errorf("resolve cwd: %w", err)
+		return empty, fmt.Errorf("resolve cwd: %w", err)
 	}
 	if !worktree.IsInsideWorkTree(cwd) {
-		return nil, fmt.Errorf("%s is not a git repository", cwd)
+		return empty, fmt.Errorf("%s is not a git repository", cwd)
 	}
 	checkoutRoot, err := worktree.ShowToplevel(cwd)
 	if err != nil {
-		return nil, err
+		return empty, err
 	}
 
 	repos, err := discoverStatusRepos(context.Background(), checkoutRoot)
 	if err != nil {
-		return nil, err
+		return empty, err
 	}
 
-	// Ensure primary checkout is always present even if scan omits it.
-	seen := make(map[string]struct{}, len(repos)+1)
-	paths := make([]string, 0, len(repos)+1)
-	addPath := func(p string) {
+	// Seed: primary checkout + nested independent repos under it.
+	seed := make([]string, 0, len(repos)+1)
+	seedSeen := make(map[string]struct{}, len(repos)+1)
+	addSeed := func(p string) {
 		n := storage.NormalizePath(p)
-		if _, ok := seen[n]; ok {
+		if _, ok := seedSeen[n]; ok {
 			return
 		}
-		seen[n] = struct{}{}
-		paths = append(paths, p)
+		seedSeen[n] = struct{}{}
+		seed = append(seed, n)
 	}
-	addPath(checkoutRoot)
+	addSeed(checkoutRoot)
 	for _, r := range repos {
-		addPath(r.Path)
+		addSeed(r.Path)
+	}
+
+	paths, pathEdges, warnings, err := expandStackViaLocalReplaces(seed)
+	if err != nil {
+		return empty, err
 	}
 
 	members := make([]StackMember, 0, len(paths))
@@ -108,7 +132,7 @@ func BuildStackInventory(workDir string) ([]StackMember, error) {
 		label := filepath.Base(mainRepo)
 		dirty, err := stackCheckoutDirty(p)
 		if err != nil {
-			return nil, err
+			return empty, err
 		}
 		members = append(members, StackMember{
 			Path:     storage.NormalizePath(p),
@@ -118,7 +142,174 @@ func BuildStackInventory(workDir string) ([]StackMember, error) {
 			Linked:   worktree.IsLinked(p),
 		})
 	}
-	return members, nil
+
+	return StackInventory{
+		Members:        members,
+		SyntheticEdges: pathEdgesToRepoEdges(members, pathEdges),
+		Warnings:       warnings,
+	}, nil
+}
+
+// stackPathEdge is a synthetic depend edge between checkout paths (pre-label).
+type stackPathEdge struct {
+	fromPath string // consumer checkout (normalized)
+	toPath   string // dep checkout (normalized)
+}
+
+// expandStackViaLocalReplaces BFS-expands seed checkout paths by following local
+// filesystem replaces on every Go module under each known checkout. Intra-repo
+// targets (toplevel already in the set) are not re-added; missing/non-git
+// targets yield soft warnings and are skipped.
+func expandStackViaLocalReplaces(seed []string) (paths []string, pathEdges []stackPathEdge, warnings []string, err error) {
+	seen := make(map[string]struct{}, len(seed))
+	queue := make([]string, 0, len(seed))
+	addPath := func(p string) bool {
+		n := storage.NormalizePath(p)
+		if _, ok := seen[n]; ok {
+			return false
+		}
+		seen[n] = struct{}{}
+		paths = append(paths, n)
+		queue = append(queue, n)
+		return true
+	}
+	for _, s := range seed {
+		addPath(s)
+	}
+
+	edgeSeen := make(map[string]struct{})
+	addPathEdge := func(from, to string) {
+		from = storage.NormalizePath(from)
+		to = storage.NormalizePath(to)
+		if from == "" || to == "" || from == to {
+			return
+		}
+		key := from + "\x00" + to
+		if _, ok := edgeSeen[key]; ok {
+			return
+		}
+		edgeSeen[key] = struct{}{}
+		pathEdges = append(pathEdges, stackPathEdge{fromPath: from, toPath: to})
+	}
+
+	for qi := 0; qi < len(queue); qi++ {
+		checkout := queue[qi]
+		scanned, scanErr := scan.Scan(checkout, scan.Options{})
+		if scanErr != nil {
+			return nil, nil, nil, scanErr
+		}
+		for _, sm := range scanned {
+			modDir := checkout
+			if sm.Dir != "" && sm.Dir != "." {
+				modDir = filepath.Join(checkout, filepath.FromSlash(sm.Dir))
+			}
+			for _, repl := range sm.LocalFilesystemReplaces() {
+				resolved, resolveErr := resolveLocalReplacePath(modDir, repl.NewPath)
+				if resolveErr != nil {
+					warnings = append(warnings, fmt.Sprintf(
+						"warning: local replace target %s (from %s): %v",
+						repl.NewPath, modDir, resolveErr))
+					continue
+				}
+				if _, statErr := os.Stat(resolved); statErr != nil {
+					warnings = append(warnings, fmt.Sprintf(
+						"warning: local replace target missing: %s (from %s)",
+						resolved, modDir))
+					continue
+				}
+				if !worktree.IsInsideWorkTree(resolved) {
+					warnings = append(warnings, fmt.Sprintf(
+						"warning: local replace target is not a git worktree: %s (from %s)",
+						resolved, modDir))
+					continue
+				}
+				toplevel, topErr := worktree.ShowToplevel(resolved)
+				if topErr != nil {
+					warnings = append(warnings, fmt.Sprintf(
+						"warning: local replace target %s: %v", resolved, topErr))
+					continue
+				}
+				toplevel = storage.NormalizePath(toplevel)
+				// Always record synthetic edge C→D when follow resolves into D
+				// (including when D is already a seed member). Same-checkout
+				// (intra-repo) is filtered by from==to in addPathEdge.
+				addPathEdge(checkout, toplevel)
+				// Extra-repo: enqueue for BFS fixpoint. Intra-repo / already
+				// seen: do not re-add as a separate member.
+				addPath(toplevel)
+			}
+		}
+	}
+	return paths, pathEdges, warnings, nil
+}
+
+// resolveLocalReplacePath resolves a local filesystem replace NewPath against
+// the owning module directory (not necessarily the repo root).
+func resolveLocalReplacePath(modDir, newPath string) (string, error) {
+	if newPath == "" {
+		return "", fmt.Errorf("empty replace path")
+	}
+	if filepath.IsAbs(newPath) {
+		return filepath.Clean(newPath), nil
+	}
+	return filepath.Clean(filepath.Join(modDir, newPath)), nil
+}
+
+// pathEdgesToRepoEdges maps checkout-path synthetic edges to peel labels.
+func pathEdgesToRepoEdges(members []StackMember, pathEdges []stackPathEdge) []RepoEdge {
+	labelByPath := make(map[string]string, len(members))
+	for _, m := range members {
+		labelByPath[m.Path] = m.Label
+	}
+	edgeSet := make(map[string]RepoEdge, len(pathEdges))
+	for _, pe := range pathEdges {
+		from := labelByPath[pe.fromPath]
+		to := labelByPath[pe.toPath]
+		if from == "" || to == "" || from == to {
+			continue
+		}
+		key := from + "\x00" + to
+		edgeSet[key] = RepoEdge{From: from, To: to}
+	}
+	out := make([]RepoEdge, 0, len(edgeSet))
+	for _, e := range edgeSet {
+		out = append(out, e)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].From != out[j].From {
+			return out[i].From < out[j].From
+		}
+		return out[i].To < out[j].To
+	})
+	return out
+}
+
+// mergeRepoEdges unions two edge lists, deduping by From+To.
+func mergeRepoEdges(a, b []RepoEdge) []RepoEdge {
+	edgeSet := make(map[string]RepoEdge, len(a)+len(b))
+	add := func(e RepoEdge) {
+		if e.From == "" || e.To == "" || e.From == e.To {
+			return
+		}
+		edgeSet[e.From+"\x00"+e.To] = e
+	}
+	for _, e := range a {
+		add(e)
+	}
+	for _, e := range b {
+		add(e)
+	}
+	out := make([]RepoEdge, 0, len(edgeSet))
+	for _, e := range edgeSet {
+		out = append(out, e)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].From != out[j].From {
+			return out[i].From < out[j].From
+		}
+		return out[i].To < out[j].To
+	})
+	return out
 }
 
 // stackCheckoutDirty reports whether the checkout has uncommitted changes
@@ -502,14 +693,24 @@ func runUnwind(workDir string, flags UnwindFlags) error {
 	if err != nil {
 		return err
 	}
-	members, err := BuildStackInventory(workDir)
+	inv, err := CollectStackInventory(workDir)
 	if err != nil {
 		return err
 	}
+	// Soft follow warnings (missing/non-git local replace targets) on stderr.
+	for _, w := range inv.Warnings {
+		msg := w
+		if !strings.HasPrefix(msg, "warning:") && !strings.HasPrefix(msg, "Warning:") {
+			msg = "warning: " + msg
+		}
+		fmt.Fprintln(os.Stderr, msg)
+	}
+	members := inv.Members
 	edges, err := BuildRepoDAG(members)
 	if err != nil {
 		return err
 	}
+	edges = mergeRepoEdges(edges, inv.SyntheticEdges)
 	plan, err := PlanUnwind(members, edges)
 	if err != nil {
 		return err

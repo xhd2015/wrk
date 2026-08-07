@@ -2,17 +2,13 @@
 
 ```
 ==== unwind (dry-run) ====
-would: peel external/agent-pro-main-2026-06-30
 would: peel .
 ```
-
-(No peel line for clean leaf external/dot-pkgs-….)
 
 ## Expected
 
 - Exit code 0.
-- Peel order: mid external display path then primary `.`.
-- Stdout does **not** contain a peel line for the clean leaf checkout display path.
+- Only primary `.` peels; clean sibling dep display is absent from peel lines.
 - Zero mutations.
 
 ## Side Effects
@@ -33,13 +29,10 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
 	assertPeelOrder(t, resp.Stdout, req.PeelOrder)
-	for _, display := range req.PeelOrder {
-		assertPeelUsesRelDisplay(t, resp.Stdout, display)
-	}
-	// Clean leaf must not appear as a peel (whole-line match on leaf external display).
+	assertPeelUsesRelDisplay(t, resp.Stdout, ".")
 	skipped := peelDisplay(t, req, req.DepsLinkedWtDir)
 	if hasPeelLine(resp.Stdout, skipped) {
-		t.Fatalf("clean leaf must not appear as peel line %q\nstdout:\n%s", peelLine(skipped), resp.Stdout)
+		t.Fatalf("clean dep must not appear as peel line %q\nstdout:\n%s", peelLine(skipped), resp.Stdout)
 	}
 	assertUnwindZeroMutations(t, req)
 }

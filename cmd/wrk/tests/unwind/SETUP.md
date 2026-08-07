@@ -4,7 +4,7 @@
 
 ```
 # isolated WRK_HOME + multi-repo stack under consumer checkout
-stack (root + nested external/*) + go require edges
+stack (primary + nested external/* + BFS local-filesystem replace follow) + edges
   -> wrk --unwind --dry-run [+ ship/land + gen-commit flags]
   -> cycle? Error mentioning cycle (no mutations)
   -> missing pin flags with edges? Error naming --tag-next/--push
@@ -12,6 +12,7 @@ stack (root + nested external/*) + go require edges
   -> gen-commit: would: git add -A and/or leave-N as flags/porcelain
   -> apply (no --dry-run): peel free-first + pin at in-scope Path (not MainRepo remap)
   -> multi-mod dep: pin only modules C requires/replaces; tidy errors include go stderr
+  -> follow-local-replace: sibling/out-of-tree + transitive + missing-target warning
 ```
 
 ## Preconditions
@@ -23,24 +24,32 @@ stack (root + nested external/*) + go require edges
   `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/wrk` (file-locked) for fixture
   create / worktree helpers when needed.
 - Apply fixtures use local bare remotes + optional `file://` module proxy (no network).
-- Pin-on-linked-consumer, multi-module pin selectivity, and tidy-stderr contracts are
-  Classic TDD (**RED** until implementer lands).
+- Pin-on-linked-consumer, multi-module pin selectivity, tidy-stderr, and
+  **follow-local-replace** contracts are Classic TDD (**RED** until implementer lands
+  where noted).
 
 ## Steps
 
 1. Root `Setup` creates isolated `{WorkRoot}` and `{WorkRoot}/.wrk`.
-2. Leaves seed stack fixtures (single main, 3-repo chain, 2-repo apply, linked-consumer
-   pin, multi-module dep pin, tidy-error pin, or 2-cycle) and set `req.Args` /
-   `req.RepoDir` / `req.PeelOrder` (display paths) / apply fields.
+2. Leaves seed stack fixtures (single main, 3-repo chain, follow-local-replace
+   sibling/transitive, 2-repo apply, linked-consumer pin, multi-module dep pin,
+   tidy-error pin, or 2-cycle) and set `req.Args` / `req.RepoDir` /
+   `req.PeelOrder` (display paths) / apply fields.
 3. Root `Run` invokes wrk via `wrkcli.Capture` when `InProcess` (default for leaves).
 
 ## Context
 
 - Peel **display paths** (not bare MainRepo basenames): relative checkout path vs
-  `RepoDir` / invocation cwd — e.g. `external/dot-pkgs-main-2026-06-30`, `.` for
-  primary at cwd. Assert via `would: peel <display-path>` and apply banner.
+  `RepoDir` / invocation cwd — e.g. `external/dot-pkgs-main-2026-06-30`,
+  `../external/dep-main-2026-06-30` for sibling out-of-tree, `.` for primary at
+  cwd. Assert via `would: peel <display-path>` and apply banner.
 - DAG identity uses MainRepo abs; human pin short names remain basenames.
-- **Pin target** = in-scope StackMember **Path** (primary + nested externals).
+- **Follow local filesystem replace** (dry-run family): BFS expand inventory via
+  `./`/`../`/abs replaces on all modules under known checkouts; map target →
+  `ShowToplevel`; intra-repo never adds a member; synthetic edge C→D when follow
+  discovers D from C; missing/non-git targets → `warning:` on stderr, continue.
+- **Pin target** = in-scope StackMember **Path** (primary + nested externals +
+  followed checkouts once inventory expands).
   Linked-consumer fixtures materialize **both** consumer main (baseline go.mod)
   and consumer linked WT (require + replace); asserts prove main baseline
   untouched and WT pinned.
@@ -48,7 +57,8 @@ stack (root + nested external/*) + go require edges
   under one dep main; consumer requires **only root**. After peel+pin, consumer
   must not gain a nested-module require (Cartesian pin is the production bug).
 - Dirtiness v1: untracked file `DIRTY` under a stack checkout path (counts as N=1
-  not-fully-staged for leave-N when not staged).
+  not-fully-staged for leave-N when not staged). Clean followed checkouts stay in
+  inventory for DAG but produce no peel line.
 - Apply leaf fixtures also commit **ahead-of-main** work on linked WTs so land
   has content; pin leaves seed `{WorkRoot}/modproxy` + `ExtraEnv` for tidy.
   Tidy-error leaf seeds **old** proxy only so tidy fails after pin to next.
@@ -743,8 +753,38 @@ func applyBannerLine(displayPath string) string {
 	return "==== unwind: peel " + displayPath + " ===="
 }
 
+// indexPeelLine returns the byte index of a whole-line peel plan entry for displayPath,
+// or -1 if absent. Matching is line-exact so "would: peel ." is not a prefix hit on
+// "would: peel ../external/..." (or other longer display paths).
+func indexPeelLine(stdout, displayPath string) int {
+	want := peelLine(displayPath)
+	at := 0
+	for at <= len(stdout) {
+		nl := strings.IndexByte(stdout[at:], '\n')
+		segEnd := len(stdout)
+		if nl >= 0 {
+			segEnd = at + nl
+		}
+		seg := strings.TrimRight(stdout[at:segEnd], "\r")
+		if seg == want {
+			return at
+		}
+		if nl < 0 {
+			break
+		}
+		at = segEnd + 1
+	}
+	return -1
+}
+
+// hasPeelLine reports whether stdout contains a whole-line "would: peel <display>".
+func hasPeelLine(stdout, displayPath string) bool {
+	return indexPeelLine(stdout, displayPath) >= 0
+}
+
 // assertPeelOrder checks free-first would: peel <display-path> lines appear in order.
 // Also requires a dry-run/unwind banner somewhere in stdout.
+// Uses whole-line peel matching so "." is not a prefix of "../…".
 func assertPeelOrder(t *testing.T, stdout string, displayPaths []string) {
 	t.Helper()
 	lower := strings.ToLower(stdout)
@@ -760,7 +800,7 @@ func assertPeelOrder(t *testing.T, stdout string, displayPaths []string) {
 	var prev int = -1
 	for i, display := range displayPaths {
 		line := peelLine(display)
-		idx := strings.Index(stdout, line)
+		idx := indexPeelLine(stdout, display)
 		if idx < 0 {
 			t.Fatalf("missing peel line %q (step %d)\nstdout:\n%s", line, i+1, stdout)
 		}
@@ -775,12 +815,12 @@ func assertPeelOrder(t *testing.T, stdout string, displayPaths []string) {
 // full peel path when a nested external display was expected (covers free-first RED).
 func assertPeelUsesRelDisplay(t *testing.T, stdout, displayPath string) {
 	t.Helper()
-	if !strings.Contains(stdout, peelLine(displayPath)) {
+	if !hasPeelLine(stdout, displayPath) {
 		t.Fatalf("want peel display %q\nstdout:\n%s", peelLine(displayPath), stdout)
 	}
 	if displayPath == "." {
 		// Primary at cwd must not be printed only as bare main-repo basename "root".
-		if strings.Contains(stdout, peelLine(labelRoot)) {
+		if hasPeelLine(stdout, labelRoot) {
 			t.Fatalf("primary peel must be %q, not bare basename %q\nstdout:\n%s",
 				peelLine("."), peelLine(labelRoot), stdout)
 		}
@@ -1615,6 +1655,261 @@ func assertTidyErrorSurfacesGoStderr(t *testing.T, resp *Response) {
 	}
 }
 
+// --- follow-local-replace dry-run fixtures (Classic TDD; expand inventory via
+// local filesystem replace → ShowToplevel) ---
+
+// externalCheckoutName returns the conventional external checkout basename.
+func externalCheckoutName(label string) string {
+	return label + "-" + branchNameMainDate()
+}
+
+// relLocalReplace returns a go.mod local-filesystem replace NewPath from
+// fromModDir to targetPath (./ or ../ form; slash-separated).
+func relLocalReplace(t *testing.T, fromModDir, targetPath string) string {
+	t.Helper()
+	rel, err := filepath.Rel(fromModDir, targetPath)
+	if err != nil {
+		t.Fatalf("rel %s -> %s: %v", fromModDir, targetPath, err)
+	}
+	rel = filepath.ToSlash(filepath.Clean(rel))
+	if rel == "." {
+		return "./"
+	}
+	if !strings.HasPrefix(rel, ".") && !filepath.IsAbs(rel) {
+		rel = "./" + rel
+	}
+	return rel
+}
+
+// initFollowDepCheckout creates a single-module git main at
+// {WorkRoot}/external/{label}-main-{date} and returns its resolved path.
+func initFollowDepCheckout(t *testing.T, req *Request, label, modulePath, pkgFile, pkgSrc string) string {
+	t.Helper()
+	extParent := filepath.Join(req.WorkRoot, "external")
+	mkdirAll(t, extParent)
+	depDir := filepath.Join(extParent, externalCheckoutName(label))
+	initGitRepoOnMain(t, depDir)
+	writeGoModRequire(t, depDir, modulePath)
+	writeFile(t, filepath.Join(depDir, pkgFile), pkgSrc)
+	runGitIsolated(t, depDir, "add", "go.mod", pkgFile)
+	runGitIsolated(t, depDir, "commit", "-m", "add "+label+" module")
+	return resolvePath(t, depDir)
+}
+
+// initFollowConsumerMain creates consumer main at {WorkRoot}/root with module
+// unwindRootModule and optional requires. Returns resolved path.
+func initFollowConsumerMain(t *testing.T, req *Request, requires ...string) string {
+	t.Helper()
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, requires...)
+	writeFile(t, filepath.Join(rootMain, "main.go"), "package main\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "main.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+	req.RepoDir = rootMain
+	return rootMain
+}
+
+// setupFollowSiblingBothDirty (F1): consumer main replace => ../external/dep-…;
+// dep is a sibling out-of-tree checkout (not nested under consumer). Both dirty.
+// Pin flags required once synthetic edge lands. Peel free-first: dep display then `.`.
+func setupFollowSiblingBothDirty(t *testing.T, req *Request) {
+	t.Helper()
+
+	depDir := initFollowDepCheckout(t, req, labelDotPkgs, unwindDotPkgsModule,
+		"pkg.go", "package dotpkgs\n")
+	req.SecondRepo = depDir
+	req.DepsLinkedWtDir = depDir
+
+	rootMain := initFollowConsumerMain(t, req, unwindDotPkgsModule+"@v0.0.0")
+	appendLocalReplace(t, rootMain, unwindDotPkgsModule, relLocalReplace(t, rootMain, depDir))
+	runGitIsolated(t, rootMain, "add", "go.mod")
+	runGitIsolated(t, rootMain, "commit", "-m", "local replace to sibling external")
+
+	markDirty(t, rootMain)
+	markDirty(t, depDir)
+	setPeelOrderDisplays(t, req, depDir, rootMain)
+}
+
+// setupFollowNestedModuleOwnsReplace (F2): root go.mod has no extra-repo replace;
+// nested module svc/ owns replace => ../../external/dep-…. Dep + primary dirty.
+// Peel free-first: dep display then `.`.
+func setupFollowNestedModuleOwnsReplace(t *testing.T, req *Request) {
+	t.Helper()
+
+	depDir := initFollowDepCheckout(t, req, labelDotPkgs, unwindDotPkgsModule,
+		"pkg.go", "package dotpkgs\n")
+	req.SecondRepo = depDir
+	req.DepsLinkedWtDir = depDir
+
+	rootMain := initFollowConsumerMain(t, req) // no require/replace on root
+
+	// Nested consumer module owns the out-of-tree local replace.
+	svcDir := filepath.Join(rootMain, "svc")
+	mkdirAll(t, svcDir)
+	writeGoModRequire(t, svcDir, unwindRootModule+"/svc", unwindDotPkgsModule+"@v0.0.0")
+	writeFile(t, filepath.Join(svcDir, "svc.go"), "package svc\n")
+	appendLocalReplace(t, svcDir, unwindDotPkgsModule, relLocalReplace(t, svcDir, depDir))
+	runGitIsolated(t, rootMain, "add", "svc")
+	runGitIsolated(t, rootMain, "commit", "-m", "nested module local replace to sibling")
+
+	// Prove root go.mod has no local filesystem replace (only nested owns it).
+	rootGoMod := readFile(t, filepath.Join(rootMain, "go.mod"))
+	if strings.Contains(rootGoMod, "replace ") {
+		t.Fatalf("root go.mod must not own replace for F2; got:\n%s", rootGoMod)
+	}
+
+	markDirty(t, rootMain)
+	markDirty(t, depDir)
+	setPeelOrderDisplays(t, req, depDir, rootMain)
+}
+
+// setupFollowIntraRepoOnly (F3): replace => ./pkgs/shared (same git root).
+// Primary dirty → only would: peel . (never a separate stack member for shared).
+func setupFollowIntraRepoOnly(t *testing.T, req *Request) {
+	t.Helper()
+
+	rootMain := initFollowConsumerMain(t, req)
+	sharedDir := filepath.Join(rootMain, "pkgs", "shared")
+	mkdirAll(t, sharedDir)
+	writeGoModRequire(t, sharedDir, unwindRootModule+"/shared")
+	writeFile(t, filepath.Join(sharedDir, "shared.go"), "package shared\n")
+	// Root requires shared module path and replaces to in-tree path.
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindRootModule+"/shared@v0.0.0")
+	writeFile(t, filepath.Join(rootMain, "main.go"), "package main\n")
+	appendLocalReplace(t, rootMain, unwindRootModule+"/shared", "./pkgs/shared")
+	runGitIsolated(t, rootMain, "add", "go.mod", "main.go", "pkgs")
+	runGitIsolated(t, rootMain, "commit", "-m", "intra-repo local replace")
+
+	markDirty(t, rootMain)
+	req.PeelOrder = []string{"."}
+	// Shared path for negative asserts (must not appear as separate peel target).
+	req.DepsLinkedWtDir = sharedDir
+}
+
+// setupFollowCleanDepSkipped (F5): sibling out-of-tree dep **clean**, consumer dirty.
+// Only would: peel . — clean followed checkout stays out of PeelOrder.
+func setupFollowCleanDepSkipped(t *testing.T, req *Request) {
+	t.Helper()
+
+	depDir := initFollowDepCheckout(t, req, labelDotPkgs, unwindDotPkgsModule,
+		"pkg.go", "package dotpkgs\n")
+	req.SecondRepo = depDir
+	req.DepsLinkedWtDir = depDir
+
+	rootMain := initFollowConsumerMain(t, req, unwindDotPkgsModule+"@v0.0.0")
+	appendLocalReplace(t, rootMain, unwindDotPkgsModule, relLocalReplace(t, rootMain, depDir))
+	runGitIsolated(t, rootMain, "add", "go.mod")
+	runGitIsolated(t, rootMain, "commit", "-m", "local replace to clean sibling")
+
+	markDirty(t, rootMain)
+	markCleanTracked(t, depDir)
+	req.PeelOrder = []string{"."}
+}
+
+// setupFollowTransitiveChain (F6): A→B→C via local filesystem replaces; all dirty.
+// Layout:
+//
+//	{WorkRoot}/root/                         A (consumer, RepoDir)
+//	{WorkRoot}/external/agent-pro-main-DATE/ B
+//	{WorkRoot}/external/dot-pkgs-main-DATE/  C
+//
+// Free-first peel: C then B then A (display paths).
+func setupFollowTransitiveChain(t *testing.T, req *Request) {
+	t.Helper()
+
+	// C (leaf)
+	leafDir := initFollowDepCheckout(t, req, labelDotPkgs, unwindDotPkgsModule,
+		"pkg.go", "package dotpkgs\n")
+	req.DepsLinkedWtDir = leafDir
+	req.SecondRepo = leafDir
+
+	// B (mid) requires C + local replace
+	midDir := initFollowDepCheckout(t, req, labelAgentPro, unwindAgentProModule,
+		"agent.go", "package agentpro\n")
+	// re-open mid go.mod with require + replace
+	writeGoModRequire(t, midDir, unwindAgentProModule, unwindDotPkgsModule+"@v0.0.0")
+	appendLocalReplace(t, midDir, unwindDotPkgsModule, relLocalReplace(t, midDir, leafDir))
+	writeFile(t, filepath.Join(midDir, "agent.go"), "package agentpro\n")
+	runGitIsolated(t, midDir, "add", "go.mod", "agent.go")
+	runGitIsolated(t, midDir, "commit", "-m", "mid local replace to leaf")
+	midDir = resolvePath(t, midDir)
+	req.ExternalWtDir = midDir
+	req.DepPath = midDir
+
+	// A (root) requires B + local replace
+	rootMain := initFollowConsumerMain(t, req, unwindAgentProModule+"@v0.0.0")
+	appendLocalReplace(t, rootMain, unwindAgentProModule, relLocalReplace(t, rootMain, midDir))
+	runGitIsolated(t, rootMain, "add", "go.mod")
+	runGitIsolated(t, rootMain, "commit", "-m", "root local replace to mid")
+
+	markDirty(t, leafDir)
+	markDirty(t, midDir)
+	markDirty(t, rootMain)
+	setPeelOrderDisplays(t, req, leafDir, midDir, rootMain)
+}
+
+// setupFollowMissingTarget (F7): replace points at missing path; consumer dirty.
+// stderr warning:; plan continues with would: peel .; exit 0.
+func setupFollowMissingTarget(t *testing.T, req *Request) {
+	t.Helper()
+
+	rootMain := initFollowConsumerMain(t, req, unwindDotPkgsModule+"@v0.0.0")
+	// Deliberately missing — no checkout created under external/.
+	missing := filepath.Join(req.WorkRoot, "external", externalCheckoutName(labelDotPkgs))
+	appendLocalReplace(t, rootMain, unwindDotPkgsModule, relLocalReplace(t, rootMain, missing))
+	runGitIsolated(t, rootMain, "add", "go.mod")
+	runGitIsolated(t, rootMain, "commit", "-m", "replace to missing target")
+
+	// Stash expected missing path for asserts (not a real checkout).
+	req.DepsLinkedWtDir = missing
+	markDirty(t, rootMain)
+	req.PeelOrder = []string{"."}
+}
+
+// setupFollowNestedModTargetToplevel (F8): multi-module dep; replace points at
+// nested module subdir of dep main. Peel display uses dep **git toplevel**, not
+// the nested module subdir alone.
+func setupFollowNestedModTargetToplevel(t *testing.T, req *Request) {
+	t.Helper()
+
+	// Dep multi-module main under external/
+	extParent := filepath.Join(req.WorkRoot, "external")
+	mkdirAll(t, extParent)
+	depDir := filepath.Join(extParent, externalCheckoutName(labelDep))
+	initGitRepoOnMain(t, depDir)
+	writeGoModRequire(t, depDir, unwindDepModule)
+	writeFile(t, filepath.Join(depDir, "pkg.go"), "package dep\n")
+	nestedDir := filepath.Join(depDir, unwindDepNestedDir)
+	mkdirAll(t, nestedDir)
+	writeGoModRequire(t, nestedDir, unwindDepNestedModule)
+	writeFile(t, filepath.Join(nestedDir, "pkg.go"), "package nested\n")
+	runGitIsolated(t, depDir, "add", "go.mod", "pkg.go",
+		filepath.Join(unwindDepNestedDir, "go.mod"),
+		filepath.Join(unwindDepNestedDir, "pkg.go"))
+	runGitIsolated(t, depDir, "commit", "-m", "add multi-module dep")
+	depDir = resolvePath(t, depDir)
+	req.SecondRepo = depDir
+	req.DepPath = depDir
+	req.DepsLinkedWtDir = depDir
+	req.NestedModulePath = unwindDepNestedModule
+	req.LeafModulePath = unwindDepNestedModule
+
+	// Consumer replace targets nested module **subdir** (not dep root).
+	rootMain := initFollowConsumerMain(t, req, unwindDepNestedModule+"@v0.0.0")
+	nestedTarget := filepath.Join(depDir, unwindDepNestedDir)
+	appendLocalReplace(t, rootMain, unwindDepNestedModule, relLocalReplace(t, rootMain, nestedTarget))
+	runGitIsolated(t, rootMain, "add", "go.mod")
+	runGitIsolated(t, rootMain, "commit", "-m", "replace to dep nested module subdir")
+
+	markDirty(t, rootMain)
+	markDirty(t, depDir)
+	// Peel display must be dep git toplevel Path, not …/nested alone.
+	setPeelOrderDisplays(t, req, depDir, rootMain)
+}
+
 func unwindEnsureHelpersUsed() {
 	_ = setupSingleMainDirty
 	_ = setupThreeRepoChain
@@ -1626,6 +1921,17 @@ func unwindEnsureHelpersUsed() {
 	_ = setupApplyMultiModuleRootOnlyPinStack
 	_ = setupApplyTidyErrorPinStack
 	_ = setupApplyAlreadyMainRootBump
+	_ = setupFollowSiblingBothDirty
+	_ = setupFollowNestedModuleOwnsReplace
+	_ = setupFollowIntraRepoOnly
+	_ = setupFollowCleanDepSkipped
+	_ = setupFollowTransitiveChain
+	_ = setupFollowMissingTarget
+	_ = setupFollowNestedModTargetToplevel
+	_ = initFollowDepCheckout
+	_ = initFollowConsumerMain
+	_ = relLocalReplace
+	_ = externalCheckoutName
 	_ = seedDepRootProxy
 	_ = seedDepNestedProxy
 	_ = recordUnwindBaseline
@@ -1656,6 +1962,8 @@ func unwindEnsureHelpersUsed() {
 	_ = assertOriginMainEqualsLocalMain
 	_ = peelLine
 	_ = applyBannerLine
+	_ = indexPeelLine
+	_ = hasPeelLine
 	_ = peelDisplay
 	_ = setPeelOrderDisplays
 	_ = stageAll

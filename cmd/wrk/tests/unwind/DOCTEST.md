@@ -17,35 +17,60 @@ Decision tree for **stack unwind**:
   (primary checkout + nested external repos under it — status scan), **not**
   remapped to `MainRepo` when Path is a linked/nested checkout whose MainRepo
   lies outside the current scope.
-- **This cycle (Classic TDD):** (1) multi-module dep peel pins **only** dep
-  modules the consumer **requires or replaces** (no force-add of nested module
-  paths the consumer never needed); per-module pin version from this peel's
-  created tags when available. (2) `go mod tidy` failures always surface
-  **trimmed go child stderr** (not only `exit status 1`). Peel display /
-  dry-run add-all / leave-N / apply banner / pin-Path contracts remain.
+- **Prior cycle (still open RED on apply):** multi-module pin selectivity;
+  tidy go-stderr surfacing; pin Path on linked consumer.
+- **This cycle (Classic TDD):** **follow local filesystem replaces** into the
+  stack inventory via full **BFS fixpoint** over all Go modules under known
+  checkouts. Resolve `NewPath` relative to the **module directory**, map to
+  git checkout via **ShowToplevel**, skip intra-repo, emit `warning:` for
+  missing/non-git targets, add synthetic DAG edge **C→D** when follow adds D
+  from C. Dirty-only peel (v1) unchanged. Dry-run leaves under
+  `dry-run/follow-local-replace/` are the primary RED drivers.
 
 **Layer:** **L2** — in-process CLI via `wrkcli.Capture` (`req.InProcess=true`).
 Fixture setup may use session-built `wrk` for `--new` / worktree materialization.
 Prefer pure cores: path display helper (statusDirLine policy), leave-N porcelain
-count, `PlanUnwind` / `FormatUnwindDryRun`, apply peel driver.
+count, `PlanUnwind` / `FormatUnwindDryRun`, apply peel driver, inventory expand.
 
-**Out of scope:** implying land flags; global `--propagate-tags` as unwind default;
-non-unwind compose dry-run redesign.
+**Out of scope this cycle:** `--status` parity; opt-out flag; walking parent
+`external/` without a replace; module-path-only replaces as discovery seeds;
+implying land flags; global `--propagate-tags` as unwind default.
 
 # DSN (Domain Specific Notion)
 
 - **wrk --unwind** — top-level primary mode. Compose with ship/land flags and
   `--dry-run`, and the optional **reinstall-local tail**. Mutually exclusive with unrelated modes (`--list`, `--status`,
   bare create, …). Event `command: "unwind"` when recorded (optional for leaves).
-- **Stack** — status-partition style inventory of the checkout: **primary** git
-  toplevel (main or linked) plus **nested external** independent repos under
-  the tree (typically `external/*` dep worktrees). Discovered from cwd via
-  git toplevel + nested scan (same shape as status external section).
+- **Stack** — inventory of checkouts for unwind:
+  1. **Seed:** **primary** git toplevel (main or linked) plus **nested
+     external** independent repos under that root (status-like
+     `discoverStatusRepos` — typically in-tree `external/*`).
+  2. **Expand (this cycle):** full **BFS fixpoint** over **local filesystem
+     replaces** on **all Go modules** (including nested go.mod) under every
+     known stack checkout:
+     - Local replace = `NewPath` is `./`, `../`, or absolute **and** no
+       version (same semantics as `isLocalFilesystemReplace` /
+       `Module.LocalFilesystemReplaces()`).
+     - Resolve `NewPath` relative to the **module directory** (not always
+       repo root).
+     - Map target → git checkout via **`ShowToplevel` of resolved path**
+       (replace into `…/go-pkgs` or `…/nested` becomes the dep **repo root**).
+     - **Intra-repo** (toplevel already the owner / same git root already in
+       stack): **never** add a separate stack member.
+     - **Extra-repo:** add checkout to stack; scan it next (transitive).
+     - **Missing / non-git targets:** emit **`warning:`** on **stderr**, skip
+       that target; do not fail unwind solely for that (exit 0 if plan
+       otherwise OK).
 - **Module → repo DAG** — scan Go modules per stack repo; collect
   `require` / `replace` edges among **stack-owned** modules; contract to a
   **repo DAG**. Identity keys are **normalized absolute MainRepo paths**
   (basename collisions must not merge distinct mains). Edge **`Rc → Rd`**
   means repo **Rc depends on** repo **Rd**.
+- **Synthetic DAG edges (option B)** — when expansion adds dep checkout **D**
+  because consumer checkout **C** has a local filesystem replace resolving into
+  **D**, always add edge **C → D** (C depends on D), **deduped** with edges
+  from existing require/OldPath contraction in `BuildRepoDAG`. Synthetic edges
+  count for pin-flag validation and free-first residual graph.
 - **Human short names** — pin / consumer short text still uses **basename** of
   MainRepo (e.g. `dot-pkgs`), not the peel display path.
 - **Cycle preflight** — if the stack-repo DAG has a cycle among repos with
@@ -54,19 +79,23 @@ non-unwind compose dry-run redesign.
   both dry-run and apply.
 - **Dirty pending (v1)** — only **dirty** stack repos enter the pending peel
   set (fixtures control dirtiness via untracked/modified files). Clean stack
-  members are **skipped** from peel; consumers may still **receive Pin** when
-  a dep they require is peeled. Apply fixtures may also leave **commits ahead**
-  on linked WTs so land/tag have content after dirt is handled.
+  members (including **clean followed** checkouts) stay in inventory for
+  DAG/cycle but produce **no peel line**. Consumers may still **receive Pin**
+  when a dep they require is peeled. Apply fixtures may also leave **commits
+  ahead** on linked WTs so land/tag have content after dirt is handled.
 - **Peel order (free-first / Kahn)** — among **pending** dirty repos, peel
   nodes with **no dependency edge to other pending** repos first (leaves of
-  the residual DAG). Example chain `root → agent-pro → dot-pkgs` (depends-on
-  arrows): peel **leaf external then mid external then primary** (display paths
-  below).
+  the residual DAG, including synthetic edges). Example nested chain
+  `root → agent-pro → dot-pkgs`: peel **leaf external then mid external then
+  primary**. Example follow chain A→B→C via local replaces: peel **C then B
+  then A**.
 - **Peel display path** — human peel line / apply banner uses the **relative
   path of the peel checkout** vs invocation cwd, same policy as status
   `Dir:` (`statusDirLine`: slash form; abs fallback if Rel fails or too many
-  `..`). Nested externals → `external/<name>-main-<date>`; primary at cwd →
-  `.`. **Not** bare MainRepo basename alone as the full peel path.
+  `..`). Nested under primary → `external/<name>-main-<date>`; sibling
+  outside primary → often `../external/<name>-…`; primary at cwd → `.`.
+  When replace targets a nested module subdir, display still uses **dep git
+  toplevel** Path. **Not** bare MainRepo basename alone as the full peel path.
 - **Flag validation (before any mutation)**  
   - Cross-repo **pin** needed (pending graph has edges) → require
     **`--tag-next` + `--push`**.  
@@ -134,6 +163,8 @@ non-unwind compose dry-run redesign.
   - Missing pin flags when edges exist: names `--tag-next` and `--push`; exit ≠ 0.
   - Tidy fail: mentions `go mod tidy` (and consumer path); **includes go child
     diagnostic body** (not only `exit status 1`).
+  - Missing / non-git local-replace target: **`warning:`** on stderr; plan
+    continues; exit 0 when otherwise OK (not a hard fail).
 - **Local remotes / offline tidy** — apply leaves attach **local bare** origins
   for `--push` (no network). Pin+tidy leaves may set `GOPROXY=file://…` via
   `req.ExtraEnv` and seed `{WorkRoot}/modproxy`. Multi-module pin leaves seed
@@ -152,16 +183,24 @@ non-unwind compose dry-run redesign.
 
 ```
 unwind/
-├── dry-run/                              # acyclic plan (+ display / gen-commit staging)
-│   ├── free-first-order/                 # 3-repo dirty; free-first with rel display paths
+├── dry-run/                              # acyclic plan (+ display / gen-commit / follow)
+│   ├── free-first-order/                 # F4 regression: nested external free-first
 │   ├── single-repo-no-edges/             # main-only dirty → would: peel .
 │   ├── clean-leaf-skipped/               # leaf clean; mid+primary display paths only
 │   ├── missing-flags-with-edges/         # edges; no tag-next/push → error
 │   ├── reinstall-local-tail/             # accepted tail; peel . + reinstall plan
-│   └── gen-commit/                       # gen-commit dry-run add-all / leave-N
-│       ├── add-all-reflected/            # --add-all → would: git add -A
-│       ├── leave-uncommitted/            # no --add-all + unstaged/untracked → leave-N
-│       └── leave-skipped-when-fully-staged/  # only staged → no leave-N line
+│   ├── gen-commit/                       # gen-commit dry-run add-all / leave-N
+│   │   ├── add-all-reflected/            # --add-all → would: git add -A
+│   │   ├── leave-uncommitted/            # no --add-all + unstaged/untracked → leave-N
+│   │   └── leave-skipped-when-fully-staged/  # only staged → no leave-N line
+│   └── follow-local-replace/             # BFS local-filesystem replace expansion
+│       ├── sibling-both-dirty/           # F1: sibling ../external; both dirty
+│       ├── nested-module-owns-replace/   # F2: nested go.mod owns replace
+│       ├── intra-repo-only/              # F3: ./pkgs/shared → only peel .
+│       ├── clean-dep-skipped/            # F5: clean followed dep omitted from peel
+│       ├── transitive-chain/             # F6: A→B→C free-first C,B,A
+│       ├── missing-target-warns/         # F7: warning: + continue peel .
+│       └── nested-mod-target-toplevel/   # F8: replace nested subdir → toplevel peel
 ├── apply/                                # non-dry-run peel / pin
 │   ├── leaf-then-pin/                    # pin when primary Path == main (in scope)
 │   ├── pin-on-linked-consumer-not-main/  # pin Path=linked WT; MainRepo go.mod untouched
@@ -177,7 +216,8 @@ unwind/
 Split factor (MECE, significance-first):
 
 1. **Mode** — dry-run plan | apply mutation | cycle preflight.
-2. Within dry-run: **order/skip/flags** | **gen-commit staging vocabulary**.
+2. Within dry-run: **order/skip/flags** | **gen-commit staging vocabulary** |
+   **follow-local-replace inventory expansion**.
 3. Within apply: **pin target Path** | **pin module selectivity (multi-mod)** |
    **tidy error surfacing** | **already-main no land** | **done removes WT**.
 4. Cycle: dry-run vs apply-mode (same reject, no mutations).
@@ -186,7 +226,7 @@ Split factor (MECE, significance-first):
 
 | # | Leaf | Description | Expect |
 |---|------|-------------|--------|
-| D1 | dry-run/free-first-order | 3-repo dirty; peel order external leaf → external mid → `.`; zero mutations | **GREEN** (rel display) |
+| D1 | dry-run/free-first-order | **F4** nested 3-repo dirty; free-first external leaf → mid → `.` | **GREEN** (regression) |
 | D2 | dry-run/single-repo-no-edges | sole main dirty; `would: peel .`; no pin flags | **GREEN** |
 | D3 | dry-run/clean-leaf-skipped | leaf clean; peel mid external then `.` only | **GREEN** |
 | D4 | dry-run/missing-flags-with-edges | edges + dry-run without tag/push → error | **GREEN** |
@@ -194,6 +234,13 @@ Split factor (MECE, significance-first):
 | D6 | dry-run/gen-commit/add-all-reflected | gen-commit + `--add-all` + dry-run → `would: git add -A` then generate | **GREEN** |
 | D7 | dry-run/gen-commit/leave-uncommitted | gen-commit, no add-all, untracked → leave-N line; exit 0; zero mutations | **GREEN** |
 | D8 | dry-run/gen-commit/leave-skipped-when-fully-staged | gen-commit, no add-all, only staged → no leave-N | **GREEN** |
+| F1 | dry-run/follow-local-replace/sibling-both-dirty | sibling `../external/…` replace; both dirty; peel dep then `.` | **RED** until follow lands |
+| F2 | dry-run/follow-local-replace/nested-module-owns-replace | nested module owns replace; dep still in plan | **RED** until nested-module scan follow |
+| F3 | dry-run/follow-local-replace/intra-repo-only | `replace => ./pkgs/shared`; only `would: peel .` | **GREEN** regression (no extra member) |
+| F5 | dry-run/follow-local-replace/clean-dep-skipped | out-of-tree dep clean; only peel `.` | **GREEN** today; stays GREEN after follow |
+| F6 | dry-run/follow-local-replace/transitive-chain | A→B→C local replaces; peel C then B then A | **RED** until BFS follow + synthetic edges |
+| F7 | dry-run/follow-local-replace/missing-target-warns | missing replace target → `warning:`; peel `.`; exit 0 | **RED** until warning emitted |
+| F8 | dry-run/follow-local-replace/nested-mod-target-toplevel | replace nested subdir → peel dep **git toplevel** display | **RED** until ShowToplevel map |
 | C1 | cycle/two-cycle | A↔B dry-run → cycle error; zero mutations | **GREEN** |
 | A1 | apply/leaf-then-pin | primary is main (Path == MainRepo); peel leaf + pin **that** Path go.mod; banner rel display | **GREEN** (pin-when-primary-is-main) |
 | A4 | apply/pin-on-linked-consumer-not-main | primary is **linked** consumer WT; pin WT go.mod; consumer **MainRepo** go.mod baseline unchanged | **RED** until pin uses Path not MainRepo |
@@ -208,15 +255,18 @@ Split factor (MECE, significance-first):
 ```sh
 doctest vet ./cmd/wrk/tests/unwind
 doctest test -count=1 ./cmd/wrk/tests/unwind
+doctest test -count=1 ./cmd/wrk/tests/unwind/dry-run/follow-local-replace
+doctest test -count=1 ./cmd/wrk/tests/unwind/dry-run/free-first-order
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/multi-module-pin-require-root-only
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/tidy-error-surfaces-go-stderr
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/pin-on-linked-consumer-not-main
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/leaf-then-pin
 ```
 
-Expected **RED** on **A4** (pin Path), **A5** (multi-module pin selectivity), and **A6**
-(tidy go stderr) until implementer lands. Prior display/add-all/single-module pin
-leaves stay **GREEN**.
+Expected **RED** this cycle on **F1, F2, F6, F7, F8** (follow expansion / warning /
+toplevel map) until implementer lands. **F3, F5** and **D1/F4** free-first
+regression stay **GREEN** (or report unexpected RED). Prior apply RED (**A4–A6**)
+unchanged. Other prior leaves stay **GREEN**.
 
 ```go
 import (
