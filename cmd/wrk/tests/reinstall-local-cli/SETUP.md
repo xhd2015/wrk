@@ -13,7 +13,7 @@ WorkRoot/{mod,gobin,.wrk}
 
 ## Preconditions
 
-- Nested root: no inheritance from `cmd/wrk/tests` (own `DOCTEST.md` Version 0.0.8).
+- Nested root: no inheritance from `cmd/wrk/tests` (own `DOCTEST.md` Version 0.0.9).
 - Go toolchain on PATH; session wrk binary built once per doctest run to
   `{DOCTEST_FIXTURE_ROOT}/{DOCTEST_SESSION_ID}/bin/wrk`.
 - Fixture modules are real directories under a per-leaf `t.TempDir()` WorkRoot:

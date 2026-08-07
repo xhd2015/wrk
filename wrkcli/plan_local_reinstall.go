@@ -710,7 +710,7 @@ func goEnvGOPATH() (string, error) {
 func printLocalReinstallDryRun(plan *LocalReinstallPlan, colorOn bool) error {
 	printReinstallDiagnostics(plan.Diagnostics, colorOn)
 	nInstall, nSkip := 0, 0
-	if err := printPlanItemsDryRun(plan.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
+	if err := printPlanItemsDryRun(plan.ModuleRoot, plan.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
 		return err
 	}
 	fmt.Printf("would: reinstall %d binaries (%d skipped)\n", nInstall, nSkip)
@@ -743,7 +743,7 @@ func printMultiLocalReinstallDryRun(plan *MultiLocalReinstallPlan, colorOn bool)
 			}
 			fmt.Printf("# module %s (%s)\n", modulePath, relDir)
 		}
-		if err := printPlanItemsDryRun(mod.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
+		if err := printPlanItemsDryRun(mod.ModuleRoot, mod.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
 			return err
 		}
 	}
@@ -820,16 +820,22 @@ func isScriptRelPath(rel string) bool {
 }
 
 // printPlanItemsDryRun writes would:/skip: lines for items; accumulates counters.
-func printPlanItemsDryRun(items []PlanItem, binDir string, nInstall, nSkip *int) error {
+// Install paths are re-rooted to the nearest go.mod under moduleRoot so dry-run
+// matches what execute will run (e.g. ./foo when cmd/ is a nested module).
+func printPlanItemsDryRun(moduleRoot string, items []PlanItem, binDir string, nInstall, nSkip *int) error {
 	for _, it := range items {
 		switch it.Action {
 		case ActionInstall:
 			*nInstall++
+			_, ownRel, err := resolveGoPackageRoot(moduleRoot, it.RelPath)
+			if err != nil {
+				return err
+			}
 			switch it.Method {
 			case MethodGoInstall:
-				fmt.Printf("would: go install %s\n", it.RelPath)
+				fmt.Printf("would: go install %s\n", ownRel)
 			case MethodGoRunInstall:
-				fmt.Printf("would: go run %s\n", it.RelPath)
+				fmt.Printf("would: go run %s\n", ownRel)
 			default:
 				return fmt.Errorf("unknown reinstall method %q for %s", it.Method, it.BinName)
 			}
@@ -894,18 +900,25 @@ func printReinstallFailedWarning(nFailed int, colorOn bool) {
 
 // executePlanItems runs install/skip actions for one module's items.
 // Unknown method/action returns a hard error (stops the plan).
+// Install/run paths are re-rooted to the nearest go.mod under moduleRoot
+// (progress lines and cmd.Dir use the post-re-root path/root).
 func executePlanItems(moduleRoot, binDir string, items []PlanItem, nReinstalled, nSkip, nFailed *int) error {
 	for _, it := range items {
 		switch it.Action {
 		case ActionInstall:
-			var err error
+			ownRoot, ownRel, err := resolveGoPackageRoot(moduleRoot, it.RelPath)
+			if err != nil {
+				// Soft-fail this item so other installs can continue.
+				*nFailed++
+				continue
+			}
 			switch it.Method {
 			case MethodGoInstall:
-				fmt.Printf("go install %s\n", it.RelPath)
-				err = runGoInModule(moduleRoot, "install", it.RelPath)
+				fmt.Printf("go install %s\n", ownRel)
+				err = runGoInModule(ownRoot, "install", ownRel)
 			case MethodGoRunInstall:
-				fmt.Printf("go run %s\n", it.RelPath)
-				err = runGoInModule(moduleRoot, "run", it.RelPath)
+				fmt.Printf("go run %s\n", ownRel)
+				err = runGoInModule(ownRoot, "run", ownRel)
 			default:
 				return fmt.Errorf("unknown reinstall method %q for %s", it.Method, it.BinName)
 			}
@@ -924,8 +937,73 @@ func executePlanItems(moduleRoot, binDir string, items []PlanItem, nReinstalled,
 	return nil
 }
 
+// resolveGoPackageRoot returns the module directory owning pkg and the path
+// relative to that module for go install/run.
+//
+// It walks up from the package directory looking for the nearest go.mod, without
+// leaving moduleRoot. This re-roots installs when discovery planned under a
+// parent module but the package lives in a nested module (e.g. cmd/go.mod +
+// cmd/foo → ownRoot=cmd, ownRel=./foo).
+func resolveGoPackageRoot(moduleRoot, relPath string) (ownRoot, ownRel string, err error) {
+	moduleRoot = filepath.Clean(moduleRoot)
+	if abs, aerr := filepath.Abs(moduleRoot); aerr == nil {
+		moduleRoot = abs
+	}
+	if resolved, rerr := filepath.EvalSymlinks(moduleRoot); rerr == nil {
+		moduleRoot = resolved
+	}
+
+	rel := strings.TrimPrefix(relPath, "./")
+	pkgDir := filepath.Clean(filepath.Join(moduleRoot, filepath.FromSlash(rel)))
+	if resolved, rerr := filepath.EvalSymlinks(pkgDir); rerr == nil {
+		pkgDir = resolved
+	}
+
+	dir := pkgDir
+	for {
+		if !pathIsUnderOrEqual(dir, moduleRoot) {
+			break
+		}
+		if _, serr := os.Stat(filepath.Join(dir, "go.mod")); serr == nil {
+			ownRoot = dir
+			relToPkg, rerr := filepath.Rel(ownRoot, pkgDir)
+			if rerr != nil {
+				return "", "", rerr
+			}
+			relToPkg = filepath.ToSlash(relToPkg)
+			if relToPkg == "" || relToPkg == "." {
+				ownRel = "."
+			} else {
+				ownRel = "./" + relToPkg
+			}
+			return ownRoot, ownRel, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", "", fmt.Errorf("no go.mod found for package %s under module root %s", relPath, moduleRoot)
+}
+
+// pathIsUnderOrEqual reports whether path is the same as root or a descendant.
+func pathIsUnderOrEqual(path, root string) bool {
+	path = filepath.Clean(path)
+	root = filepath.Clean(root)
+	if path == root {
+		return true
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 // runGoInModule runs `go <subcmd> <relPath>` with Dir=moduleRoot and inherited env
 // (including GOBIN). Streams child stdout/stderr to the process.
+// moduleRoot/relPath should already be post-re-root (nearest go.mod + rebased path).
 func runGoInModule(moduleRoot, subcmd, relPath string) error {
 	cmd := exec.Command("go", subcmd, relPath)
 	cmd.Dir = moduleRoot

@@ -1,14 +1,15 @@
 # wrk --reinstall-local — CLI dry-run + execute + multi + --main compose (P6)
 
 ## Version
-0.0.8
+0.0.9
 
 Decision tree for **Phase 2** CLI dry-run surface, **Phase 3** execute path,
 **Phase 4** hardening (events.jsonl), **Phase 3 multi-module dry-run**,
 **Phase 4 product compose** (`--main --reinstall-local`), **Phase 5
-multi-module execute**, and **Phase 6** events with `--main` (args include
-`--main`). Builds and runs the real `wrk` binary (session fixture cache), with
-**GOBIN** isolation for bin-dir filtering.
+multi-module execute**, **Phase 6** events with `--main` (args include
+`--main`), and **nearest-go.mod re-root** for packages under a nested
+`go.mod` (agent-pro `cmd/go.mod` pattern). Builds and runs the real `wrk`
+binary (session fixture cache), with **GOBIN** isolation for bin-dir filtering.
 
 Depends on P1 pure API `wrkcli.PlanLocalReinstalls` / multi
 `PlanLocalReinstallsFromWorkDir` (under `cmd/wrk/tests/reinstall-local/`).
@@ -99,6 +100,12 @@ JSON CLI, bare `--main` nested shell e2e, FORCE_COLOR / CLICOLOR, coloring
   - method `go-run-install` → `would: go run <RelPath>`
   Optional trailing ` # <bin>` comment is allowed by product but **not** required
   by these asserts (locked form has no comment).
+  **Nearest-go.mod re-root (display):** `<RelPath>` is the **post-re-root** path
+  when the package dir’s nearest `go.mod` (walk up, still under the plan item’s
+  `ModuleRoot`) differs from that plan `ModuleRoot` — e.g. discovery may keep
+  `./cmd/foo` under the root module while dry-run prints `would: go install ./foo`
+  after re-rooting into nested `cmd/go.mod`. `# module` headers may still name
+  the **plan** module; asserts lock path strings, not header re-attribution.
 - **skip: lines** — for each plan item with `Action=skip`:
   `skip: <bin> (not in <bindir>)` where `<bindir>` is the resolved bin directory
   path (absolute under test isolation). Same wording in dry-run and execute.
@@ -150,20 +157,32 @@ JSON CLI, bare `--main` nested shell e2e, FORCE_COLOR / CLICOLOR, coloring
   useMain)` (`useMain` true only with `--main`). Then
   `executeMultiLocalReinstalls`: for each module in multi-plan order (lex
   absolute ModuleRoot), for each plan item (lex BinName within module):
-  - `Action=install` + method `go-install` → run `go install <RelPath>` with
-    `Dir=that module's ModuleRoot`, stream child stdout/stderr to parent
-    streams; count success as reinstalled or failure as failed.
-  - `Action=install` + method `go-run-install` → run `go run <RelPath>` with
-    `Dir=ModuleRoot`, stream child stdout/stderr; count reinstalled/failed.
+  - `Action=install` + method `go-install` → **nearest-go.mod re-root** then
+    run `go install <ownRel>` with `Dir=ownRoot` (see re-root rule below);
+    stream child stdout/stderr to parent streams; count success as reinstalled
+    or failure as failed.
+  - `Action=install` + method `go-run-install` → same re-root, then
+    `go run <ownRel>` with `Dir=ownRoot`; count reinstalled/failed.
   - `Action=skip` → do **not** invoke go; count skipped.
   Continue after a failed install (do not abort remaining items or remaining
   modules). Cross-module install×install collision fails at plan time (non-zero
   stderr; **no** `go install` / no execute summary).
+- **Nearest-go.mod re-root (execute + dry-run display)** — before `go install` /
+  `go run` (and when printing the matching would:/progress path):
+  1. `pkgDir = Clean(Join(ModuleRoot, TrimPrefix(RelPath, "./")))`
+  2. Walk up from `pkgDir` while still under (or equal to) plan `ModuleRoot`
+  3. First directory with `go.mod` → `ownRoot`; rebased
+     `ownRel = "./" + Rel(ownRoot, pkgDir)` (or `"."` if same)
+  Prefer `EvalSymlinks` on `pkgDir` when possible. If no `go.mod` in bound →
+  that install fails (count failed). Classic nested `tools/cmd/toolbin` is
+  identity re-root (`ownRoot` already equals the tools plan module). Agent-pro
+  shape (`cmd/go.mod` + `cmd/foo`) re-roots parent-planned `./cmd/foo` →
+  `Dir=…/cmd`, path `./foo`.
 - **Execute progress lines** — for each install attempt, one wrk-owned stdout
   line before/as the command runs (mirrors dry-run without the `would:` prefix;
-  **no** `# module` headers on execute):
-  - `go install <RelPath>`
-  - `go run <RelPath>`
+  **no** `# module` headers on execute); paths are **post-re-root**:
+  - `go install <ownRel>`
+  - `go run <ownRel>`
   Child compiler/tool output is streamed (typically on stderr) and is **not**
   locked to exact match in execute leaves.
 - **Execute summary line** — always last content line of execute stdout:
@@ -214,6 +233,7 @@ reinstall-local-cli/
 │   └── warning-color/               # --color + ambiguous cmd → orange warning: on stderr
 ├── dry-run-multi/                   # multi-module dry-run (P3 multi, sealed) — P5 E3 regression
 │   ├── nested-modules/              # C1: root + tools; headers + both would; across 2 modules
+│   ├── nested-gomod-under-cmd/      # D1: root + cmd/go.mod + cmd/foo → would: go install ./foo (post-re-root)
 │   ├── install-collision/           # C3: install×install same bin → non-zero; stderr names bin
 │   └── from-subdir/                 # C4: git cwd=pkg/sub still plans both modules
 ├── execute/                         # real --reinstall-local without --dry-run (P3, sealed single-mod)
@@ -222,6 +242,7 @@ reinstall-local-cli/
 │   └── continue-on-failure/         # E3-s: one compile fail among installs; soft exit 0 + warning:; continue
 ├── execute-multi/                   # multi-module execute (P5)
 │   ├── nested-modules/              # E1: root + tools both install into GOBIN; reinstalled 2
+│   ├── nested-gomod-under-cmd/      # E1-nr: cmd/go.mod + cmd/foo → go install ./foo; bin prints foo-ok
 │   ├── continue-on-failure/         # E2: fail in root; tools still installs; soft exit 0 + warning:
 │   └── install-collision/           # collision: plan error before any go install; stub unchanged
 ├── events/                          # P4/P6 hardening: events.jsonl command identity
@@ -249,8 +270,8 @@ Split factor (MECE, significance-first):
 
 1. **Mode** — dry-run plan (single vs multi) vs real execute (single vs multi) vs events vs main-compose vs flag surface / errors.
 2. **Within single dry-run** — present install / skip-only / script-wins notice / ambiguous / color.
-3. **Within multi dry-run** — happy nested modules / install×install collision / from git subdir.
-4. **Within multi execute** — both modules install / continue across module failure / collision before install.
+3. **Within multi dry-run** — happy nested modules / nested go.mod under cmd (re-root paths) / install×install collision / from git subdir.
+4. **Within multi execute** — both modules install / nested go.mod under cmd (re-root execute) / continue across module failure / collision before install.
 5. **Events** — dry-run / execute / main-compose dry-run success recording of
    `command: "reinstall-local"` (P6 locks `--main` in args for compose).
 6. **Main compose** — linked-WT scan-root choice (main vs worktree) / flag order / still exclusive with --list.
@@ -269,12 +290,14 @@ Split factor (MECE, significance-first):
 | C3-nc | dry-run/prefer-script-color | `--color` + unique conflict → stderr grey `notice:`; stdout plan uncolored |
 | C3-wc | dry-run/warning-color | `--color` + ambiguous cmd → stderr orange `warning:`; stdout uncolored |
 | **C1** | dry-run-multi/nested-modules | root + nested tools, both bins present → `# module … (.)` + `# module … (tools)` + both `would: go install`; `across 2 modules`; stubs unchanged |
+| **D1** | dry-run-multi/nested-gomod-under-cmd | root + nested `cmd/go.mod` + `cmd/foo` + GOBIN/foo → multi dry-run with **post-re-root** `would: go install ./foo` (not `./cmd/foo`); across 2; stub unchanged |
 | **C3** | dry-run-multi/install-collision | nested mod-a + mod-b both `./cmd/samebin` + GOBIN/samebin → non-zero; stderr contains `samebin`, `mod-a`, `mod-b` |
 | **C4** | dry-run-multi/from-subdir | git repo root+tools; cwd=`pkg/sub` → same multi dry-run as full tree; both modules; `across 2 modules` |
 | E1-s | execute/present-install | `./cmd/tool` prints version + GOBIN stub → real `go install`; exit 0; GOBIN/tool executable and runs; summary `reinstalled 1, skipped 0, failed 0` |
 | E2-s | execute/skip-only | `./cmd/missing` no bin → no go; exit 0; `skip:` + `reinstalled 0, skipped 1, failed 0` |
 | E3-s | execute/continue-on-failure | present `broken` (does not compile) + `good` (ok) → continue; exit 0; stderr `warning:` (reinstall/fail); good installed; `failed 1` in summary |
 | **E1** | execute-multi/nested-modules | root + nested tools both bins present → `go install` each with per-module Dir; both GOBIN bins run; `reinstalled 2, skipped 0, failed 0` |
+| **E1-nr** | execute-multi/nested-gomod-under-cmd | root + nested `cmd/go.mod` + `cmd/foo` prints foo-ok + GOBIN/foo → progress `go install ./foo`; `reinstalled 1, skipped 0, failed 0`; bin runs `foo-ok` |
 | **E2** | execute-multi/continue-on-failure | root `broken` fails compile; tools `toolgood` still installs; exit 0; stderr `warning:`; `reinstalled 1, skipped 0, failed 1` |
 | E-coll | execute-multi/install-collision | mod-a + mod-b both `./cmd/samebin` + GOBIN → non-zero **before** install; stub unchanged; stderr names `samebin`/`mod-a`/`mod-b` |
 | **E3** | dry-run-multi/* (regression) | multi dry-run still zero mutation; `across K modules` / collision plan errors unchanged (sealed C1/C3/C4) |
@@ -303,6 +326,7 @@ doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run/prefer-script-color
 doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run/warning-color
 doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run-multi
 doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run-multi/nested-modules
+doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run-multi/nested-gomod-under-cmd
 doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run-multi/install-collision
 doctest test ./cmd/wrk/tests/reinstall-local-cli/dry-run-multi/from-subdir
 doctest test ./cmd/wrk/tests/reinstall-local-cli/execute/present-install
@@ -310,6 +334,7 @@ doctest test ./cmd/wrk/tests/reinstall-local-cli/execute/skip-only
 doctest test ./cmd/wrk/tests/reinstall-local-cli/execute/continue-on-failure
 doctest test ./cmd/wrk/tests/reinstall-local-cli/execute-multi
 doctest test ./cmd/wrk/tests/reinstall-local-cli/execute-multi/nested-modules
+doctest test ./cmd/wrk/tests/reinstall-local-cli/execute-multi/nested-gomod-under-cmd
 doctest test ./cmd/wrk/tests/reinstall-local-cli/execute-multi/continue-on-failure
 doctest test ./cmd/wrk/tests/reinstall-local-cli/execute-multi/install-collision
 doctest test ./cmd/wrk/tests/reinstall-local-cli/events
@@ -340,6 +365,16 @@ implementer changes `executeLocalReinstalls` /
 `executeMultiLocalReinstalls` so `failed > 0` prints stderr `warning:` and
 returns nil (exit 0) instead of `ExitCodeError{Code: 1}`. Do **not** weaken
 sealed success-path `execute/*` / `dry-run-multi/*` ASSERT bodies.
+
+**Coverage (nearest-go.mod re-root, Classic TDD):** expect **RED** on
+`dry-run-multi/nested-gomod-under-cmd` and
+`execute-multi/nested-gomod-under-cmd` until implementer re-roots
+`go install` / `go run` (and matching dry-run `would:` paths) to the package
+dir’s nearest `go.mod` under the plan `ModuleRoot` (agent-pro `cmd/go.mod` +
+`cmd/foo` → `./foo` with `Dir=…/cmd`). Pre-fix: dry-run prints
+`would: go install ./cmd/foo`; execute fails with “does not contain package”
+and `failed 1`. Identity nested `tools/cmd/toolbin` leaves stay GREEN. Do
+**not** weaken sealed ASSERTs of unrelated leaves.
 
 **Coverage (P4 main-compose):** expect **GREEN** when flag mutex allows
 `--main` + `--reinstall-local` and `runReinstallLocal` passes `useMain=true`.
