@@ -36,8 +36,8 @@ window on implies terminal new (after flag apply); legacy create.interceptor ign
 
 ## Context
 
-- Agent default argv: `agent-run run --dir <abs-worktree> --session-id-from-prompt --no-submit --open --agent-runner=grok-tty <prompt>`
-  (`--dir` may appear immediately after `run`; space form preferred).
+- Agent default argv: `agent-run run --dir <abs-worktree> --session-id-from-prompt --no-submit --open --color --agent-runner=grok-tty <prompt>`
+  (`--dir` may appear immediately after `run`; space form preferred). Always injects `--color` even if config `create.agent.args` omits it.
 - Default prompt template: `/brainstorm ${task}` (empty task → empty substitution).
 - Terminal+agent: agent only as iTerm follow-up command string; outer wrk must **not** exec agent-run.
 - In-process agent: `--dir` is the workspace source of truth; process cwd of agent-run **need not** equal worktree.
@@ -195,7 +195,7 @@ func writeFullCreateUXConfig(t *testing.T, wrkHome string) {
 			"enabled":          true,
 			"runner":           "grok-tty",
 			"prompt_template":  "/brainstorm ${task}",
-			"args":             []string{"--session-id-from-prompt", "--no-submit", "--open"},
+			"args":             []string{"--session-id-from-prompt", "--no-submit", "--open", "--color"},
 		},
 	})
 }
@@ -380,7 +380,7 @@ func assertAgentRunInvoked(t *testing.T, req *Request, wtPath, task string) []st
 		t.Fatalf("argv should start with agent-run run …, got %v", args)
 	}
 	joined := strings.Join(args, "\x00")
-	for _, need := range []string{"--session-id-from-prompt", "--no-submit", "--open"} {
+	for _, need := range []string{"--session-id-from-prompt", "--no-submit", "--open", "--color"} {
 		if !containsArg(args, need) {
 			t.Fatalf("argv missing %q: %v", need, args)
 		}
@@ -467,6 +467,9 @@ func assertItermFollowUpHasAgentRun(t *testing.T, script, wtPath, task string) {
 	}
 	if !strings.Contains(script, "grok-tty") {
 		t.Fatalf("iterm follow-up should include grok-tty; script:\n%s", script)
+	}
+	if !strings.Contains(script, "--color") {
+		t.Fatalf("iterm follow-up should include --color; script:\n%s", script)
 	}
 	if !strings.Contains(script, "--dir") {
 		t.Fatalf("iterm follow-up should include --dir; script:\n%s", script)

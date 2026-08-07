@@ -30,7 +30,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 			"enabled":         true,
 			"runner":          "grok-tty",
 			"prompt_template": "/brainstorm ${task}",
-			"args":            []string{"--session-id-from-prompt", "--no-submit", "--open"},
+			"args":            []string{"--session-id-from-prompt", "--no-submit", "--open", "--color"},
 		},
 	})
 	req.Args = []string{"--new-terminal"}

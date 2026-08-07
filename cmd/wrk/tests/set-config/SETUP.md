@@ -134,7 +134,7 @@ func decodeAgent(t *testing.T, raw json.RawMessage) (enabled bool, runner, promp
 }
 
 func defaultAgentArgs() []string {
-	return []string{"--session-id-from-prompt", "--no-submit", "--open"}
+	return []string{"--session-id-from-prompt", "--no-submit", "--open", "--color"}
 }
 
 func assertDefaultAgentOn(t *testing.T, wrkHome string) {

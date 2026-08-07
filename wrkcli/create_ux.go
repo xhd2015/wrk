@@ -27,8 +27,9 @@ const (
 )
 
 // defaultAgentArgs returns the default agent-run flags before --agent-runner.
+// Includes --color so TTY children (grok-tty/codex-tty) force color env.
 func defaultAgentArgs() []string {
-	return []string{"--session-id-from-prompt", "--no-submit", "--open"}
+	return []string{"--session-id-from-prompt", "--no-submit", "--open", "--color"}
 }
 
 // createUXFlags are one-shot create-mode CLI flags.
@@ -322,6 +323,8 @@ func expandAgentPrompt(tmpl, task string) string {
 
 // buildAgentArgv builds: agent-run run --dir <absWorktree> <args...> --agent-runner=<runner> <prompt>
 // --dir is the workspace source of truth (process cwd need not equal the worktree).
+// Always ensures --color so agent-run forces TTY child color even when create.agent.args
+// omits it or the parent shell has NO_COLOR/TERM=dumb.
 func buildAgentArgv(worktreePath string, plan createUXPlan, task string) []string {
 	runner := plan.runner
 	if runner == "" {
@@ -331,6 +334,7 @@ func buildAgentArgv(worktreePath string, plan createUXPlan, task string) []strin
 	if args == nil {
 		args = defaultAgentArgs()
 	}
+	args = ensureAgentColorArg(args)
 	absDir, err := filepath.Abs(worktreePath)
 	if err != nil {
 		absDir = worktreePath
@@ -342,6 +346,19 @@ func buildAgentArgv(worktreePath string, plan createUXPlan, task string) []strin
 	argv = append(argv, "--agent-runner="+runner)
 	argv = append(argv, prompt)
 	return argv
+}
+
+// ensureAgentColorArg appends --color if missing (no duplicate).
+func ensureAgentColorArg(args []string) []string {
+	for _, a := range args {
+		if a == "--color" || strings.HasPrefix(a, "--color=") {
+			return args
+		}
+	}
+	out := make([]string, 0, len(args)+1)
+	out = append(out, args...)
+	out = append(out, "--color")
+	return out
 }
 
 func buildAgentShellCommand(worktreePath string, plan createUXPlan, task string) string {
