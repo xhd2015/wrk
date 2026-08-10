@@ -27,6 +27,10 @@ dirty/clean stack + --unwind --tag-next [+ --push/--done/--add-all/--reinstall-l
 - **P4:** `reinstall-local/` — nested skip consumer + multi-repo reinstall tail.
   Classic preferred; mixed OK if already GREEN after P2/P3. Do not break sealed
   dry-run or clean/partial-edit leaves.
+- **B1 pin-before-feature:** `pin-before-feature/` — interleaved free-first apply
+  with separate pin auto-commit **before** consumer feature gen-commit (Classic
+  TDD RED until product reorders). Do not rewrite sealed clean/partial-edit
+  ASSERT contracts for B1.
 - Do **not** rewrite sealed P1 dry-run ASSERT files under `cascade/dry-run/`.
 
 ## Steps

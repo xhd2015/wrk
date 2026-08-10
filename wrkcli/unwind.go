@@ -763,10 +763,11 @@ func runUnwind(workDir string, flags UnwindFlags) error {
 }
 
 // ApplyUnwind peels free-first dirty stack repos with explicit ship/land flags.
-// With --tag-next: land prelude then global free-module cascade (one-scope tags,
-// keep-local-replace pins, selective cascade pin commits, push when main clears).
-// Without --tag-next: land peels and legacy pinConsumersOfPeeled (latest tags).
-// Preflight (cycle + flags) must already have passed; this mutates.
+// With --tag-next (B1): peel free deps first → free-module cascade (tag + pin
+// consumers, selective pin commits) → peel remaining dirty consumers (feature
+// gen-commit sees pinned go.mod). Without --tag-next: land peels and legacy
+// pinConsumersOfPeeled (latest tags). Preflight (cycle + flags) must already
+// have passed; this mutates.
 func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdge, plan *UnwindPlan, flags UnwindFlags) error {
 	if plan == nil {
 		return nil
@@ -793,107 +794,36 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		reinstallMainPaths = append(reinstallMainPaths, path)
 	}
 
-	// Land prelude (and legacy full peel when not --tag-next).
-	for i, label := range plan.PeelOrder {
-		m, ok := byLabel[label]
-		if !ok {
-			return fmt.Errorf("wrk: peel target %s not found in stack inventory", label)
-		}
-		if i > 0 {
-			fmt.Println()
-		}
-		// Banner uses checkout Path relative to invocation workDir (statusDirLine policy).
-		fmt.Printf("==== unwind: peel %s ====\n", peelDisplayPath(workDir, m.Path))
-
-		mainPath := m.MainRepo
-		if mainPath == "" {
-			mainPath = m.Path
-		}
-
-		// Linked worktree: land with --done (remove) or --merge-back (keep).
-		// Already-main: skip land; ship/cascade against main checkout.
-		if m.Linked {
-			if !flags.Done && !flags.MergeBack {
-				return fmt.Errorf("wrk: --unwind for linked worktrees requires --done or --merge-back")
-			}
-			if flags.GenCommitMsg {
-				fmt.Println("---- generate commit message ----")
-				// Stage only when --add-all is in GenCommitArgs (library honors
-				// it). Do not unconditional git add -A before gen-commit so
-				// untracked dirt is not forced into the AI commit.
-				if err := runGenCommitMsgStage(m.Path, flags.GenCommitArgs, false); err != nil {
-					// Empty index without --add-all: AI gen-commit has nothing
-					// to work on. Soft-skip and let auto-commit / land handle
-					// remaining dirt (fixtures with only untracked dirt).
-					if genArgsHasFlag(flags.GenCommitArgs, "--add-all") || flags.AddAll || !isNoStagedGenCommitErr(err) {
-						return err
-					}
-					if err := autoCommitIfDirty(m.Path); err != nil {
-						return err
-					}
-				}
-			}
-			// --done (Remove) refuses dirty porcelain; auto-commit pending dirt
-			// (including leftover untracked after a staged-only gen-commit).
-			if flags.Done {
-				if err := autoCommitIfDirty(m.Path); err != nil {
-					return err
-				}
-			}
-			result, err := worktree.MergeBack(worktree.MergeBackOptions{
-				SourcePath: m.Path,
-				TargetPath: "",
-				Remove:     flags.Done, // --done removes; --merge-back alone keeps
-				DryRun:     false,
-				TmpDir:     filepath.Join(wrkHome, "worktrees"),
-				StashLabel: "wrk-unwind",
-				Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
-					// Default auto-yes (same as CLI --done/--merge-back).
-					return worktree.PromptConfirmPlan(plan, false, true)
-				},
-			})
-			if err != nil {
-				return mapMergeBackSharedError(err, "--unwind")
-			}
-			if result.Action == "aborted" {
-				return fmt.Errorf("wrk: merge-back aborted during unwind peel %s", label)
-			}
-			fmt.Println(result.Message)
-			if result.TargetPath != "" {
-				mainPath = result.TargetPath
-			}
-		}
-
-		if flags.Sync {
-			fmt.Println("---- sync linked worktrees ----")
-			if _, err := runSyncWithColor(mainPath, false, flags.Color, flags.NoColor); err != nil {
+	peelCount := 0
+	peelLabels := func(labels []string) error {
+		for _, label := range labels {
+			if err := applyUnwindPeelOne(workDir, wrkHome, label, byLabel, members, edges, flags, &stats, addReinstallMainPath, peelCount > 0); err != nil {
 				return err
 			}
+			peelCount++
 		}
-
-		// With --tag-next: land prelude only; tag/pin/push are global cascade.
-		if !flags.TagNext {
-			// Legacy: optional push without tag-next, pin consumers to latest.
-			if flags.Push {
-				fmt.Println()
-				if err := runPushMain(mainPath, false, flags.Force, nil); err != nil {
-					return err
-				}
-				stats.Pushed++
-			}
-			if err := pinConsumersOfPeeled(label, mainPath, nil, members, edges); err != nil {
-				return err
-			}
-		}
-		addReinstallMainPath(mainPath)
-		stats.Peeled++
+		return nil
 	}
 
-	if flags.TagNext {
-		// Linked paths may be removed by --done; remap to MainRepo so cascade
-		// graph/scan and tagscope plan against landed mains.
+	if !flags.TagNext {
+		// Legacy: peel all free-first, pin consumers to latest per peel.
+		if err := peelLabels(plan.PeelOrder); err != nil {
+			return err
+		}
+	} else {
+		// B1 interleaved free-first: free peels → cascade pin → consumer peels.
+		// Consumers that only need pin of a free dep must not gen-commit while a
+		// droppable external replace remains (D7 separate pin then feature commit).
+		early, deferred := splitPeelOrderB1(plan.PeelOrder, members)
+		if err := peelLabels(early); err != nil {
+			return err
+		}
+		// Linked free paths may be removed by --done; remap for cascade graph.
 		cascadeMembers := refreshStackMembersAfterLand(members)
 		if err := applyUnwindCascade(cascadeMembers, flags, addReinstallMainPath, &stats); err != nil {
+			return err
+		}
+		if err := peelLabels(deferred); err != nil {
 			return err
 		}
 	}
@@ -913,6 +843,196 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		fmt.Println(line)
 	}
 	return nil
+}
+
+// applyUnwindPeelOne peels one dirty stack label: optional gen-commit, land,
+// sync, and (without --tag-next) legacy push/pin. blankBefore prints a blank
+// line before the peel banner when prior peels already ran.
+func applyUnwindPeelOne(
+	workDir, wrkHome, label string,
+	byLabel map[string]StackMember,
+	members []StackMember,
+	edges []RepoEdge,
+	flags UnwindFlags,
+	stats *UnwindApplyStats,
+	addReinstallMainPath func(string),
+	blankBefore bool,
+) error {
+	m, ok := byLabel[label]
+	if !ok {
+		return fmt.Errorf("wrk: peel target %s not found in stack inventory", label)
+	}
+	if blankBefore {
+		fmt.Println()
+	}
+	// Banner uses checkout Path relative to invocation workDir (statusDirLine policy).
+	fmt.Printf("==== unwind: peel %s ====\n", peelDisplayPath(workDir, m.Path))
+
+	mainPath := m.MainRepo
+	if mainPath == "" {
+		mainPath = m.Path
+	}
+
+	// Linked worktree: land with --done (remove) or --merge-back (keep).
+	// Already-main: skip land; ship/cascade against main checkout.
+	if m.Linked {
+		if !flags.Done && !flags.MergeBack {
+			return fmt.Errorf("wrk: --unwind for linked worktrees requires --done or --merge-back")
+		}
+		if flags.GenCommitMsg {
+			fmt.Println("---- generate commit message ----")
+			// Stage only when --add-all is in GenCommitArgs (library honors
+			// it). Do not unconditional git add -A before gen-commit so
+			// untracked dirt is not forced into the AI commit.
+			if err := runGenCommitMsgStage(m.Path, flags.GenCommitArgs, false); err != nil {
+				// Empty index without --add-all: AI gen-commit has nothing
+				// to work on. Soft-skip and let auto-commit / land handle
+				// remaining dirt (fixtures with only untracked dirt).
+				if genArgsHasFlag(flags.GenCommitArgs, "--add-all") || flags.AddAll || !isNoStagedGenCommitErr(err) {
+					return err
+				}
+				if err := autoCommitIfDirty(m.Path); err != nil {
+					return err
+				}
+			}
+		}
+		// --done (Remove) refuses dirty porcelain; auto-commit pending dirt
+		// (including leftover untracked after a staged-only gen-commit).
+		if flags.Done {
+			if err := autoCommitIfDirty(m.Path); err != nil {
+				return err
+			}
+		}
+		result, err := worktree.MergeBack(worktree.MergeBackOptions{
+			SourcePath: m.Path,
+			TargetPath: "",
+			Remove:     flags.Done, // --done removes; --merge-back alone keeps
+			DryRun:     false,
+			TmpDir:     filepath.Join(wrkHome, "worktrees"),
+			StashLabel: "wrk-unwind",
+			Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
+				// Default auto-yes (same as CLI --done/--merge-back).
+				return worktree.PromptConfirmPlan(plan, false, true)
+			},
+		})
+		if err != nil {
+			return mapMergeBackSharedError(err, "--unwind")
+		}
+		if result.Action == "aborted" {
+			return fmt.Errorf("wrk: merge-back aborted during unwind peel %s", label)
+		}
+		fmt.Println(result.Message)
+		if result.TargetPath != "" {
+			mainPath = result.TargetPath
+		}
+	}
+
+	if flags.Sync {
+		fmt.Println("---- sync linked worktrees ----")
+		if _, err := runSyncWithColor(mainPath, false, flags.Color, flags.NoColor); err != nil {
+			return err
+		}
+	}
+
+	// With --tag-next: land prelude only; tag/pin/push are global cascade.
+	if !flags.TagNext {
+		// Legacy: optional push without tag-next, pin consumers to latest.
+		if flags.Push {
+			fmt.Println()
+			if err := runPushMain(mainPath, false, flags.Force, nil); err != nil {
+				return err
+			}
+			if stats != nil {
+				stats.Pushed++
+			}
+		}
+		if err := pinConsumersOfPeeled(label, mainPath, nil, members, edges); err != nil {
+			return err
+		}
+	}
+	if addReinstallMainPath != nil {
+		addReinstallMainPath(mainPath)
+	}
+	if stats != nil {
+		stats.Peeled++
+	}
+	return nil
+}
+
+// splitPeelOrderB1 partitions PeelOrder for B1 free-first interleave:
+//
+//	early: free dep peels (and same-label free+consumer hosts) — peel before cascade
+//	deferred: pure pin-consumer peels — peel after cascade pin drops external replace
+//
+// Same-repo free+consumer (shared label hosts both free dep and pin consumer)
+// stays early so land/DIRTY prelude still runs before cascade tags on that main.
+// Plan/cascade failures fall back to all-early (legacy peel-then-cascade).
+func splitPeelOrderB1(peelOrder []string, members []StackMember) (early, deferred []string) {
+	if len(peelOrder) == 0 {
+		return nil, nil
+	}
+	if len(members) == 0 {
+		return append([]string(nil), peelOrder...), nil
+	}
+	cascade, err := PlanUnwindCascade(members)
+	if err != nil || cascade == nil || len(cascade.Steps) == 0 {
+		return append([]string(nil), peelOrder...), nil
+	}
+	byLabel := pickPeelMembersByLabel(members)
+	nodes, _, err := buildUnwindModuleGraph(members, byLabel)
+	if err != nil {
+		return append([]string(nil), peelOrder...), nil
+	}
+	labelOfMod := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		if n.Path != "" && n.RepoLabel != "" {
+			labelOfMod[n.Path] = n.RepoLabel
+		}
+	}
+	// freeHost: labels that host a free dep of a planned pin (or a free-only tag).
+	// pinConsumer: labels that receive a cascade pin (feature peel deferred).
+	freeHost := make(map[string]struct{})
+	pinConsumer := make(map[string]struct{})
+	for _, s := range cascade.Steps {
+		if s.Kind != CascadePin {
+			continue
+		}
+		if lab, ok := labelOfMod[s.ModulePath]; ok && lab != "" {
+			pinConsumer[lab] = struct{}{}
+		}
+		if lab, ok := labelOfMod[s.DepModulePath]; ok && lab != "" {
+			freeHost[lab] = struct{}{}
+		}
+	}
+	for _, s := range cascade.Steps {
+		if s.Kind != CascadeTagNext {
+			continue
+		}
+		lab, ok := labelOfMod[s.ModulePath]
+		if !ok || lab == "" {
+			continue
+		}
+		// Tag module that is a pin dep is already freeHost. Pure free tags
+		// (label not only a pin consumer) also keep peels early.
+		if _, onlyConsumer := pinConsumer[lab]; !onlyConsumer {
+			freeHost[lab] = struct{}{}
+		}
+	}
+
+	early = make([]string, 0, len(peelOrder))
+	deferred = make([]string, 0, len(peelOrder))
+	for _, label := range peelOrder {
+		_, isPinConsumer := pinConsumer[label]
+		_, isFreeHost := freeHost[label]
+		// Defer pure pin-consumer peels so cascade pin/commit runs first (B1/D7).
+		// Same-label free+consumer hosts stay early (single-repo two modules).
+		if isPinConsumer && !isFreeHost {
+			deferred = append(deferred, label)
+			continue
+		}
+		early = append(early, label)
+	}
+	return early, deferred
 }
 
 // runUnwindReinstallLocal executes one unwind tail entry. A repository without

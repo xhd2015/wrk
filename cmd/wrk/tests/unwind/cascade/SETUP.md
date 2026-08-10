@@ -18,15 +18,19 @@ stack modules (pending) -> PlanUnwindCascade
 ## Preconditions
 
 - Inherits root `cmd/wrk/tests/unwind` Request/Response/Run and fixture helpers.
-- **P1 dry-run** leaves under `cascade/dry-run/` are **sealed** (6 leaves) — do
-  not rewrite their ASSERT meaning. Plan printer is GREEN.
+- **P1 dry-run** sealed leaves under `cascade/dry-run/` (C-DR1–C-DR6) — do **not**
+  rewrite their ASSERT meaning. Plan printer is GREEN for those.
+- **P1 extension (this cycle):** external stack replace ⇒ needs-pin even when the
+  free dep is clean and require already matches (no drift / no tag-next). New
+  leaves under `cascade/dry-run/with-tag-next/replace-only-*` — Classic **RED**
+  until planner treats droppable external replaces as pin triggers.
 - **P2 apply** clean / `--add-all` leaves under `cascade/apply/clean/` and
   `dirty-gomod/with-add-all/` are **sealed GREEN**.
 - **P3 partial edit** leaves under `cascade/apply/partial-edit/` and C-AP5
   (`dirty-gomod/without-add-all`) — do not break dry-run or clean apply leaves.
 - **P4 reinstall** leaves under `cascade/apply/reinstall-local/` — nested skip
   consumer pin + reinstall-local regression (and multi-repo tail). Do not break
-  the sealed 13 cascade leaves above.
+  the sealed cascade leaves above.
 - Leaves set `req.InProcess = true` and full `req.Args` including `--unwind`.
 - Dry-run cascade vocabulary is **top-level** (no indent), distinct from under-peel
   `  would: pin stack consumers` / `  would: create release tag`.
@@ -278,6 +282,106 @@ func setupCascadeMultiRepoBothDirty(t *testing.T, req *Request) {
 	setPeelOrderDisplays(t, req, leafExt, rootMain)
 }
 
+// setupCascadeReplaceOnlyExternalCleanDep builds the T3-core replace-only pin fixture:
+//
+//	leaf (dot-pkgs) nested external under root: **clean**, HEAD at release tag v0.0.1
+//	root main: dirty; require leaf@v0.0.1 (matches tag — no require-drift);
+//	  replace => ./external/dot-pkgs-main-<date> (droppable external stack replace)
+//
+// No owned-changed on leaf → no tag-next. Planner must still emit cascade pin at
+// current require version (v0.0.1) solely because of the external replace (D1/D3).
+// PeelOrder = ["."] only (clean free dep never peels).
+func setupCascadeReplaceOnlyExternalCleanDep(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	// D3: no tag/drift → pin keeps current require version.
+	req.ExpectedPinVersion = unwindApplyOldTag
+
+	// --- leaf main: baseline tag only (no post-tag commits) ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+
+	// --- root consumer: require matches tag ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	// Nest clean leaf WT under root/external (stack member + replace target).
+	extDir := filepath.Join(rootMain, "external")
+	mkdirAll(t, extDir)
+	leafExt := filepath.Join(extDir, labelDotPkgs+"-"+branchNameMainDate())
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate(), leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+	req.WtBranch = branchNameMainDate()
+	// Intentionally leave leaf clean (no markDirty; HEAD still at v0.0.1 tag tree).
+
+	writeFile(t, filepath.Join(rootMain, ".gitignore"), "/external\n")
+	// External stack replace: droppable at apply; planner must treat as needs-pin.
+	appendLocalReplace(t, rootMain, unwindDotPkgsModule, relLocalReplace(t, rootMain, leafExt))
+	runGitIsolated(t, rootMain, "add", ".gitignore", "go.mod")
+	runGitIsolated(t, rootMain, "commit", "-m", "ignore external + replace to clean leaf")
+
+	// Consumer dirty only → peel `.`; free dep stays out of PeelOrder.
+	markDirty(t, rootMain)
+	req.RepoDir = rootMain
+	req.PeelOrder = []string{"."}
+}
+
+// setupCascadeReplaceOnlyIntraCleanShared is the D4 control: dirty root with
+// only an **intra-repo** replace to pkgs/shared, require matches latest tag,
+// shared **not** owned-changed. Must **not** invent a cascade pin solely because
+// a local replace exists (keep-local / not droppable).
+func setupCascadeReplaceOnlyIntraCleanShared(t *testing.T, req *Request) {
+	t.Helper()
+
+	mainRepo := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, mainRepo)
+
+	sharedDir := filepath.Join(mainRepo, filepath.FromSlash(cascadeSharedDir))
+	mkdirAll(t, sharedDir)
+	writeGoModRequire(t, sharedDir, cascadeSharedModule)
+	writeFile(t, filepath.Join(sharedDir, "shared.go"),
+		"package shared\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+
+	writeGoModRequire(t, mainRepo, unwindRootModule, cascadeSharedModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(mainRepo, "root.go"),
+		"package root\n\nimport _ \""+cascadeSharedModule+"\"\n")
+	appendLocalReplace(t, mainRepo, cascadeSharedModule, "./"+cascadeSharedDir)
+
+	runGitIsolated(t, mainRepo, "add", "go.mod", "root.go", "pkgs")
+	runGitIsolated(t, mainRepo, "commit", "-m", "root + shared modules (no owned change)")
+	createLightweightTag(t, mainRepo, unwindApplyOldTag, "HEAD")
+	createLightweightTag(t, mainRepo, cascadeSharedOldTag, "HEAD")
+
+	// No post-tag owned change on shared → no tag-next / no require-drift.
+	mainRepo = resolvePath(t, mainRepo)
+	req.MainRepo = mainRepo
+	req.RepoDir = mainRepo
+	req.LeafModulePath = cascadeSharedModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = "" // must not pin
+	markDirty(t, mainRepo)
+	req.PeelOrder = []string{"."}
+}
+
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = d
 	_ = t
@@ -293,6 +397,8 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = setupCascadeSingleRepoTwoModules
 	_ = setupCascadeSingleRepoTwoModulesWithTestdata
 	_ = setupCascadeMultiRepoBothDirty
+	_ = setupCascadeReplaceOnlyExternalCleanDep
+	_ = setupCascadeReplaceOnlyIntraCleanShared
 	return nil
 }
 ```

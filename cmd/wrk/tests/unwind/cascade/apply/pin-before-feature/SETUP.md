@@ -1,0 +1,587 @@
+# Scenario
+
+**Feature**: B1 interleaved apply — cascade pin auto-commit **before** consumer feature gen-commit
+
+```
+# free-first apply with --gen-commit-msg --commit --tag-next:
+# 1) peel dirty free deps (gen-commit/land if needed)
+# 2) tag free modules when planned
+# 3) pin consumers (drop external replace) as separate auto-commit
+# 4) only then peel remaining dirty consumers: feature gen-commit / land
+dirty consumer (+ optional dirty free) + external replace
+  -> wrk --unwind --add-all --gen-commit-msg --commit --merge-back --tag-next …
+  -> pin commit "wrk: cascade pin …" before feature commit
+  -> final go.mod: no droppable external replace; require at pin version
+```
+
+## Preconditions
+
+- Inherits `cascade/apply/` helpers (`assertCascadePinCommitPresent`, modproxy,
+  pin commit prefix) and root unwind stack helpers.
+- Leaves set `req.InProcess = true` and full apply Args **with** gen-commit agent
+  flags (fake-opencode; no live LLM).
+- Linked consumer primary so gen-commit stage actually runs (product peels
+  gen-commit only for linked checkouts today).
+- Fixture pre-commit hook simulates `git-hook-go-no-local-replace` for external
+  stack replaces (fails while `replace … => ./external/…` remains).
+
+## Steps
+
+1. Grouping provides B1 apply seeders, fake-opencode install, no-local-replace
+   pre-commit hook, and pin-before-feature history asserts.
+2. Leaves split on free dep dirt: clean replace-only (T1) vs free dirty +
+   consumer gen-commit (T2).
+
+## Context
+
+- **D2** B1 free-first interleaved apply; **D3** keep-current require when no
+  free tag; **D7** separate pin auto-commit then feature gen-commit.
+- Classic TDD: leaves are **RED** until product reorders pin before consumer
+  feature gen-commit (today peels all then cascade; gen-commit hits hook while
+  replace still present).
+- Do not rewrite sealed ASSERT contracts under `clean/`, `dirty-gomod/`,
+  `partial-edit/`, `reinstall-local/`.
+
+```go
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/gitops/git/git_isolated"
+)
+
+const (
+	// Uncommitted feature WIP path for consumer gen-commit (not go.mod).
+	cascadeFeatureWIPFile = "FEATURE_WIP.md"
+	cascadeFeatureWIPBody = "feature WIP for gen-commit before pin ordering\n"
+
+	// Mock gen-commit subject from fake-opencode (must match mock JSON).
+	cascadeFeatureCommitSubject = "feat: add feature"
+
+	// Fake-opencode mock: title = cascadeFeatureCommitSubject.
+	cascadeFakeOpencodeMockJSON = `{"version":"agent-pro.fake-runner.v1","runner":"fake-opencode","session_id":"cascade_pin_before_feature","llm_events":[{"type":"step_start"},{"type":"message","text":"{\"title\": \"feat: add feature\", \"description\": \"Consumer feature after cascade pin\"}"},{"type":"step_finish"}]}`
+
+	// Shell pre-commit: fail when go.mod still has a droppable external-style
+	// local replace (./external/… or ../…). Intra-repo ./pkgs/… is allowed.
+	// Mirrors git-hook-go-no-local-replace lenient mode for stack externals.
+	cascadeNoLocalReplacePreCommit = `#!/bin/sh
+# Fixture: simulate git-hook-go-no-local-replace for external stack replaces.
+if [ ! -f go.mod ]; then
+  exit 0
+fi
+if grep -E '=>[[:space:]]*(\.\./|\./external/)' go.mod >/dev/null 2>&1; then
+  echo "pre-commit: local external replace forbidden in go.mod (git-hook-go-no-local-replace sim)" >&2
+  exit 1
+fi
+exit 0
+`
+)
+
+var cascadeFakeOpencodeMu sync.Mutex
+
+// cascadeRepoHooksDir returns the common-dir hooks path for repo (worktree-safe).
+func cascadeRepoHooksDir(t *testing.T, repo string) string {
+	t.Helper()
+	if repo == "" {
+		t.Fatal("cascadeRepoHooksDir: empty repo")
+	}
+	common := strings.TrimSpace(gitOutputIsolated(t, repo, "rev-parse", "--git-common-dir"))
+	if common == "" {
+		t.Fatal("rev-parse --git-common-dir empty")
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(repo, common)
+	}
+	common = resolvePath(t, common)
+	hooksDir := filepath.Join(common, "hooks")
+	mkdirAll(t, hooksDir)
+	return hooksDir
+}
+
+// installCascadePermissivePreCommit installs a no-op pre-commit and points
+// core.hooksPath at the repo hooks dir so product gen-commit does not inherit
+// the developer machine's global hooksPath (parallel-safe, repo-local only).
+func installCascadePermissivePreCommit(t *testing.T, repo string) {
+	t.Helper()
+	hooksDir := cascadeRepoHooksDir(t, repo)
+	hookPath := filepath.Join(hooksDir, "pre-commit")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write permissive pre-commit: %v", err)
+	}
+	runGitIsolated(t, repo, "config", "core.hooksPath", hooksDir)
+}
+
+// installCascadeNoLocalReplacePreCommit installs a repo-local pre-commit hook
+// that fails while go.mod still has an external filesystem replace. Uses the
+// common git dir so linked worktrees share the hook. Parallel-safe (repo-local
+// config only; no process env mutation).
+func installCascadeNoLocalReplacePreCommit(t *testing.T, repo string) {
+	t.Helper()
+	hooksDir := cascadeRepoHooksDir(t, repo)
+	hookPath := filepath.Join(hooksDir, "pre-commit")
+	if err := os.WriteFile(hookPath, []byte(cascadeNoLocalReplacePreCommit), 0o755); err != nil {
+		t.Fatalf("write pre-commit: %v", err)
+	}
+	// Ensure product git commits invoke hooks (seed commits used isolated git).
+	runGitIsolated(t, repo, "config", "core.hooksPath", hooksDir)
+}
+
+// findAgentProFakeOpencodeDir locates cmd/fake-opencode for offline gen-commit.
+// Prefers sibling agent-pro-* worktrees (unwind-pipeline style); falls back to
+// external/agent-pro-master-2026-07-16 under the wrk module.
+func findAgentProFakeOpencodeDir(t *testing.T) string {
+	t.Helper()
+	modRoot := findModuleRoot(doctestRootPath(t))
+	if modRoot == "" {
+		t.Fatal("find module root: no go.mod in ancestors of d.DOCTEST_ROOT")
+	}
+	// Sibling worktrees: …/agent-pro-*/cmd/fake-opencode
+	parent := filepath.Dir(modRoot)
+	matches, err := filepath.Glob(filepath.Join(parent, "agent-pro-*", "cmd", "fake-opencode"))
+	if err == nil && len(matches) > 0 {
+		// Prefer a path that has main.go.
+		for i := len(matches) - 1; i >= 0; i-- {
+			if _, err := os.Stat(filepath.Join(matches[i], "main.go")); err == nil {
+				return matches[i]
+			}
+		}
+	}
+	// Vendored external checkout (gen-commit-msg tree).
+	ext := filepath.Join(modRoot, "external", "agent-pro-master-2026-07-16", "cmd", "fake-opencode")
+	if _, err := os.Stat(filepath.Join(ext, "main.go")); err == nil {
+		return ext
+	}
+	t.Skip("agent-pro cmd/fake-opencode fixture unavailable (sibling agent-pro-* or external/)")
+	return ""
+}
+
+// sessionCascadeFakeOpencodeBin is the session-cached fake-opencode path.
+func sessionCascadeFakeOpencodeBin(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(fixtureSessionRoot(t), "bin", "fake-opencode")
+}
+
+// getCascadeFakeOpencodeBin builds fake-opencode once per session (file-locked).
+func getCascadeFakeOpencodeBin(t *testing.T) string {
+	t.Helper()
+	bin := sessionCascadeFakeOpencodeBin(t)
+	if _, err := os.Stat(bin); err == nil {
+		return bin
+	}
+	lockPath := filepath.Join(fixtureSessionRoot(t), "bin", ".fake-opencode.lock")
+	withFlock(t, lockPath, func() {
+		if _, err := os.Stat(bin); err == nil {
+			return
+		}
+		srcDir := findAgentProFakeOpencodeDir(t)
+		if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+			t.Fatalf("mkdir fake-opencode bin: %v", err)
+		}
+		cmd := exec.Command("go", "build", "-mod=mod", "-o", bin, ".")
+		cmd.Dir = srcDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("build fake-opencode: %v\n%s", err, out)
+		}
+	})
+	return bin
+}
+
+// installCascadeFakeOpencodeEnv writes mock config under WorkRoot, builds
+// fake-opencode, and appends ExtraEnv (no t.Setenv).
+func installCascadeFakeOpencodeEnv(t *testing.T, req *Request) string {
+	t.Helper()
+	_ = cascadeFakeOpencodeMu // keep for future multi-leaf coordination
+	mockPath := filepath.Join(req.WorkRoot, "fake-opencode-mock.json")
+	writeFile(t, mockPath, cascadeFakeOpencodeMockJSON)
+	bin := getCascadeFakeOpencodeBin(t)
+	configDir := filepath.Join(req.WorkRoot, "opencode-config")
+	mkdirAll(t, configDir)
+	req.ExtraEnv = append(req.ExtraEnv,
+		"FAKE_OPENCODE_MOCK_CONFIG="+mockPath,
+		"OPENCODE_CONFIG_DIR="+configDir,
+	)
+	return bin
+}
+
+// cascadeUnwindGenCommitArgs builds apply Args: unwind + gen-commit agent path +
+// stages (e.g. --add-all --merge-back --tag-next [--push]).
+func cascadeUnwindGenCommitArgs(t *testing.T, req *Request, stages ...string) []string {
+	t.Helper()
+	bin := installCascadeFakeOpencodeEnv(t, req)
+	args := []string{
+		"--unwind",
+		"--gen-commit-msg",
+		"--commit",
+		"--agent-runner", "opencode",
+		"--agent-runner-binary", bin,
+		"--model", "openai/gpt-5",
+	}
+	return append(args, stages...)
+}
+
+// dirtyCascadeFeatureWIP writes uncommitted FEATURE_WIP.md under checkout.
+func dirtyCascadeFeatureWIP(t *testing.T, checkout string) {
+	t.Helper()
+	if checkout == "" {
+		t.Fatal("dirtyCascadeFeatureWIP: empty checkout")
+	}
+	writeFile(t, filepath.Join(checkout, cascadeFeatureWIPFile), cascadeFeatureWIPBody)
+	status := gitOutputIsolated(t, checkout, "status", "--porcelain", "--", cascadeFeatureWIPFile)
+	if strings.TrimSpace(status) == "" {
+		t.Fatal("expected uncommitted feature WIP after dirtyCascadeFeatureWIP")
+	}
+}
+
+// seedDotPkgsProxy seeds file:// modproxy for example.com/dot-pkgs at version
+// from srcDir (or a synthetic seed when srcDir content is for a different ver).
+func seedDotPkgsProxyVersions(t *testing.T, req *Request, versions map[string]string) {
+	t.Helper()
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	for ver, src := range versions {
+		if src == "" {
+			seed := filepath.Join(req.WorkRoot, "seed-dot-pkgs-"+ver)
+			mkdirAll(t, seed)
+			writeGoModRequire(t, seed, unwindDotPkgsModule)
+			writeFile(t, filepath.Join(seed, "pkg.go"),
+				"package dotpkgs\n\nfunc Version() string { return \""+ver+"\" }\n")
+			src = seed
+		}
+		seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, ver, src)
+	}
+	enableFileModuleProxy(t, req, proxyRoot)
+}
+
+// setupApplyPinBeforeFeatureExternalCleanDep is T1 core fixture:
+//
+//	leaf external: clean, tag v0.0.1 at HEAD (no owned-changed)
+//	root main: require leaf@v0.0.1
+//	root linked WT (RepoDir / primary): require + replace => ./external/…
+//	  + uncommitted FEATURE_WIP.md for gen-commit
+//	pre-commit: no external local replace (hook sim)
+//	modproxy: v0.0.1 for pin+tidy after drop replace
+//
+// PeelOrder ≈ ["."] (only dirty consumer). Expected pin version = v0.0.1 (D3).
+func setupApplyPinBeforeFeatureExternalCleanDep(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyOldTag // D3 keep-current
+
+	// --- leaf main: baseline tag only (clean) ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	// Isolate leaf product commits from developer global hooksPath.
+	installCascadePermissivePreCommit(t, leafMain)
+
+	// --- root consumer main ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer main")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	// Linked consumer = stack primary (gen-commit only runs for linked peels).
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	// Nest clean leaf WT under consumer WT/external.
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate()+"-leaf", leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+	// Leave leaf clean (no markDirty; HEAD at v0.0.1).
+
+	relReplace := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, "./"+relReplace)
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	runGitIsolated(t, wtDir, "add", "go.mod", ".gitignore")
+	runGitIsolated(t, wtDir, "commit", "-m", "stack replace + ignore external")
+
+	// Feature WIP for consumer gen-commit (replace already committed).
+	dirtyCascadeFeatureWIP(t, wtDir)
+	// Peel pending marker (DIRTY counts as dirty under v1 filter).
+	markDirty(t, wtDir)
+
+	// Hook: fail gen-commit while external replace remains (T1 RED surface today).
+	// Install after seed commits (shared common-dir with main).
+	installCascadeNoLocalReplacePreCommit(t, wtDir)
+
+	// Offline proxy for pin+tidy after drop replace @ current require.
+	seedDotPkgsProxyVersions(t, req, map[string]string{
+		unwindApplyOldTag: "", // synthetic seed
+	})
+
+	req.RepoDir = wtDir
+	req.PeelOrder = []string{"."}
+}
+
+// setupApplyPinBeforeFeatureFreeDirty is T2 fixture:
+//
+//	leaf external: dirty / owned-changed → next tag v0.0.2; bare origin for --push
+//	root linked WT: external replace + feature WIP + no-local-replace hook
+//	modproxy: old + next for pin after free tag
+//
+// Free-first: peel/land free → tag → pin auto-commit → consumer feature gen-commit.
+// Expected pin version = v0.0.2.
+func setupApplyPinBeforeFeatureFreeDirty(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- leaf main + origin ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	// Isolate free-dep product gen-commit from developer global hooks.
+	installCascadePermissivePreCommit(t, leafMain)
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	req.OriginBare = leafBare
+
+	// --- root consumer main + linked WT ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer main")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "root-origin.path"), rootBare+"\n")
+
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	// Dirty free leaf under external (owned-changed for next tag).
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate()+"-leaf", leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, leafExt, "add", "pkg.go")
+	runGitIsolated(t, leafExt, "commit", "-m", "leaf feature for next tag")
+	markDirty(t, leafExt)
+
+	relReplace := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, "./"+relReplace)
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	runGitIsolated(t, wtDir, "add", "go.mod", ".gitignore")
+	runGitIsolated(t, wtDir, "commit", "-m", "stack replace + ignore external")
+
+	dirtyCascadeFeatureWIP(t, wtDir)
+	markDirty(t, wtDir)
+	// Consumer hook only (after seed commits).
+	installCascadeNoLocalReplacePreCommit(t, wtDir)
+
+	// Proxy: next from leaf WT content; old synthetic.
+	seedDotPkgsProxyVersions(t, req, map[string]string{
+		unwindApplyNextTag: leafExt,
+		unwindApplyOldTag:  "",
+	})
+
+	req.RepoDir = wtDir
+	setPeelOrderDisplays(t, req, leafExt, wtDir)
+}
+
+// assertExternalReplaceDropped fails if consumer go.mod still has a replace for
+// LeafModulePath (droppable external replace must be gone after pin).
+func assertExternalReplaceDropped(t *testing.T, goModPath, modulePath string) {
+	t.Helper()
+	if goModHasReplace(t, goModPath, modulePath) {
+		t.Fatalf("consumer go.mod must DROP external replace for %s after pin:\n%s",
+			modulePath, readFile(t, goModPath))
+	}
+}
+
+// assertConsumerRequireAndNoExternalReplace checks require version + no replace
+// on the preferred consumer checkout (WtDir if present, else MainRepo).
+func assertConsumerRequireAndNoExternalReplace(t *testing.T, req *Request) {
+	t.Helper()
+	if req.LeafModulePath == "" || req.ExpectedPinVersion == "" {
+		t.Fatal("LeafModulePath and ExpectedPinVersion required")
+	}
+	checkout := req.MainRepo
+	if req.WtDir != "" {
+		if _, err := os.Stat(req.WtDir); err == nil {
+			// Prefer Path after merge-back keep; also check MainRepo landed tree.
+			checkout = req.WtDir
+		}
+	}
+	if checkout == "" {
+		t.Fatal("MainRepo or WtDir required")
+	}
+	goMod := filepath.Join(checkout, "go.mod")
+	got := requireVersionInGoMod(t, goMod, req.LeafModulePath)
+	if got != req.ExpectedPinVersion {
+		t.Fatalf("consumer require %s = %q, want %s\ngo.mod:\n%s",
+			req.LeafModulePath, got, req.ExpectedPinVersion, readFile(t, goMod))
+	}
+	assertExternalReplaceDropped(t, goMod, req.LeafModulePath)
+
+	// After --merge-back, main should also reflect pin when land merged.
+	if req.MainRepo != "" && resolvePath(t, req.MainRepo) != resolvePath(t, checkout) {
+		mainMod := filepath.Join(req.MainRepo, "go.mod")
+		// Soft: main may lag if product pins only Path; prefer Path contract.
+		_ = mainMod
+	}
+}
+
+// featureCommitSHA returns newest commit SHA whose subject contains needle.
+func featureCommitSHA(t *testing.T, repo, subjectNeedle string) string {
+	t.Helper()
+	if subjectNeedle == "" {
+		subjectNeedle = cascadeFeatureCommitSubject
+	}
+	sha := strings.TrimSpace(gitOutputIsolated(t, repo, "log", "-1", "--format=%H", "--grep", subjectNeedle))
+	return sha
+}
+
+// assertCascadePinBeforeFeatureCommit requires a cascade pin commit that is an
+// ancestor of the feature gen-commit (pin landed first on history).
+func assertCascadePinBeforeFeatureCommit(t *testing.T, repo, depModule, pinVer, featureSubject string) {
+	t.Helper()
+	if repo == "" {
+		t.Fatal("repo required for pin-before-feature history assert")
+	}
+	assertCascadePinCommitPresent(t, repo, depModule, pinVer)
+	pinSHA := pinCommitSHA(t, repo)
+	if pinSHA == "" {
+		t.Fatalf("missing pin commit SHA on %s\nlog:\n%s",
+			repo, gitOutputIsolated(t, repo, "log", "--oneline", "-20"))
+	}
+	if featureSubject == "" {
+		featureSubject = cascadeFeatureCommitSubject
+	}
+	featSHA := featureCommitSHA(t, repo, featureSubject)
+	if featSHA == "" {
+		t.Fatalf("missing feature gen-commit (subject containing %q) on %s\nlog:\n%s",
+			featureSubject, repo, gitOutputIsolated(t, repo, "log", "--oneline", "-20"))
+	}
+	// pin must be ancestor of feature (pin before feature on the branch).
+	err := git_isolated.Command(repo, "merge-base", "--is-ancestor", pinSHA, featSHA).Run()
+	if err != nil {
+		t.Fatalf("B1 order: pin commit must be ancestor of feature commit (pin before gen-commit)\npin=%s feature=%s\nlog:\n%s",
+			pinSHA, featSHA, gitOutputIsolated(t, repo, "log", "--oneline", "-20"))
+	}
+	// Feature commit tree must not reintroduce external replace.
+	featGoMod := gitOutputIsolated(t, repo, "show", featSHA+":go.mod")
+	if strings.Contains(featGoMod, "=> ./external/") || strings.Contains(featGoMod, "=> ../") {
+		// Only fail when the dep module still has an external replace line.
+		if strings.Contains(featGoMod, depModule) && strings.Contains(featGoMod, "=>") {
+			t.Fatalf("feature commit go.mod must not carry external replace for %s\n%s",
+				depModule, featGoMod)
+		}
+	}
+}
+
+// assertFeatureWIPLanded checks FEATURE_WIP.md content is on history (gen-commit).
+func assertFeatureWIPLanded(t *testing.T, repo string) {
+	t.Helper()
+	// Prefer show from HEAD; fall back to log --name-only.
+	out, err := git_isolated.CombinedOutput(repo, "show", "HEAD:"+cascadeFeatureWIPFile)
+	if err != nil {
+		// Search history for the path.
+		log := gitOutputIsolated(t, repo, "log", "--oneline", "--", cascadeFeatureWIPFile)
+		if strings.TrimSpace(log) == "" {
+			t.Fatalf("feature WIP %s never committed on %s\nlog:\n%s",
+				cascadeFeatureWIPFile, repo, gitOutputIsolated(t, repo, "log", "--oneline", "-20"))
+		}
+		return
+	}
+	if !strings.Contains(string(out), "feature WIP") {
+		t.Fatalf("HEAD:%s missing feature body; got %q", cascadeFeatureWIPFile, string(out))
+	}
+}
+
+// historyRepoForConsumer picks the checkout to assert git log on (main after land).
+func historyRepoForConsumer(t *testing.T, req *Request) string {
+	t.Helper()
+	if req.MainRepo != "" {
+		return req.MainRepo
+	}
+	if req.WtDir != "" {
+		return req.WtDir
+	}
+	t.Fatal("MainRepo or WtDir required for history asserts")
+	return ""
+}
+
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	_ = t
+	req.InProcess = true
+	// Keep generator references for helpers used only from leaves.
+	_ = installCascadeNoLocalReplacePreCommit
+	_ = installCascadePermissivePreCommit
+	_ = installCascadeFakeOpencodeEnv
+	_ = cascadeUnwindGenCommitArgs
+	_ = dirtyCascadeFeatureWIP
+	_ = setupApplyPinBeforeFeatureExternalCleanDep
+	_ = setupApplyPinBeforeFeatureFreeDirty
+	_ = assertExternalReplaceDropped
+	_ = assertConsumerRequireAndNoExternalReplace
+	_ = assertCascadePinBeforeFeatureCommit
+	_ = assertFeatureWIPLanded
+	_ = historyRepoForConsumer
+	_ = featureCommitSHA
+	_ = cascadeFeatureWIPFile
+	_ = cascadeFeatureCommitSubject
+	_ = cascadePinCommitPrefix
+	return nil
+}
+```

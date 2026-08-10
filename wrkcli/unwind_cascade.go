@@ -83,7 +83,27 @@ func planUnwindCascadeFromGraph(nodes []UnwindGraphModuleNode, edges []UnwindGra
 		}
 	}
 
-	// Pending modules: owned-changed (taggable) ∪ require-drift ∪ needs-pin.
+	// Droppable external replaces among stack-owned modules (C-DR7): same policy
+	// as apply's classifyLocalReplace / localReplacePolicy — intra keep-local
+	// (same repo label) does not force pin (C-DR8).
+	// Key: consumer\x00dep
+	droppableExternal := make(map[string]struct{})
+	for _, e := range edges {
+		if e.Kind != "replace" || e.From == "" || e.To == "" {
+			continue
+		}
+		from, ok1 := nodeByPath[e.From]
+		to, ok2 := nodeByPath[e.To]
+		if !ok1 || !ok2 {
+			continue
+		}
+		if isDroppableExternalStackReplace(from, to, e) {
+			droppableExternal[e.From+"\x00"+e.To] = struct{}{}
+		}
+	}
+
+	// Pending modules: owned-changed (taggable) ∪ require-drift ∪ needs-pin
+	// (including droppable external replace of a stack dep).
 	pending := make(map[string]struct{})
 	for _, n := range nodes {
 		if cascadeModuleShouldTag(n) {
@@ -115,6 +135,17 @@ func planUnwindCascadeFromGraph(nodes []UnwindGraphModuleNode, edges []UnwindGra
 				// Require-drift alone still needs the consumer; dep stays if already pending.
 				_ = dep
 			}
+		}
+	}
+	// Droppable external replace alone ⇒ consumer needs-pin (even when require
+	// already matches and the free dep will not tag).
+	for pair := range droppableExternal {
+		from, _, ok := strings.Cut(pair, "\x00")
+		if !ok || from == "" {
+			continue
+		}
+		if _, ok := nodeByPath[from]; ok {
+			pending[from] = struct{}{}
 		}
 	}
 	// Fixpoint: any module requiring a pending dep is pending (needs-pin).
@@ -202,13 +233,20 @@ func planUnwindCascadeFromGraph(nodes []UnwindGraphModuleNode, edges []UnwindGra
 					pinVer = goRequireVersionFromTag(t)
 				}
 			}
+			// D3: when no tag/drift planned version, keep current require.
+			if pinVer == "" && e.Version != "" {
+				pinVer = e.Version
+			}
 			if pinVer == "" {
 				continue
 			}
 			_, wasTagged := tagged[e.To]
 			willTag := cascadeModuleShouldTag(dep)
 			drift := e.Version != "" && !versionsMatch(e.Version, pinVer)
-			if !wasTagged && !willTag && !drift {
+			_, dropExt := droppableExternal[e.From+"\x00"+e.To]
+			// Pin when dep was/will be tagged, require drifts, or there is a
+			// droppable external replace of this stack dep (replace-only pin).
+			if !wasTagged && !willTag && !drift && !dropExt {
 				continue
 			}
 			if _, seen := pinVerByDep[e.To]; seen {
@@ -237,6 +275,33 @@ func planUnwindCascadeFromGraph(nodes []UnwindGraphModuleNode, edges []UnwindGra
 		}
 	}
 	return out, nil
+}
+
+// isDroppableExternalStackReplace reports whether a module-graph replace edge
+// should force needs-pin (apply would drop the replace). Aligns with
+// classifyLocalReplace: module-path and cross-repo filesystem replaces are
+// droppable; same-repo local filesystem replaces are keep-local (no force pin).
+func isDroppableExternalStackReplace(from, to UnwindGraphModuleNode, e UnwindGraphModuleEdge) bool {
+	if e.Kind != "replace" || e.From == "" || e.To == "" {
+		return false
+	}
+	replNew := e.NewPath
+	if replNew == "" {
+		// Replace edge without NewPath still targets a stack-owned module; treat
+		// cross-repo ownership as droppable external.
+		return from.RepoLabel != "" && to.RepoLabel != "" && from.RepoLabel != to.RepoLabel
+	}
+	// Module-path replace (not filesystem): drop so pin can use a version.
+	if !strings.HasPrefix(replNew, ".") && !filepath.IsAbs(replNew) {
+		return true
+	}
+	// Filesystem replace: drop when consumer and dep live in different stack
+	// repos (nested external worktree / multi-repo). Same RepoLabel = intra
+	// keep-local (./pkgs/shared) — must not force pin alone (C-DR8).
+	if from.RepoLabel != "" && to.RepoLabel != "" && from.RepoLabel != to.RepoLabel {
+		return true
+	}
+	return false
 }
 
 // cascadeModuleShouldTag reports whether the cascade plans a would: tag-next line.
@@ -583,10 +648,13 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			}
 			_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
 
-			// Selective commit when pin dirtied go.mod/go.sum (or --add-all stages more).
+			// Selective commit of this module's go.mod/go.sum only (D7): never
+			// scoop feature WIP / --add-all extras into the pin auto-commit.
+			// --add-all still gates partial-edit vs pin-on-dirty above; only
+			// staging for the pin commit is forced selective.
 			// Commit while WT still holds Base+pin (no WIP); restore WIP after.
 			// Pass consumerModDir so nested modules stage tools/go.mod, not only root.
-			if err := cascadeCommitPin(consumerCheckout, consumerModDir, step.DepModulePath, step.TagOrVersion, addAll); err != nil {
+			if err := cascadeCommitPin(consumerCheckout, consumerModDir, step.DepModulePath, step.TagOrVersion, false); err != nil {
 				return pinFail(err)
 			}
 			if stats != nil {

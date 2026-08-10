@@ -289,18 +289,20 @@ unwind/
 ├── cycle/
 │   ├── two-cycle/                        # dry-run cycle reject
 │   └── apply-two-cycle/                  # apply-mode cycle still pre-mutation
-├── cascade/                              # free-module cascade (P1–P3 sealed; P4 reinstall)
-│   ├── dry-run/                          # P1 sealed plan vocabulary (6 leaves)
+├── cascade/                              # free-module cascade (P1–P4 + replace-only pin)
+│   ├── dry-run/                          # P1 plan vocabulary (+ C-DR7/8 replace-only)
 │   │   ├── with-tag-next/                # cascade section emitted
 │   │   │   ├── single-repo-two-modules/  # C-DR1: free-first tag leaf → pin root
 │   │   │   ├── multi-repo-free-first/    # C-DR2: peel + module free-first across stack
 │   │   │   ├── skip-testdata-scope/      # C-DR4: no tag-next for testdata scopes
-│   │   │   └── reinstall-local-tail/     # C-DR6: cascade + reinstall tail; zero mut
+│   │   │   ├── reinstall-local-tail/     # C-DR6: cascade + reinstall tail; zero mut
+│   │   │   ├── replace-only-external-clean-dep/ # C-DR7: external replace ⇒ pin @ current
+│   │   │   └── replace-only-intra-no-pin/       # C-DR8: intra replace alone ⇒ no pin
 │   │   ├── without-tag-next/             # C-DR3: peel-only; no cascade tag/pin
 │   │   │   └── peel-only-no-cascade/
 │   │   └── cycle/                        # C-DR5: cycle reject; no cascade body
 │   │       └── two-cycle-no-cascade/
-│   └── apply/                            # P2 clean; P3 partial-edit; P4 reinstall
+│   └── apply/                            # P2 clean; P3 partial-edit; P4 reinstall; B1 pin-before-feature
 │       ├── clean/
 │       │   ├── single-repo-two-modules/  # C-AP1+3+4: tag/pin/commit-before-tag/keep-replace
 │       │   └── multi-repo-free-first/    # C-AP2: free-first across repos + pin commit
@@ -311,9 +313,12 @@ unwind/
 │       │   ├── unrelated-wip-file/       # P3-2: only go.mod/go.sum in pin commit
 │       │   ├── sequential-two-pins/      # P3-3: two pins same consumer; both bumps
 │       │   └── tidy-fail-restores/       # P3-4: tidy fail → exact WIP restore
-│       └── reinstall-local/              # P4: cascade + reinstall-local ship gate
-│           ├── nested-skip-consumer/     # C-RI1: nested skip pin + reinstall success
-│           └── multi-repo/               # C-RI2: multi-repo cascade + reinstall tail
+│       ├── reinstall-local/              # P4: cascade + reinstall-local ship gate
+│       │   ├── nested-skip-consumer/     # C-RI1: nested skip pin + reinstall success
+│       │   └── multi-repo/               # C-RI2: multi-repo cascade + reinstall tail
+│       └── pin-before-feature/           # B1 interleaved: pin auto-commit before feature gen-commit
+│           ├── external-clean-dep-gen-commit/       # T1: clean free + hook; pin @ v0.0.1 then feature
+│           └── free-dirty-then-consumer-gen-commit/ # T2: free peel/tag → pin → consumer gen-commit
 └── show-graph/                           # read-only repo+module graph
     ├── reject/                           # mutual exclusion with dry-run / apply partners
     │   ├── with-dry-run/
@@ -421,6 +426,8 @@ Split factor (MECE, significance-first):
 | C-DR4 | cascade/dry-run/with-tag-next/skip-testdata-scope | real free module tag-next present; **no** tag-next for testdata scopes | **GREEN** (P1 sealed) |
 | C-DR5 | cascade/dry-run/cycle/two-cycle-no-cascade | cycle → non-zero `cycle`; no successful cascade body | **GREEN** |
 | C-DR6 | cascade/dry-run/with-tag-next/reinstall-local-tail | tag-next cascade + `would: reinstall local binaries` tail; zero mut | **GREEN** (P1 sealed) |
+| C-DR7 | cascade/dry-run/with-tag-next/replace-only-external-clean-dep | clean free dep + matching require + external replace ⇒ `would: pin … @ v0.0.1`; no leaf peel/tag-next | **RED** until external replace ⇒ needs-pin |
+| C-DR8 | cascade/dry-run/with-tag-next/replace-only-intra-no-pin | intra `replace => ./pkgs/shared` alone; matching require; no owned-changed → **no** cascade pin | **GREEN** control (D4) |
 | C-AP1 | cascade/apply/clean/single-repo-two-modules | clean Base; tag shared; pin root keep-replace; pin commit; root tag after pin; push | **GREEN** (P2 sealed) |
 | C-AP2 | cascade/apply/clean/multi-repo-free-first | multi-repo free-first land + cascade; leaf tagged/pushed; root pin commit | **GREEN** (P2 sealed) |
 | C-AP5 | cascade/apply/dirty-gomod/without-add-all | **P3-1:** dirty go.mod WIP, no `--add-all` → partial-edit success; WIP preserve + pin commit Base-only | **RED** until partial edit (justified flip from P2 Error) |
@@ -450,6 +457,8 @@ doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/apply
 doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/apply/reinstall-local
 doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/apply/partial-edit
 doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/apply/dirty-gomod/without-add-all
+doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/dry-run/with-tag-next/replace-only-external-clean-dep
+doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/dry-run/with-tag-next/replace-only-intra-no-pin
 doctest test -count=1 ./cmd/wrk/tests/unwind/show-graph
 doctest test -count=1 ./cmd/wrk/tests/unwind/dry-run/follow-local-replace
 doctest test -count=1 ./cmd/wrk/tests/unwind/dry-run/free-first-order
@@ -459,12 +468,11 @@ doctest test -count=1 ./cmd/wrk/tests/unwind/apply/pin-on-linked-consumer-not-ma
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/leaf-then-pin
 ```
 
-Expected this cycle (**P4**): new **C-RI1** / **C-RI2** reinstall leaves under
-`cascade/apply/reinstall-local/` — Classic **RED** if nested reinstall still
-fails; mixed **GREEN** OK if P2/P3 already fixed the path (coverage backfill).
-**GREEN** regression: sealed 13 cascade leaves (P1 dry-run 6 + P2/P3 apply 7),
-full `cmd/wrk/tests/unwind`. Do not rewrite sealed dry-run / clean / partial-edit
-asserts.
+Expected this cycle (**P1 extension — external replace needs-pin**): new **C-DR7**
+(Classic **RED** until planner treats droppable external stack replaces as
+needs-pin even when free dep is clean and require matches) and **C-DR8**
+(GREEN D4 control: intra replace alone must not invent pin). Do **not** rewrite
+sealed C-DR1–C-DR6 / apply cascade asserts. Apply interleaving remains P2+.
 
 ```go
 import (
