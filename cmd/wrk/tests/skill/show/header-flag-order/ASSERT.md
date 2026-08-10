@@ -5,8 +5,8 @@
 name: wrk
 description: >-
   Git worktree helper for isolated feature branches. Use when creating
-  linked worktrees, merging back, checking status, linking deps, or
-  looking up registered projects by basename.
+  linked worktrees, merging back, checking status, linking deps, PRs,
+  or looking up registered projects by basename.
 ---
 ```
 
