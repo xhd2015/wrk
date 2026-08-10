@@ -831,7 +831,11 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 			return err
 		}
 		// Linked free paths may be removed by --done; remap for cascade graph.
+		// Early peels already land into main: also force Path→MainRepo for those
+		// labels so cascade pin/tag edits main when --merge-back keeps the WT
+		// (else pin commits land only on the post-land linked branch).
 		cascadeMembers := refreshStackMembersAfterLand(members)
+		cascadeMembers = remapPeeledLabelsToMain(cascadeMembers, early)
 		if err := applyUnwindCascade(cascadeMembers, flags, addReinstallMainPath, &stats); err != nil {
 			return err
 		}

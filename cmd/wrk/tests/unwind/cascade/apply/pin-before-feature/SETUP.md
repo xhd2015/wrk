@@ -33,6 +33,7 @@ dirty consumer (+ optional dirty free) + external replace
    - T1: pure multi-repo clean external replace-only
    - T2: free dirty external then consumer gen-commit
    - T-M1: **monorepo freeHost** (intra owned-changed) + clean external replace
+   - T-tag1: **3-level freeHost** mid + dirty free (pin before free tag-next)
 
 ## Context
 
@@ -43,8 +44,12 @@ dirty consumer (+ optional dirty free) + external replace
   replace still present).
 - **T-M1 hole:** same-label freeHost (intra free pin dep) blocks pure consumer
   deferral, so ready external pins never run before freeHost feature gen-commit.
+- **T-tag1 hole:** mid freeHost peels early; `pinReadyExternalReplacesBeforeGenCommit`
+  pins dirty free @ planned NextTag **before** cascade `tag-next` (missing
+  `attachTagScopeToModules` → `cascadeModuleShouldTag` always false). Production
+  surfaces as `go mod tidy: unknown revision`; L2 locks tag-before-pin order.
 - Do not rewrite sealed ASSERT contracts under `clean/`, `dirty-gomod/`,
-  `partial-edit/`, `reinstall-local/`, or sealed T1/T2 leaves.
+  `partial-edit/`, `reinstall-local/`, or sealed T1/T2/T-M1 leaves.
 
 ```go
 import (
@@ -558,6 +563,233 @@ func setupApplyPinBeforeFeatureMonorepoFreeHostExternal(t *testing.T, req *Reque
 	req.PeelOrder = []string{"."}
 }
 
+// setupApplyPinBeforeFeatureThreeLevelFreeHostDirty is T-tag1 fixture:
+//
+//	3-level multi-repo freeHost stack (production: spl → kool → go-pkgs):
+//	  leaf free (dot-pkgs): dirty owned-changed → next v0.0.2; bare origin + --push
+//	  mid freeHost (agent-pro): pinConsumer of leaf AND freeHost of top; linked;
+//	    external replace → leaf; FEATURE_WIP for gen-commit; B1 peels early
+//	  top pure pinConsumer (root): external replace → mid; dirty deferred peel
+//	modproxy: old+next for leaf and mid (cascade pin+tidy after free tag)
+//
+// Bug: pinReady on mid early peel pins leaf@next before cascade tag-next
+// (rebuild graph without attachTagScopeToModules → cascadeModuleShouldTag false).
+// Expected GREEN: free tag-next before mid pin of free; mid require@next; no replace.
+func setupApplyPinBeforeFeatureThreeLevelFreeHostDirty(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- leaf free main + origin (owned-changed → next tag) ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	installCascadePermissivePreCommit(t, leafMain)
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	req.OriginBare = leafBare
+
+	// --- mid freeHost main + origin (requires free @ baseline) ---
+	midMain := filepath.Join(req.WorkRoot, labelAgentPro)
+	initGitRepoOnMain(t, midMain)
+	writeGoModRequire(t, midMain, unwindAgentProModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(midMain, "agent.go"),
+		"package agentpro\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, midMain, "add", "go.mod", "agent.go")
+	runGitIsolated(t, midMain, "commit", "-m", "add agent-pro mid freeHost")
+	createLightweightTag(t, midMain, unwindApplyOldTag, "")
+	midMain = resolvePath(t, midMain)
+	req.DepPath = midMain
+	installCascadePermissivePreCommit(t, midMain)
+
+	midBare := setupBareOrigin(t, req.WorkRoot, "mid-origin")
+	attachOriginAndPushMain(t, midMain, midBare)
+	if tagRefExists(t, midMain, unwindApplyOldTag) {
+		runGitIsolated(t, midMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "mid-origin.path"), midBare+"\n")
+
+	// --- top pure pinConsumer main + origin ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindAgentProModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindAgentProModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root top consumer")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "root-origin.path"), rootBare+"\n")
+
+	// Linked top = stack primary (cwd for inventory / peel displays).
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	// Nest mid + leaf linked externals under top (sibling externals, production-like).
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+
+	midExtName := labelAgentPro + "-" + branchNameMainDate()
+	midExt := filepath.Join(extDir, midExtName)
+	runGitIsolated(t, midMain, "worktree", "add", "-b", branchNameMainDate()+"-mid", midExt)
+	midExt = resolvePath(t, midExt)
+	req.ExternalWtDir = midExt
+
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate()+"-leaf", leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+
+	// Dirty free leaf: owned-changed after baseline tag → next v0.0.2.
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, leafExt, "add", "pkg.go")
+	runGitIsolated(t, leafExt, "commit", "-m", "leaf feature for next tag")
+	markDirty(t, leafExt)
+
+	// Mid freeHost: droppable external replace → leaf + feature WIP (gen-commit path).
+	// No no-local-replace hook: after fix, pinReady skips untagged free so mid may
+	// gen-commit while replace still present; cascade pin drops it after free tag.
+	appendLocalReplace(t, midExt, unwindDotPkgsModule, relLocalReplace(t, midExt, leafExt))
+	runGitIsolated(t, midExt, "add", "go.mod")
+	runGitIsolated(t, midExt, "commit", "-m", "mid external replace to dirty free leaf")
+	dirtyCascadeFeatureWIP(t, midExt)
+	markDirty(t, midExt)
+	installCascadePermissivePreCommit(t, midExt)
+
+	// Top: droppable external replace → mid freeHost; pure pinConsumer → deferred peel.
+	relMid := filepath.ToSlash(filepath.Join("external", midExtName))
+	appendLocalReplace(t, wtDir, unwindAgentProModule, "./"+relMid)
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	runGitIsolated(t, wtDir, "add", "go.mod", ".gitignore")
+	runGitIsolated(t, wtDir, "commit", "-m", "top replace to mid freeHost + ignore external")
+	markDirty(t, wtDir)
+	installCascadePermissivePreCommit(t, wtDir)
+
+	// Offline proxy: free old+next (and mid old+next if mid also tags from FEATURE_WIP).
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyNextTag, leafExt)
+	oldLeafSeed := filepath.Join(req.WorkRoot, "seed-leaf-"+unwindApplyOldTag)
+	mkdirAll(t, oldLeafSeed)
+	writeGoModRequire(t, oldLeafSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(oldLeafSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyOldTag, oldLeafSeed)
+
+	// Mid versions for top pin after drop replace (FEATURE_WIP may plan mid next tag).
+	seedFileModuleProxy(t, proxyRoot, unwindAgentProModule, unwindApplyOldTag, midMain)
+	midNextSeed := filepath.Join(req.WorkRoot, "seed-mid-"+unwindApplyNextTag)
+	mkdirAll(t, midNextSeed)
+	writeGoModRequire(t, midNextSeed, unwindAgentProModule, unwindDotPkgsModule+"@"+unwindApplyNextTag)
+	writeFile(t, filepath.Join(midNextSeed, "agent.go"),
+		"package agentpro\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindAgentProModule, unwindApplyNextTag, midNextSeed)
+	// Mid zip at next may require free@next from proxy during tidy of top.
+	enableFileModuleProxy(t, req, proxyRoot)
+
+	req.RepoDir = wtDir
+	setPeelOrderDisplays(t, req, leafExt, midExt, wtDir)
+}
+
+// assertFreeTagNextBeforeMidPinOfFree locks T-tag1 / T-tag2 order: cascade
+// tag-next for dirty free must appear before pinReady/cascade pin of mid ← free
+// @ next. pinReady must not treat planned NextTag as ready before the free tag
+// exists (production: unknown revision when tidy resolves untagged next).
+func assertFreeTagNextBeforeMidPinOfFree(t *testing.T, out string) {
+	t.Helper()
+	tagNeedle := "tag-next " + unwindDotPkgsModule + " @ " + unwindApplyNextTag
+	// pin log uses stack repo labels (not module paths).
+	pinNeedle := "pin " + labelAgentPro + " <- " + labelDotPkgs + " @ " + unwindApplyNextTag
+	tagIdx := strings.Index(out, tagNeedle)
+	pinIdx := strings.Index(out, pinNeedle)
+	if pinIdx < 0 {
+		// Tolerate label basename drift; require free pin @ next somewhere.
+		alt := "<- " + labelDotPkgs + " @ " + unwindApplyNextTag
+		pinIdx = strings.Index(out, alt)
+		if pinIdx >= 0 {
+			pinNeedle = alt
+		}
+	}
+	if tagIdx < 0 {
+		t.Fatalf("T-tag1: missing free tag-next line %q (free must be tagged before mid pin)\nout:\n%s",
+			tagNeedle, out)
+	}
+	if pinIdx < 0 {
+		t.Fatalf("T-tag1: missing mid pin of free @ next (want %q or pin … <- %s @ %s)\nout:\n%s",
+			pinNeedle, labelDotPkgs, unwindApplyNextTag, out)
+	}
+	if pinIdx < tagIdx {
+		t.Fatalf("T-tag1: free tag-next must precede mid pin of free @ next (pinReady must skip untagged NextTag)\ntag@%d pin@%d\nneedles: %q then %q\nout:\n%s",
+			tagIdx, pinIdx, tagNeedle, pinNeedle, out)
+	}
+}
+
+// assertMidPinnedToFreeLeaf checks mid freeHost require free @ ExpectedPinVersion
+// and droppable external replace for free is gone (post-cascade pin).
+func assertMidPinnedToFreeLeaf(t *testing.T, req *Request) {
+	t.Helper()
+	if req.LeafModulePath == "" || req.ExpectedPinVersion == "" {
+		t.Fatal("LeafModulePath and ExpectedPinVersion required")
+	}
+	// Prefer mid main after land; fall back to still-present linked mid.
+	checkouts := make([]string, 0, 2)
+	if req.DepPath != "" {
+		checkouts = append(checkouts, req.DepPath)
+	}
+	if req.ExternalWtDir != "" {
+		if _, err := os.Stat(req.ExternalWtDir); err == nil {
+			checkouts = append(checkouts, req.ExternalWtDir)
+		}
+	}
+	if len(checkouts) == 0 {
+		t.Fatal("DepPath or ExternalWtDir required for mid pin assert")
+	}
+	var lastMod string
+	for _, checkout := range checkouts {
+		goMod := filepath.Join(checkout, "go.mod")
+		if _, err := os.Stat(goMod); err != nil {
+			continue
+		}
+		lastMod = readFile(t, goMod)
+		got := requireVersionInGoMod(t, goMod, req.LeafModulePath)
+		if got != req.ExpectedPinVersion {
+			t.Fatalf("mid freeHost require %s = %q, want %s (checkout %s)\ngo.mod:\n%s",
+				req.LeafModulePath, got, req.ExpectedPinVersion, checkout, lastMod)
+		}
+		if goModHasReplace(t, goMod, req.LeafModulePath) {
+			t.Fatalf("mid freeHost go.mod must DROP external replace for %s after pin (checkout %s):\n%s",
+				req.LeafModulePath, checkout, lastMod)
+		}
+		// First successful checkout is enough (main preferred).
+		return
+	}
+	t.Fatalf("mid freeHost go.mod not found under DepPath/ExternalWtDir; last:\n%s", lastMod)
+}
+
 // pinCommitSHAForDep returns the newest cascade pin commit SHA whose subject
 // mentions depModule (empty if none). Prefer this over pinCommitSHA when the
 // monorepo may also pin intra free modules after the ready-external pin.
@@ -797,6 +1029,9 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = setupApplyPinBeforeFeatureExternalCleanDep
 	_ = setupApplyPinBeforeFeatureFreeDirty
 	_ = setupApplyPinBeforeFeatureMonorepoFreeHostExternal
+	_ = setupApplyPinBeforeFeatureThreeLevelFreeHostDirty
+	_ = assertFreeTagNextBeforeMidPinOfFree
+	_ = assertMidPinnedToFreeLeaf
 	_ = pinCommitSHAForDep
 	_ = assertPinCommitForDepFilesOnlyModSum
 	_ = assertCascadePinForDepBeforeFeatureCommit

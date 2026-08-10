@@ -406,6 +406,34 @@ func refreshStackMembersAfterLand(members []StackMember) []StackMember {
 	return out
 }
 
+// remapPeeledLabelsToMain forces Path to MainRepo for labels already peeled/landed
+// in the B1 early wave. Needed when --merge-back keeps the linked worktree: cascade
+// pin/tag must land on main, not on the residual feature branch checkout.
+func remapPeeledLabelsToMain(members []StackMember, peeledLabels []string) []StackMember {
+	if len(members) == 0 || len(peeledLabels) == 0 {
+		return members
+	}
+	peeled := make(map[string]struct{}, len(peeledLabels))
+	for _, lab := range peeledLabels {
+		if lab != "" {
+			peeled[lab] = struct{}{}
+		}
+	}
+	out := make([]StackMember, len(members))
+	for i, m := range members {
+		out[i] = m
+		if _, ok := peeled[m.Label]; !ok {
+			continue
+		}
+		if m.MainRepo == "" {
+			continue
+		}
+		out[i].Path = m.MainRepo
+		out[i].Linked = false
+	}
+	return out
+}
+
 // pinReadyExternalReplacesBeforeGenCommit applies cascade pins for **ready**
 // droppable external stack replaces whose consumer modules live on checkout,
 // as separate `wrk: cascade pin …` auto-commits, before feature gen-commit.
@@ -433,6 +461,10 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 	if err != nil {
 		return err
 	}
+	// Fill LatestTag/NextTag so cascadeModuleShouldTag correctly skips owned-changed
+	// free that still needs cascade tag-next (without this, NextTag is empty and
+	// pinReady treats planned next versions as "ready" → premature pin / unknown revision).
+	attachTagScopeToModules(nodes, members)
 	nodeByPath := make(map[string]UnwindGraphModuleNode, len(nodes))
 	for _, n := range nodes {
 		if n.Path != "" {
@@ -500,6 +532,11 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 		if cascadeModuleShouldTag(depNode) {
 			continue
 		}
+		// Defense-in-depth: never pinReady a version whose full release tag is not
+		// yet on free main (avoids go mod tidy unknown revision if tagscope miss).
+		if !pinReadyReleaseTagExists(depNode, step.TagOrVersion, byLabel) {
+			continue
+		}
 
 		consumerNode, ok := nodeByPath[step.ModulePath]
 		if !ok {
@@ -522,9 +559,13 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 			continue
 		}
 
+		// Always snapshot go.mod/go.sum so tidy/edit failure restores (partial and not).
+		saved, err := saveGoModSumSnap(consumerModDir)
+		if err != nil {
+			return fmt.Errorf("wrk: ready-external pin save go.mod/go.sum in %s: %w", consumerModDir, err)
+		}
 		// Dirty go.mod/go.sum without --add-all → partial edit (same as cascade pin).
 		usePartial := false
-		var saved goModSumSnap
 		if !addAll {
 			dirty, err := goModSumUncommittedAt(checkout, consumerModDir)
 			if err != nil {
@@ -532,10 +573,6 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 			}
 			if dirty {
 				usePartial = true
-				saved, err = saveGoModSumSnap(consumerModDir)
-				if err != nil {
-					return fmt.Errorf("wrk: ready-external pin save go.mod/go.sum in %s: %w", consumerModDir, err)
-				}
 				if err := writeBaseGoModSum(checkout, consumerModDir); err != nil {
 					_ = restoreGoModSumSnap(consumerModDir, saved)
 					return fmt.Errorf("wrk: ready-external pin restore Base go.mod/go.sum in %s: %w", consumerModDir, err)
@@ -554,9 +591,7 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 		fmt.Printf("pin %s <- %s @ %s\n", logConsumer, logDep, step.TagOrVersion)
 
 		pinFail := func(err error) error {
-			if usePartial {
-				_ = restoreGoModSumSnap(consumerModDir, saved)
-			}
+			_ = restoreGoModSumSnap(consumerModDir, saved)
 			return err
 		}
 
@@ -589,6 +624,63 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 		}
 	}
 	return nil
+}
+
+// pinReadyReleaseTagExists reports whether the full release tag for pinVer exists
+// on the dep module's main checkout (refs/tags/<full-tag>). Used as defense so
+// pinReady never targets an unpublished NextTag when tagscope attachment fails.
+func pinReadyReleaseTagExists(dep UnwindGraphModuleNode, pinVer string, byLabel map[string]StackMember) bool {
+	if pinVer == "" {
+		return false
+	}
+	full := cascadeFullTagForPinVersion(dep, pinVer)
+	if full == "" {
+		// Unknown full tag name: allow only when we have no tagscope hints at all
+		// (legacy/current require path); still try pinVer as tag on main.
+		full = pinVer
+	}
+	mainRepo := ""
+	if dep.RepoLabel != "" {
+		if m, ok := byLabel[dep.RepoLabel]; ok {
+			mainRepo = m.MainRepo
+			if mainRepo == "" {
+				mainRepo = m.Path
+			}
+		}
+	}
+	if mainRepo == "" {
+		// No main to check — refuse pinReady (cascade can still pin after tag).
+		return false
+	}
+	return gitTagRefExists(mainRepo, full)
+}
+
+// cascadeFullTagForPinVersion maps a go require version to a full release tag on
+// the dep node (prefer LatestTag, then NextTag, then bare pinVer for root scopes).
+func cascadeFullTagForPinVersion(dep UnwindGraphModuleNode, pinVer string) string {
+	if pinVer == "" {
+		return ""
+	}
+	if dep.LatestTag != "" && versionsMatch(goRequireVersionFromTag(dep.LatestTag), pinVer) {
+		return dep.LatestTag
+	}
+	if dep.NextTag != "" && versionsMatch(goRequireVersionFromTag(dep.NextTag), pinVer) {
+		return dep.NextTag
+	}
+	// Root modules often use the require version as the full tag (v0.0.1).
+	if strings.HasPrefix(pinVer, "v") || looksLikeSemver(strings.TrimPrefix(pinVer, "v")) {
+		return pinVer
+	}
+	return ""
+}
+
+// gitTagRefExists reports whether refs/tags/<tag> resolves in repo.
+func gitTagRefExists(repo, tag string) bool {
+	if repo == "" || tag == "" {
+		return false
+	}
+	out, err := gitOutputDir(repo, "rev-parse", "--verify", "--quiet", "refs/tags/"+tag)
+	return err == nil && strings.TrimSpace(out) != ""
 }
 
 // memberCheckoutPath prefers still-present Path over MainRepo (same as cascade checkoutForEdit).
