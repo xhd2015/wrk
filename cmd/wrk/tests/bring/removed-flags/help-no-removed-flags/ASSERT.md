@@ -26,12 +26,13 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		t.Fatalf("help must mention --bring; got %q", help)
 	}
 	// Reject live-mode documentation for removed flags (stable line-oriented checks).
+	// Match exact flag tokens only: --dep-replace / --dep-update are live modes and must not trip --dep.
 	for _, line := range strings.Split(help, "\n") {
 		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "--dep") || strings.Contains(line, "  --dep ") || strings.Contains(line, "\t--dep") {
+		if helpLineDocumentsFlag(trim, "--dep") {
 			t.Fatalf("help must not document --dep as a flag; line=%q", line)
 		}
-		if strings.HasPrefix(trim, "--all-deps") || strings.Contains(line, "  --all-deps") {
+		if helpLineDocumentsFlag(trim, "--all-deps") {
 			t.Fatalf("help must not document --all-deps as a flag; line=%q", line)
 		}
 	}

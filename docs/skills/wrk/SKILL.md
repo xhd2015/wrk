@@ -102,3 +102,5 @@ wrk --bring <path> --no-dep
 
 - **Replace guard**: `--done` may refuse local `replace` in `go.mod`; `--no-in-module-replace` for strict block.
 - **Basename fallback**: `wrk myrepo` uses registered projects when no local `./myrepo`.
+
+<!-- WRK_SKILL_DOCTEST_MARKER -->
