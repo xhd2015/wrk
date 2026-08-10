@@ -710,6 +710,36 @@ func memberCheckoutPath(m StackMember) string {
 	return storage.NormalizePath(main)
 }
 
+// cascadePinCheckout chooses where cascade pin+tidy+selective commit runs.
+//
+// Linked free/consumer Path that is still present and clean pins on MainRepo so
+// --reinstall-local (useMain) sees the tidied nested go.mod/go.sum. Dirty Path
+// keeps Path for partial-edit WIP (P3). Matches remapPeeledLabelsToMain intent
+// for peels: ship pin work onto main when there is no linked-only dirt.
+func cascadePinCheckout(m StackMember) string {
+	path := ""
+	if m.Path != "" {
+		if st, err := os.Stat(m.Path); err == nil && st.IsDir() {
+			path = storage.NormalizePath(m.Path)
+		}
+	}
+	main := storage.NormalizePath(m.MainRepo)
+	if main == "" {
+		main = path
+	}
+	if path == "" {
+		return main
+	}
+	if main == "" || path == main {
+		return path
+	}
+	// Linked worktree distinct from main: clean → pin main (reinstall scan root).
+	if err := worktree.IsClean(path); err == nil {
+		return main
+	}
+	return path
+}
+
 // moduleDirOnCheckout joins module Dir under checkout (root module → checkout).
 func moduleDirOnCheckout(checkout string, n UnwindGraphModuleNode) string {
 	if checkout == "" {
@@ -779,22 +809,14 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 		return storage.NormalizePath(main), n.RepoLabel, main != ""
 	}
 
-	// checkoutForEdit prefers still-present Path (linked consumer) over MainRepo.
-	checkoutForEdit := func(label string) string {
+	// checkoutForPin: clean linked Path → MainRepo so --reinstall-local (useMain)
+	// sees pin+tidy on nested modules; dirty Path keeps Path (partial-edit P3).
+	checkoutForPin := func(label string) string {
 		m, ok := byLabel[label]
 		if !ok {
 			return ""
 		}
-		if m.Path != "" {
-			if st, err := os.Stat(m.Path); err == nil && st.IsDir() {
-				return storage.NormalizePath(m.Path)
-			}
-		}
-		main := m.MainRepo
-		if main == "" {
-			main = m.Path
-		}
-		return storage.NormalizePath(main)
+		return cascadePinCheckout(m)
 	}
 
 	moduleDirOn := func(checkout string, n UnwindGraphModuleNode) string {
@@ -979,7 +1001,10 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			}
 			_, depLabel, _ := mainForModule(step.DepModulePath)
 
-			consumerCheckout := checkoutForEdit(consumerLabel)
+			// Pin on MainRepo when linked Path is clean so reinstall (useMain)
+			// sees tidied nested modules (agent-pro cmd ← parent). Dirty Path
+			// keeps Path for partial-edit.
+			consumerCheckout := checkoutForPin(consumerLabel)
 			if consumerCheckout == "" {
 				consumerCheckout = consumerMain
 			}
