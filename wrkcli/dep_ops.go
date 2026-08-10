@@ -25,11 +25,13 @@ func runDepReplace(workDir string, paths []string, dryRun bool) error {
 		if err != nil {
 			return fmt.Errorf("wrk: resolve %s: %w", p, err)
 		}
+		// Validate module first so non-module dirs get a clear "not a go module"
+		// error (library ReplaceIn may surface opaque "resolve go mod" exit codes).
+		modPath, absDir, err := resolveDepModuleForReplace(absDep)
+		if err != nil {
+			return fmt.Errorf("wrk: %w", err)
+		}
 		if dryRun {
-			modPath, absDir, err := resolveDepModuleForReplace(absDep)
-			if err != nil {
-				return fmt.Errorf("wrk: %w", err)
-			}
 			fmt.Printf("would: dep-replace %s => %s\n", modPath, absDir)
 			continue
 		}
@@ -94,7 +96,9 @@ func resolveDepModuleForReplace(dir string) (modulePath, absDir string, err erro
 	}
 	modInfo, err := resolve.GetModuleInfo(absDir)
 	if err != nil {
-		return "", "", err
+		// Opaque library errors (e.g. "resolve go mod: … exit status 1") still mean
+		// the path is not a usable Go module for --dep-replace.
+		return "", "", fmt.Errorf("not a go module: %s", absDir)
 	}
 	if modInfo.Module.Path == "" {
 		return "", "", fmt.Errorf("not a go module: %s", absDir)

@@ -16,6 +16,7 @@ wrk --all-deps -> non-zero; unknown/invalid flag --all-deps
 
 ```go
 import (
+	"strings"
 	"testing"
 
 	"github.com/xhd2015/doctest/session"
@@ -24,6 +25,24 @@ import (
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = d
 	req.InProcess = true
+	_ = helpLineDocumentsFlag
 	return nil
+}
+
+// helpLineDocumentsFlag reports whether a help line documents flag as its own
+// token (not a longer flag that shares a prefix, e.g. --dep vs --dep-replace).
+func helpLineDocumentsFlag(trimLine, flag string) bool {
+	if trimLine == flag {
+		return true
+	}
+	if strings.HasPrefix(trimLine, flag+" ") || strings.HasPrefix(trimLine, flag+"\t") || strings.HasPrefix(trimLine, flag+"=") {
+		return true
+	}
+	// common usage indent: "  --dep " / "  --dep\t"
+	if strings.Contains(trimLine, " "+flag+" ") || strings.Contains(trimLine, "\t"+flag+" ") ||
+		strings.Contains(trimLine, " "+flag+"\t") || strings.HasSuffix(trimLine, " "+flag) {
+		return true
+	}
+	return false
 }
 ```
