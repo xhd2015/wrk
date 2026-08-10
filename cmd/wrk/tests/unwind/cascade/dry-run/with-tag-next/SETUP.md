@@ -15,7 +15,10 @@ stack + --unwind --dry-run --tag-next [+ --push/--done as validation]
 ## Preconditions
 
 - Leaves supply pin/land flags when the stack has cross-repo edges or linked WTs.
-- Cascade lines are top-level (no indent), after peels.
+- Cascade lines are top-level (no indent). Sealed C-DR1–C-DR6 expect peels then
+  cascade (do not rewrite). G1 (`false-freehost-b1-interleave`) locks **intended**
+  B1 interleaved dry-run order for T-spl-like graphs (early free / cascade /
+  deferred consumer) — may RED until FormatUnwindDryRun interleaves phases.
 - Sealed C-DR1–C-DR6 asserts unchanged; C-DR7/C-DR8 cover replace-only pin policy.
 
 ## Steps

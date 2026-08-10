@@ -74,7 +74,7 @@ func BuildUnwindVerifyReport(workDir string) (*UnwindVerifyReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	attachTagScopeToModules(modNodes, members)
+	attachTagScopeToModules(modNodes, members, nil)
 
 	cascade, err := planUnwindCascadeFromGraph(modNodes, modEdges)
 	if err != nil {

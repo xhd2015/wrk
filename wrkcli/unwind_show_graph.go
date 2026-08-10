@@ -176,7 +176,7 @@ func BuildUnwindGraphReport(workDir string) (*UnwindGraphReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	attachTagScopeToModules(modNodes, members)
+	attachTagScopeToModules(modNodes, members, nil)
 
 	applyHint := buildApplyHint(plan)
 	summary := UnwindGraphSummary{
@@ -394,11 +394,24 @@ func buildUnwindModuleGraph(members []StackMember, byLabel map[string]StackMembe
 	return nodes, edges, nil
 }
 
+// tagScopePlanEntry caches one tagscope.Plan result for a checkout root.
+type tagScopePlanEntry struct {
+	ok   bool
+	plan tagscope.ChangePlan
+}
+
+// tagScopePlanCache is an optional per-ApplyUnwind cache of tagscope.Plan by
+// normalized checkout root. tagscope.Plan is multi-second on large monorepos;
+// pinReady + cascade + split would otherwise re-run it for every peel.
+type tagScopePlanCache map[string]tagScopePlanEntry
+
 // attachTagScopeToModules fills latest/next/skip from tagscope.Plan per stack
 // checkout. Prefers the peel-chosen Path (linked dirty worktree) so HEAD
 // reflects owned changes still on the worktree, not only MainRepo tip.
 // Soft-skips failures (leaves fields empty / skip_reason=unknown).
-func attachTagScopeToModules(nodes []UnwindGraphModuleNode, members []StackMember) {
+// When cache is non-nil, tagscope.Plan results are shared across calls (one
+// ApplyUnwind run); pass nil for isolated one-shot use (show-graph, verify).
+func attachTagScopeToModules(nodes []UnwindGraphModuleNode, members []StackMember, cache tagScopePlanCache) {
 	// Peel-preferred checkout root per label (linked/dirty Path first).
 	planRootByLabel := make(map[string]string, len(members))
 	for label, m := range pickPeelMembersByLabel(members) {
@@ -422,12 +435,10 @@ func attachTagScopeToModules(nodes []UnwindGraphModuleNode, members []StackMembe
 			planRootByLabel[m.Label] = storage.NormalizePath(root)
 		}
 	}
-	// Cache plans per checkout path (normalized).
-	type planCache struct {
-		ok   bool
-		plan tagscope.ChangePlan
+	// Local map when caller did not supply a shared ApplyUnwind cache.
+	if cache == nil {
+		cache = make(tagScopePlanCache)
 	}
-	cache := make(map[string]planCache)
 
 	getPlan := func(repoRoot string) (tagscope.ChangePlan, bool) {
 		repoRoot = storage.NormalizePath(repoRoot)
@@ -436,10 +447,10 @@ func attachTagScopeToModules(nodes []UnwindGraphModuleNode, members []StackMembe
 		}
 		plan, _, err := tagscope.Plan(repoRoot, "HEAD")
 		if err != nil {
-			cache[repoRoot] = planCache{ok: false}
+			cache[repoRoot] = tagScopePlanEntry{ok: false}
 			return tagscope.ChangePlan{}, false
 		}
-		cache[repoRoot] = planCache{ok: true, plan: plan}
+		cache[repoRoot] = tagScopePlanEntry{ok: true, plan: plan}
 		return plan, true
 	}
 

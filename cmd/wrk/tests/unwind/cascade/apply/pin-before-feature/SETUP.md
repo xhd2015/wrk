@@ -29,11 +29,17 @@ dirty consumer (+ optional dirty free) + external replace
 
 1. Grouping provides B1 apply seeders, fake-opencode install, no-local-replace
    pre-commit hook, and pin-before-feature history asserts.
-2. Leaves split on free-host shape:
+2. Leaves split on free-host shape / consumer dirt / replace form:
    - T1: pure multi-repo clean external replace-only
    - T2: free dirty external then consumer gen-commit
    - T-M1: **monorepo freeHost** (intra owned-changed) + clean external replace
    - T-tag1: **3-level freeHost** mid + dirty free (pin before free tag-next)
+   - T-spl / A1: **false freeHost** via noise intra pins + dirty free + replace-only
+   - A2: false freeHost monorepo + **FEATURE_WIP** (pin then deferred feature)
+   - A4: **clean** consumer porcelain + committed replace + dirty free
+   - A5: **resume** free already landed clean/untagged + consumer replace dirt
+   - D1: **absolute-path** external replace (droppable; pin drops it)
+   - C1: **free multi-module** (root + `cmd/`) both tag-next; consumer pins **root only**
 
 ## Context
 
@@ -42,14 +48,22 @@ dirty consumer (+ optional dirty free) + external replace
 - Classic TDD: leaves are **RED** until product reorders pin before consumer
   feature gen-commit (today peels all then cascade; gen-commit hits hook while
   replace still present).
+- **P2 coverage backfill (A2/A4/A5/D1):** P1 freeHost fix already in tree;
+  new leaves may be GREEN immediately (backfill OK). Mixed GREEN/RED OK.
 - **T-M1 hole:** same-label freeHost (intra free pin dep) blocks pure consumer
   deferral, so ready external pins never run before freeHost feature gen-commit.
 - **T-tag1 hole:** mid freeHost peels early; `pinReadyExternalReplacesBeforeGenCommit`
   pins dirty free @ planned NextTag **before** cascade `tag-next` (missing
   `attachTagScopeToModules` → `cascadeModuleShouldTag` always false). Production
   surfaces as `go mod tidy: unknown revision`; L2 locks tag-before-pin order.
+- **T-spl / A1 hole:** `splitPeelOrderB1` marks freeHost for **every** pin dep
+  label, including noise intra pins @ LatestTag with **no** tag-next. Monorepo
+  consumer peels early with unready external free replace → hook fail. freeHost
+  must be true tag hosts only so pure pin-consumers defer.
 - Do not rewrite sealed ASSERT contracts under `clean/`, `dirty-gomod/`,
-  `partial-edit/`, `reinstall-local/`, or sealed T1/T2/T-M1 leaves.
+  `partial-edit/`, `reinstall-local/`, or sealed T1/T2/T-M1/T-tag1/T-spl leaves.
+- **P3 C1:** free monorepo multi-module tags (go-pkgs root + nested `cmd/`) +
+  consumer require **root only** — pin must not force-add nested free/cmd.
 
 ```go
 import (
@@ -65,6 +79,13 @@ import (
 )
 
 const (
+	// Free multi-module nested cmd (C1 / go-pkgs shape): path-scoped tags.
+	// Root module reuses unwindDotPkgsModule (example.com/dot-pkgs).
+	freeMultiCmdModule  = "example.com/dot-pkgs/cmd"
+	freeMultiCmdDir     = "cmd" // rel under free monorepo main
+	freeMultiCmdOldTag  = "cmd/v0.0.1"
+	freeMultiCmdNextTag = "cmd/v0.0.2"
+
 	// Uncommitted feature WIP path for consumer gen-commit (not go.mod).
 	cascadeFeatureWIPFile = "FEATURE_WIP.md"
 	cascadeFeatureWIPBody = "feature WIP for gen-commit before pin ordering\n"
@@ -76,14 +97,15 @@ const (
 	cascadeFakeOpencodeMockJSON = `{"version":"agent-pro.fake-runner.v1","runner":"fake-opencode","session_id":"cascade_pin_before_feature","llm_events":[{"type":"step_start"},{"type":"message","text":"{\"title\": \"feat: add feature\", \"description\": \"Consumer feature after cascade pin\"}"},{"type":"step_finish"}]}`
 
 	// Shell pre-commit: fail when go.mod still has a droppable external-style
-	// local replace (./external/… or ../…). Intra-repo ./pkgs/… is allowed.
-	// Mirrors git-hook-go-no-local-replace lenient mode for stack externals.
+	// local replace (./external/…, ../…, or absolute /…). Intra-repo ./pkgs/…
+	// is allowed. Mirrors git-hook-go-no-local-replace lenient mode for stack
+	// externals (D1 absolute-path coverage; relative-only leaves unchanged).
 	cascadeNoLocalReplacePreCommit = `#!/bin/sh
 # Fixture: simulate git-hook-go-no-local-replace for external stack replaces.
 if [ ! -f go.mod ]; then
   exit 0
 fi
-if grep -E '=>[[:space:]]*(\.\./|\./external/)' go.mod >/dev/null 2>&1; then
+if grep -E '=>[[:space:]]*(\.\./|\./external/|/)' go.mod >/dev/null 2>&1; then
   echo "pre-commit: local external replace forbidden in go.mod (git-hook-go-no-local-replace sim)" >&2
   exit 1
 fi
@@ -715,6 +737,620 @@ func setupApplyPinBeforeFeatureThreeLevelFreeHostDirty(t *testing.T, req *Reques
 	setPeelOrderDisplays(t, req, leafExt, midExt, wtDir)
 }
 
+// setupApplyPinBeforeFeatureFreeMultiModuleCmdRootOnly is C1 fixture:
+//
+//	free monorepo (go-pkgs shape) under external:
+//	  example.com/dot-pkgs (root) owned-changed → tag-next v0.0.2
+//	  example.com/dot-pkgs/cmd under cmd/ requires free @ v0.0.1 + keep-local
+//	    replace => ../ ; owned-changed → tag-next cmd/v0.0.2 after pin free
+//	  baseline tags: v0.0.1 + cmd/v0.0.1; bare origin for --push
+//	consumer main (primary RepoDir):
+//	  require free root only @ v0.0.1 + droppable replace => ./external/…
+//	  never requires free/cmd
+//	modproxy: free root old+next only (no free/cmd next — spurious pin fails tidy)
+//
+// Free-first cascade on free monorepo: tag free root → pin free/cmd ← free →
+// tag free/cmd; then pin consumer ← free root only (not nested).
+// Expected consumer pin version = v0.0.2.
+func setupApplyPinBeforeFeatureFreeMultiModuleCmdRootOnly(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.NestedModulePath = freeMultiCmdModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- free monorepo main: root + cmd ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+
+	cmdDir := filepath.Join(leafMain, freeMultiCmdDir)
+	mkdirAll(t, cmdDir)
+	// Nested cmd requires free root; keep-local replace to parent (intra monorepo).
+	// Library package (not package main) so SETUP fixtures avoid package-main anti-pattern.
+	writeGoModRequire(t, cmdDir, freeMultiCmdModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	appendLocalReplace(t, cmdDir, unwindDotPkgsModule, "../")
+	writeFile(t, filepath.Join(cmdDir, "cmd.go"),
+		"package freecmd\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go",
+		filepath.Join(freeMultiCmdDir, "go.mod"),
+		filepath.Join(freeMultiCmdDir, "cmd.go"))
+	runGitIsolated(t, leafMain, "commit", "-m", "add free monorepo root + cmd modules")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	createLightweightTag(t, leafMain, freeMultiCmdOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	installCascadePermissivePreCommit(t, leafMain)
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	if tagRefExists(t, leafMain, freeMultiCmdOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", freeMultiCmdOldTag)
+	}
+	req.OriginBare = leafBare
+
+	// --- consumer main: require free root only ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer require free root only")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	// Consumer bare origin so cascade push after root tag-next succeeds.
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "root-origin.path"), rootBare+"\n")
+
+	// Nest free multi-module WT under consumer/external (stack member).
+	extDir := filepath.Join(rootMain, "external")
+	mkdirAll(t, extDir)
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate(), leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+	req.WtBranch = branchNameMainDate()
+
+	// Owned change on free root + free/cmd (both need tag-next).
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	writeFile(t, filepath.Join(leafExt, freeMultiCmdDir, "cmd.go"),
+		"package freecmd\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, leafExt, "add", "pkg.go", filepath.Join(freeMultiCmdDir, "cmd.go"))
+	runGitIsolated(t, leafExt, "commit", "-m", "free root + cmd owned change for next tags")
+	markDirty(t, leafExt)
+
+	// Droppable external replace free root only (consumer never requires free/cmd).
+	relReplace := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, rootMain, unwindDotPkgsModule, "./"+relReplace)
+	writeFile(t, filepath.Join(rootMain, ".gitignore"), "/external\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", ".gitignore")
+	runGitIsolated(t, rootMain, "commit", "-m", "external free replace + ignore")
+	// Consumer not required dirty for pin (clean Base + replace committed).
+	// Free dirty drives peel; cascade pins consumer require root only.
+
+	// Offline proxy: free root old+next only. Do NOT seed free/cmd@next — a
+	// cartesian pin that force-adds nested require would fail tidy (RED surface).
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	// Single-module seeds (avoid multi-module zip pollution from cmd/).
+	oldSeed := filepath.Join(req.WorkRoot, "seed-free-root-"+unwindApplyOldTag)
+	mkdirAll(t, oldSeed)
+	writeGoModRequire(t, oldSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(oldSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyOldTag, oldSeed)
+
+	nextSeed := filepath.Join(req.WorkRoot, "seed-free-root-"+unwindApplyNextTag)
+	mkdirAll(t, nextSeed)
+	writeGoModRequire(t, nextSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(nextSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyNextTag, nextSeed)
+
+	// Nested cmd baseline only (if anything wrongly pins nested@old, still OK).
+	cmdOldSeed := filepath.Join(req.WorkRoot, "seed-free-cmd-"+unwindApplyOldTag)
+	mkdirAll(t, cmdOldSeed)
+	writeGoModRequire(t, cmdOldSeed, freeMultiCmdModule)
+	writeFile(t, filepath.Join(cmdOldSeed, "cmd.go"),
+		"package freecmd\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, freeMultiCmdModule, unwindApplyOldTag, cmdOldSeed)
+	enableFileModuleProxy(t, req, proxyRoot)
+
+	req.RepoDir = rootMain
+	setPeelOrderDisplays(t, req, leafExt)
+}
+
+// setupApplyPinBeforeFeatureFalseFreeHostIntraPins is T-spl / A1 fixture:
+//
+//	external free (dot-pkgs): dirty owned-changed → next tag v0.0.2; bare origin + --push
+//	consumer monorepo (linked WT primary):
+//	  - root + pkgs/shared (no owned-change on shared after pkgs/shared/v0.0.1)
+//	  - root requires shared with **pre-pin drift** vs LatestTag so cascade plans
+//	    noise pin root←shared @ LatestTag **without** tag-next on shared
+//	  - root requires free @ v0.0.1 + droppable replace => ./external/…
+//	  - consumer dirt = go.mod/go.sum (committed replace) + DIRTY only — **no** FEATURE_WIP
+//	pre-commit: no external local replace (hook sim; ./pkgs/… allowed)
+//	modproxy: old + next for free pin after tag
+//
+// Bug: splitPeelOrderB1 freeHost[depLabel] for every pin dep — noise intra pin
+// marks monorepo freeHost → early peel with unready free replace → hook fail.
+// Correct: freeHost only true tag hosts; monorepo pure pin-consumer defers.
+// Expected free pin version = v0.0.2.
+func setupApplyPinBeforeFeatureFalseFreeHostIntraPins(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- leaf free main + origin (owned-changed → next tag) ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	installCascadePermissivePreCommit(t, leafMain)
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	req.OriginBare = leafBare
+
+	// --- monorepo main: root + pkgs/shared (no owned-change) + require free ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+
+	sharedDir := filepath.Join(rootMain, filepath.FromSlash(cascadeSharedDir))
+	mkdirAll(t, sharedDir)
+	writeGoModRequire(t, sharedDir, cascadeSharedModule)
+	writeFile(t, filepath.Join(sharedDir, "shared.go"),
+		"package shared\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+
+	// Require shared at a version that drifts from LatestTag (pkgs/shared/v0.0.1 →
+	// v0.0.1) so cascade plans noise pin root←shared @ LatestTag without tag-next
+	// on shared (A1 false freeHost trigger). Free require matches baseline tag.
+	writeGoModRequire(t, rootMain, unwindRootModule,
+		cascadeSharedModule+"@v0.0.0",
+		unwindDotPkgsModule+"@"+unwindApplyOldTag,
+	)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport (\n\t_ \""+cascadeSharedModule+"\"\n\t_ \""+unwindDotPkgsModule+"\"\n)\n")
+	// Intra keep-local replace (must survive; hook allows ./pkgs/…).
+	appendLocalReplace(t, rootMain, cascadeSharedModule, "./"+cascadeSharedDir)
+
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go", "pkgs")
+	runGitIsolated(t, rootMain, "commit", "-m", "root + shared + require free (noise shared drift)")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "HEAD")
+	createLightweightTag(t, rootMain, cascadeSharedOldTag, "HEAD")
+	// No post-tag owned change on shared → no cascade tag-next for shared.
+
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "root-origin.path"), rootBare+"\n")
+
+	// Linked monorepo = stack primary (gen-commit only runs for linked peels).
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	// Dirty free leaf under external (owned-changed for next tag).
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate()+"-leaf", leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, leafExt, "add", "pkg.go")
+	runGitIsolated(t, leafExt, "commit", "-m", "leaf feature for next tag")
+	markDirty(t, leafExt)
+
+	// Committed droppable external replace; consumer dirt = DIRTY only (replace-only;
+	// no FEATURE_WIP — gen-commit must not be the path that drops replace).
+	relReplace := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, "./"+relReplace)
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	runGitIsolated(t, wtDir, "add", "go.mod", ".gitignore")
+	runGitIsolated(t, wtDir, "commit", "-m", "external stack replace + ignore")
+
+	// Replace-only consumer dirt: porcelain DIRTY, no feature WIP file.
+	markDirty(t, wtDir)
+	// Consumer hook only (after seed commits).
+	installCascadeNoLocalReplacePreCommit(t, wtDir)
+
+	// Offline proxy: next from leaf WT content; old synthetic.
+	seedDotPkgsProxyVersions(t, req, map[string]string{
+		unwindApplyNextTag: leafExt,
+		unwindApplyOldTag:  "",
+	})
+
+	req.RepoDir = wtDir
+	setPeelOrderDisplays(t, req, leafExt, wtDir)
+}
+
+// setupApplyPinBeforeFeatureFalseFreeHostIntraPinsWithFeatureWIP is A2:
+// same monorepo false freeHost stack as T-spl/A1 plus staged FEATURE_WIP so
+// deferred consumer peels run feature gen-commit after cascade pin (D7).
+func setupApplyPinBeforeFeatureFalseFreeHostIntraPinsWithFeatureWIP(t *testing.T, req *Request) {
+	t.Helper()
+	setupApplyPinBeforeFeatureFalseFreeHostIntraPins(t, req)
+	if req.WtDir == "" {
+		t.Fatal("WtDir required after false freeHost seed")
+	}
+	dirtyCascadeFeatureWIP(t, req.WtDir)
+}
+
+// setupApplyPinBeforeFeatureCleanConsumerCommittedReplace is A4:
+//
+//	leaf external: dirty owned-changed → next v0.0.2; bare origin + --push
+//	root linked WT: committed droppable external replace; **clean porcelain**
+//	  (no DIRTY, no FEATURE_WIP) — consumer not in dirty peel order
+//	modproxy: old + next for pin after free tag
+//
+// Expect: peel free only; cascade pin on consumer drops replace; no consumer
+// gen-commit failure; exit 0; final require free @ next.
+func setupApplyPinBeforeFeatureCleanConsumerCommittedReplace(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- leaf free main + origin ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	installCascadePermissivePreCommit(t, leafMain)
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	req.OriginBare = leafBare
+
+	// --- root consumer main + linked WT ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer main")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "root-origin.path"), rootBare+"\n")
+
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	// Dirty free leaf under external (owned-changed for next tag).
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate()+"-leaf", leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, leafExt, "add", "pkg.go")
+	runGitIsolated(t, leafExt, "commit", "-m", "leaf feature for next tag")
+	markDirty(t, leafExt)
+
+	// Committed replace; consumer working tree left **clean** (no DIRTY / WIP).
+	relReplace := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, "./"+relReplace)
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	runGitIsolated(t, wtDir, "add", "go.mod", ".gitignore")
+	runGitIsolated(t, wtDir, "commit", "-m", "stack replace + ignore external")
+	// A4: do not markDirty / FEATURE_WIP — clean porcelain; peel free only.
+	status := strings.TrimSpace(gitOutputIsolated(t, wtDir, "status", "--porcelain"))
+	if status != "" {
+		t.Fatalf("A4: consumer must be clean porcelain after seed; got:\n%s", status)
+	}
+	installCascadeNoLocalReplacePreCommit(t, wtDir)
+
+	seedDotPkgsProxyVersions(t, req, map[string]string{
+		unwindApplyNextTag: leafExt,
+		unwindApplyOldTag:  "",
+	})
+
+	req.RepoDir = wtDir
+	// Only free is dirty; consumer omitted from peel order intentionally.
+	setPeelOrderDisplays(t, req, leafExt)
+}
+
+// setupApplyPinBeforeFeatureResumeFreeLandedUntagged is A5:
+//
+//	Simulate partial success after free peel/land: free is **already clean on
+//	main** at the feature commit (owned-changed past LatestTag) but **untagged**.
+//	Consumer still dirty with droppable external replace (replace-only dirt).
+//
+//	Re-run full apply flags → cascade tags free @ next, pins consumer (drop
+//	replace), finishes; exit 0. No double wrong tags.
+func setupApplyPinBeforeFeatureResumeFreeLandedUntagged(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- free main: baseline tag + feature commit already landed; clean ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	// Feature already landed on main (resume after free peel success) — untagged next.
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "leaf feature already landed (untagged)")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	installCascadePermissivePreCommit(t, leafMain)
+	// Clean porcelain on free (no DIRTY) — not in dirty peel order.
+	if st := strings.TrimSpace(gitOutputIsolated(t, leafMain, "status", "--porcelain")); st != "" {
+		t.Fatalf("A5: free main must be clean after land sim; got:\n%s", st)
+	}
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	// Push main tip (feature commit) so origin matches; no next tag yet.
+	runGitIsolated(t, leafMain, "push", "origin", "main")
+	req.OriginBare = leafBare
+
+	// --- consumer main + linked WT with droppable replace → free main ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer main")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "root-origin.path"), rootBare+"\n")
+
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	// Replace points at free main (already landed checkout), not a dirty linked WT.
+	// Relative sibling form (../dot-pkgs) — distinct from D1 absolute-path leaf.
+	relFree := relLocalReplace(t, wtDir, leafMain)
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, relFree)
+	runGitIsolated(t, wtDir, "add", "go.mod")
+	runGitIsolated(t, wtDir, "commit", "-m", "external replace to free main (resume)")
+	// Consumer still dirty (DIRTY only; replace committed).
+	markDirty(t, wtDir)
+	installCascadeNoLocalReplacePreCommit(t, wtDir)
+
+	// Proxy: next content from free main tip; old synthetic.
+	seedDotPkgsProxyVersions(t, req, map[string]string{
+		unwindApplyNextTag: leafMain,
+		unwindApplyOldTag:  "",
+	})
+
+	req.RepoDir = wtDir
+	// Free clean → not peeled; only consumer dirty (deferred pure pin-consumer).
+	setPeelOrderDisplays(t, req, wtDir)
+}
+
+// setupApplyPinBeforeFeatureAbsolutePathReplace is D1:
+//
+//	Same free-dirty + consumer FEATURE_WIP shape as T2, but replace NewPath is
+//	an **absolute** path to the free external checkout (production wrk style).
+//	Droppable; cascade pin must drop it; hook sim forbids absolute external too.
+func setupApplyPinBeforeFeatureAbsolutePathReplace(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- leaf free main + origin ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	installCascadePermissivePreCommit(t, leafMain)
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	req.OriginBare = leafBare
+
+	// --- root consumer main + linked WT ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer main")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "root-origin.path"), rootBare+"\n")
+
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	// Dirty free under external (same as T2 layout).
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate()+"-leaf", leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, leafExt, "add", "pkg.go")
+	runGitIsolated(t, leafExt, "commit", "-m", "leaf feature for next tag")
+	markDirty(t, leafExt)
+
+	// Absolute-path replace (D1) — production-style, not ./external/….
+	absReplace := filepath.ToSlash(leafExt)
+	if !filepath.IsAbs(leafExt) {
+		t.Fatalf("D1: leafExt must be absolute for abs replace seed; got %q", leafExt)
+	}
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, absReplace)
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	runGitIsolated(t, wtDir, "add", "go.mod", ".gitignore")
+	runGitIsolated(t, wtDir, "commit", "-m", "absolute path stack replace + ignore external")
+
+	// Confirm seed go.mod carries absolute replace NewPath.
+	seedMod := readFile(t, filepath.Join(wtDir, "go.mod"))
+	if !strings.Contains(seedMod, "=> "+absReplace) && !strings.Contains(seedMod, "=>\t"+absReplace) {
+		// Tolerant: slash form already in absReplace; also accept space variants.
+		if !strings.Contains(seedMod, absReplace) {
+			t.Fatalf("D1 seed go.mod missing absolute replace path %q:\n%s", absReplace, seedMod)
+		}
+	}
+
+	dirtyCascadeFeatureWIP(t, wtDir)
+	markDirty(t, wtDir)
+	// Shared hook now also forbids absolute external NewPath (D1).
+	installCascadeNoLocalReplacePreCommit(t, wtDir)
+
+	seedDotPkgsProxyVersions(t, req, map[string]string{
+		unwindApplyNextTag: leafExt,
+		unwindApplyOldTag:  "",
+	})
+
+	req.RepoDir = wtDir
+	setPeelOrderDisplays(t, req, leafExt, wtDir)
+}
+
+// assertFreeTagNextBeforeConsumerPinOfFree locks free tag-next before consumer
+// pin of free @ next (T-spl / T2 order). free must be tagged before pin drops
+// replace onto the next version.
+func assertFreeTagNextBeforeConsumerPinOfFree(t *testing.T, out string) {
+	t.Helper()
+	tagNeedle := "tag-next " + unwindDotPkgsModule + " @ " + unwindApplyNextTag
+	// pin log uses stack repo labels (not module paths).
+	pinNeedle := "pin " + labelRoot + " <- " + labelDotPkgs + " @ " + unwindApplyNextTag
+	tagIdx := strings.Index(out, tagNeedle)
+	pinIdx := strings.Index(out, pinNeedle)
+	if pinIdx < 0 {
+		alt := "<- " + labelDotPkgs + " @ " + unwindApplyNextTag
+		pinIdx = strings.Index(out, alt)
+		if pinIdx >= 0 {
+			pinNeedle = alt
+		}
+	}
+	if tagIdx < 0 {
+		t.Fatalf("T-spl: missing free tag-next line %q (free must be tagged before consumer pin)\nout:\n%s",
+			tagNeedle, out)
+	}
+	if pinIdx < 0 {
+		t.Fatalf("T-spl: missing consumer pin of free @ next (want %q or pin … <- %s @ %s)\nout:\n%s",
+			pinNeedle, labelDotPkgs, unwindApplyNextTag, out)
+	}
+	if pinIdx < tagIdx {
+		t.Fatalf("T-spl: free tag-next must precede consumer pin of free @ next\ntag@%d pin@%d\nneedles: %q then %q\nout:\n%s",
+			tagIdx, pinIdx, tagNeedle, pinNeedle, out)
+	}
+}
+
+// assertNoLocalReplaceGenCommitFail fails when combined output shows the fixture
+// pre-commit / gen-commit blocked on local external replace (T-spl RED surface).
+func assertNoLocalReplaceGenCommitFail(t *testing.T, out string) {
+	t.Helper()
+	low := strings.ToLower(out)
+	if strings.Contains(low, "local external replace forbidden") ||
+		strings.Contains(low, "git-hook-go-no-local-replace") {
+		t.Fatalf("T-spl: gen-commit hit no-local-replace hook (false freeHost early peel?)\nout:\n%s", out)
+	}
+}
+
 // assertFreeTagNextBeforeMidPinOfFree locks T-tag1 / T-tag2 order: cascade
 // tag-next for dirty free must appear before pinReady/cascade pin of mid ← free
 // @ next. pinReady must not treat planned NextTag as ready before the free tag
@@ -903,6 +1539,41 @@ func assertExternalReplaceDropped(t *testing.T, goModPath, modulePath string) {
 	}
 }
 
+// assertNoAbsoluteExternalReplaceForLeaf fails if consumer go.mod still has an
+// absolute-path replace NewPath for LeafModulePath (D1 pin must drop it).
+func assertNoAbsoluteExternalReplaceForLeaf(t *testing.T, req *Request) {
+	t.Helper()
+	if req.LeafModulePath == "" {
+		t.Fatal("LeafModulePath required")
+	}
+	checkout := req.MainRepo
+	if req.WtDir != "" {
+		if _, err := os.Stat(req.WtDir); err == nil {
+			checkout = req.WtDir
+		}
+	}
+	if checkout == "" {
+		t.Fatal("MainRepo or WtDir required")
+	}
+	goMod := readFile(t, filepath.Join(checkout, "go.mod"))
+	for _, line := range strings.Split(goMod, "\n") {
+		trim := strings.TrimSpace(line)
+		if !strings.Contains(trim, req.LeafModulePath) || !strings.Contains(trim, "=>") {
+			continue
+		}
+		// replace module => /abs/path or module => C:\...
+		parts := strings.SplitN(trim, "=>", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		newPath := strings.TrimSpace(parts[1])
+		if filepath.IsAbs(newPath) || strings.HasPrefix(newPath, "/") {
+			t.Fatalf("D1: consumer go.mod must DROP absolute external replace for %s:\n%s",
+				req.LeafModulePath, goMod)
+		}
+	}
+}
+
 // assertConsumerRequireAndNoExternalReplace checks require version + no replace
 // on the preferred consumer checkout (WtDir if present, else MainRepo).
 func assertConsumerRequireAndNoExternalReplace(t *testing.T, req *Request) {
@@ -1030,6 +1701,17 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = setupApplyPinBeforeFeatureFreeDirty
 	_ = setupApplyPinBeforeFeatureMonorepoFreeHostExternal
 	_ = setupApplyPinBeforeFeatureThreeLevelFreeHostDirty
+	_ = setupApplyPinBeforeFeatureFalseFreeHostIntraPins
+	_ = setupApplyPinBeforeFeatureFalseFreeHostIntraPinsWithFeatureWIP
+	_ = setupApplyPinBeforeFeatureCleanConsumerCommittedReplace
+	_ = setupApplyPinBeforeFeatureResumeFreeLandedUntagged
+	_ = setupApplyPinBeforeFeatureAbsolutePathReplace
+	_ = setupApplyPinBeforeFeatureFreeMultiModuleCmdRootOnly
+	_ = freeMultiCmdModule
+	_ = freeMultiCmdNextTag
+	_ = assertFreeTagNextBeforeConsumerPinOfFree
+	_ = assertNoLocalReplaceGenCommitFail
+	_ = assertNoAbsoluteExternalReplaceForLeaf
 	_ = assertFreeTagNextBeforeMidPinOfFree
 	_ = assertMidPinnedToFreeLeaf
 	_ = pinCommitSHAForDep

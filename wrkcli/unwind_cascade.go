@@ -44,6 +44,12 @@ type UnwindCascadePlan struct {
 // require-drift. Testdata / forever-skip scopes never emit tag-next steps.
 // Does not mutate the workspace.
 func PlanUnwindCascade(members []StackMember) (*UnwindCascadePlan, error) {
+	return PlanUnwindCascadeCached(members, nil)
+}
+
+// PlanUnwindCascadeCached is PlanUnwindCascade with an optional tagscope cache
+// shared across one ApplyUnwind (pinReady + cascade + split peels).
+func PlanUnwindCascadeCached(members []StackMember, tagCache tagScopePlanCache) (*UnwindCascadePlan, error) {
 	if len(members) == 0 {
 		return &UnwindCascadePlan{}, nil
 	}
@@ -52,7 +58,7 @@ func PlanUnwindCascade(members []StackMember) (*UnwindCascadePlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	attachTagScopeToModules(nodes, members)
+	attachTagScopeToModules(nodes, members, tagCache)
 	return planUnwindCascadeFromGraph(nodes, edges)
 }
 
@@ -443,12 +449,46 @@ func remapPeeledLabelsToMain(members []StackMember, peeledLabels []string) []Sta
 // gen-commit. Does not pin deps that still need tag-next (owned-changed free
 // not yet landed/tagged) — those stay post-land cascade. Idempotent when the
 // replace is already gone / require already matches.
-func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMember, flags UnwindFlags, stats *UnwindApplyStats) error {
+// tagCache shares tagscope.Plan results with the rest of ApplyUnwind (may be nil).
+func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMember, flags UnwindFlags, stats *UnwindApplyStats, tagCache tagScopePlanCache) error {
 	if checkout == "" || len(members) == 0 {
 		return nil
 	}
 	checkout = storage.NormalizePath(checkout)
-	plan, err := PlanUnwindCascade(members)
+
+	// Single graph+tagscope+plan pass (do NOT call PlanUnwindCascade then rebuild —
+	// that double-scans modules and double-runs tagscope.Plan, ~2× wall on large
+	// monorepos, with no progress output after the peel banner).
+	byLabel := pickPeelMembersByLabel(members)
+	nodes, edges, err := buildUnwindModuleGraph(members, byLabel)
+	if err != nil {
+		return err
+	}
+
+	// Modules hosted on this checkout (linked Path or main matching checkout).
+	// Cheap filter before tagscope.Plan (often multi-second on monorepos).
+	onCheckout := make(map[string]struct{})
+	for _, n := range nodes {
+		if n.Path == "" || n.RepoLabel == "" {
+			continue
+		}
+		m, ok := byLabel[n.RepoLabel]
+		if !ok {
+			continue
+		}
+		if memberCheckoutPath(m) == checkout {
+			onCheckout[n.Path] = struct{}{}
+		}
+	}
+	if len(onCheckout) == 0 {
+		return nil
+	}
+
+	// Fill LatestTag/NextTag so cascadeModuleShouldTag correctly skips owned-changed
+	// free that still needs cascade tag-next (without this, NextTag is empty and
+	// pinReady treats planned next versions as "ready" → premature pin / unknown revision).
+	attachTagScopeToModules(nodes, members, tagCache)
+	plan, err := planUnwindCascadeFromGraph(nodes, edges)
 	if err != nil {
 		return err
 	}
@@ -456,15 +496,6 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 		return nil
 	}
 
-	byLabel := pickPeelMembersByLabel(members)
-	nodes, edges, err := buildUnwindModuleGraph(members, byLabel)
-	if err != nil {
-		return err
-	}
-	// Fill LatestTag/NextTag so cascadeModuleShouldTag correctly skips owned-changed
-	// free that still needs cascade tag-next (without this, NextTag is empty and
-	// pinReady treats planned next versions as "ready" → premature pin / unknown revision).
-	attachTagScopeToModules(nodes, members)
 	nodeByPath := make(map[string]UnwindGraphModuleNode, len(nodes))
 	for _, n := range nodes {
 		if n.Path != "" {
@@ -486,24 +517,6 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 		if isDroppableExternalStackReplace(from, to, e) {
 			droppableExternal[e.From+"\x00"+e.To] = struct{}{}
 		}
-	}
-
-	// Modules hosted on this checkout (linked Path or main matching checkout).
-	onCheckout := make(map[string]struct{})
-	for _, n := range nodes {
-		if n.Path == "" || n.RepoLabel == "" {
-			continue
-		}
-		m, ok := byLabel[n.RepoLabel]
-		if !ok {
-			continue
-		}
-		if memberCheckoutPath(m) == checkout {
-			onCheckout[n.Path] = struct{}{}
-		}
-	}
-	if len(onCheckout) == 0 {
-		return nil
 	}
 
 	addAll := flags.AddAll || genArgsHasFlag(flags.GenCommitArgs, "--add-all")
@@ -714,11 +727,11 @@ func moduleDirOnCheckout(checkout string, n UnwindGraphModuleNode) string {
 // has no remaining cascade modules. addReinstallMainPath records mains for the
 // reinstall-local tail (may be nil). stats may be nil; when set, Tagged/Pinned/
 // Pushed are incremented on successful steps.
-func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMainPath func(string), stats *UnwindApplyStats) error {
+func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMainPath func(string), stats *UnwindApplyStats, tagCache tagScopePlanCache) error {
 	if len(members) == 0 {
 		return nil
 	}
-	plan, err := PlanUnwindCascade(members)
+	plan, err := PlanUnwindCascadeCached(members, tagCache)
 	if err != nil {
 		return err
 	}

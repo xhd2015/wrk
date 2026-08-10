@@ -620,6 +620,10 @@ func ValidateUnwindFlags(plan *UnwindPlan, flags UnwindFlags) error {
 // Peel lines use statusDirLine-style relative checkout paths vs workDir.
 // When members is non-nil, gen-commit plans reflect --add-all and leave-N
 // based on each peel checkout's porcelain (not flags alone).
+//
+// With --tag-next, peel/cascade order matches B1 apply (splitPeelOrderB1):
+// early free peels → global cascade tag/pin → deferred pure pin-consumer peels.
+// Without --tag-next, peels print free-first only (no cascade).
 func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string, flags ...UnwindFlags) string {
 	var b strings.Builder
 	var f UnwindFlags
@@ -629,8 +633,9 @@ func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string,
 	byLabel := pickPeelMembersByLabel(members)
 	addAll := genArgsHasFlag(f.GenCommitArgs, "--add-all")
 	b.WriteString("==== unwind (dry-run) ====\n")
-	if plan != nil {
-		for _, label := range plan.PeelOrder {
+
+	writePeels := func(labels []string) {
+		for _, label := range labels {
 			display := label
 			var peelPath string
 			if m, ok := byLabel[label]; ok {
@@ -663,9 +668,22 @@ func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string,
 			b.WriteString("  would: pin stack consumers\n")
 		}
 	}
-	// Global free-module cascade after peels (only when --tag-next).
-	// Errors are soft: peel plan still prints; empty cascade on failure.
-	if f.TagNext && len(members) > 0 {
+
+	if plan != nil {
+		if f.TagNext && len(members) > 0 {
+			// B1 interleave: early peels → cascade → deferred peels (same as apply).
+			early, deferred := splitPeelOrderB1(plan.PeelOrder, members)
+			writePeels(early)
+			// Cascade errors are soft: peel plan still prints; empty cascade on failure.
+			if cascade, err := PlanUnwindCascade(members); err == nil {
+				b.WriteString(formatUnwindCascadeDryRun(cascade))
+			}
+			writePeels(deferred)
+		} else {
+			// Legacy peel-only (or cascade unavailable without members).
+			writePeels(plan.PeelOrder)
+		}
+	} else if f.TagNext && len(members) > 0 {
 		if cascade, err := PlanUnwindCascade(members); err == nil {
 			b.WriteString(formatUnwindCascadeDryRun(cascade))
 		}
@@ -806,10 +824,13 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		reinstallMainPaths = append(reinstallMainPaths, path)
 	}
 
+	// Share tagscope.Plan across peels + cascade (multi-second on large monorepos).
+	tagCache := make(tagScopePlanCache)
+
 	peelCount := 0
 	peelLabels := func(labels []string) error {
 		for _, label := range labels {
-			if err := applyUnwindPeelOne(workDir, wrkHome, label, byLabel, members, edges, flags, &stats, addReinstallMainPath, peelCount > 0); err != nil {
+			if err := applyUnwindPeelOne(workDir, wrkHome, label, byLabel, members, edges, flags, &stats, addReinstallMainPath, peelCount > 0, tagCache); err != nil {
 				return err
 			}
 			peelCount++
@@ -836,7 +857,7 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		// (else pin commits land only on the post-land linked branch).
 		cascadeMembers := refreshStackMembersAfterLand(members)
 		cascadeMembers = remapPeeledLabelsToMain(cascadeMembers, early)
-		if err := applyUnwindCascade(cascadeMembers, flags, addReinstallMainPath, &stats); err != nil {
+		if err := applyUnwindCascade(cascadeMembers, flags, addReinstallMainPath, &stats, tagCache); err != nil {
 			return err
 		}
 		if err := peelLabels(deferred); err != nil {
@@ -864,6 +885,7 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 // applyUnwindPeelOne peels one dirty stack label: optional gen-commit, land,
 // sync, and (without --tag-next) legacy push/pin. blankBefore prints a blank
 // line before the peel banner when prior peels already ran.
+// tagCache shares tagscope.Plan across peels/cascade (may be nil).
 func applyUnwindPeelOne(
 	workDir, wrkHome, label string,
 	byLabel map[string]StackMember,
@@ -873,6 +895,7 @@ func applyUnwindPeelOne(
 	stats *UnwindApplyStats,
 	addReinstallMainPath func(string),
 	blankBefore bool,
+	tagCache tagScopePlanCache,
 ) error {
 	m, ok := byLabel[label]
 	if !ok {
@@ -901,7 +924,7 @@ func applyUnwindPeelOne(
 			// replaces on this checkout first (separate pin auto-commit), then
 			// feature gen-commit sees go.mod without external replace (D7).
 			if flags.TagNext {
-				if err := pinReadyExternalReplacesBeforeGenCommit(m.Path, members, flags, stats); err != nil {
+				if err := pinReadyExternalReplacesBeforeGenCommit(m.Path, members, flags, stats, tagCache); err != nil {
 					return err
 				}
 			}
@@ -989,8 +1012,10 @@ func applyUnwindPeelOne(
 //	early: free dep peels (and same-label free+consumer hosts) — peel before cascade
 //	deferred: pure pin-consumer peels — peel after cascade pin drops external replace
 //
-// Same-repo free+consumer (shared label hosts both free dep and pin consumer)
-// stays early so land/DIRTY prelude still runs before cascade tags on that main.
+// Same-repo free+consumer (shared label hosts a TagNext free pin-dep and a pin
+// consumer) stays early so land/DIRTY prelude still runs before cascade tags.
+// freeHost is pin deps with planned CascadeTagNext only — not every pin dep
+// (noise LatestTag intra pins) and not self-TagNext on the consumer alone.
 // Plan/cascade failures fall back to all-early (legacy peel-then-cascade).
 func splitPeelOrderB1(peelOrder []string, members []StackMember) (early, deferred []string) {
 	if len(peelOrder) == 0 {
@@ -1014,8 +1039,19 @@ func splitPeelOrderB1(peelOrder []string, members []StackMember) (early, deferre
 			labelOfMod[n.Path] = n.RepoLabel
 		}
 	}
-	// freeHost: labels that host a free dep of a planned pin (or a free-only tag).
+	// freeHost: labels that host a free dep with planned CascadeTagNext (true
+	// free / tag hosts that consumers pin after tag). Built only from pin
+	// DepModulePath entries that also have a TagNext step — NOT from every
+	// pin dep (noise LatestTag intra pins false-freeHost monorepo consumers;
+	// T-spl / A1) and NOT from TagNext on the consumer itself (self-tag after
+	// land must not block pure-consumer deferral).
 	// pinConsumer: labels that receive a cascade pin (feature peel deferred).
+	tagNextMod := make(map[string]struct{})
+	for _, s := range cascade.Steps {
+		if s.Kind == CascadeTagNext && s.ModulePath != "" {
+			tagNextMod[s.ModulePath] = struct{}{}
+		}
+	}
 	freeHost := make(map[string]struct{})
 	pinConsumer := make(map[string]struct{})
 	for _, s := range cascade.Steps {
@@ -1025,21 +1061,12 @@ func splitPeelOrderB1(peelOrder []string, members []StackMember) (early, deferre
 		if lab, ok := labelOfMod[s.ModulePath]; ok && lab != "" {
 			pinConsumer[lab] = struct{}{}
 		}
+		// True freeHost: pin dep that itself needs cascade tag-next (T-M1
+		// same-label free; dirty free leaf). LatestTag-only noise deps skip.
+		if _, willTag := tagNextMod[s.DepModulePath]; !willTag {
+			continue
+		}
 		if lab, ok := labelOfMod[s.DepModulePath]; ok && lab != "" {
-			freeHost[lab] = struct{}{}
-		}
-	}
-	for _, s := range cascade.Steps {
-		if s.Kind != CascadeTagNext {
-			continue
-		}
-		lab, ok := labelOfMod[s.ModulePath]
-		if !ok || lab == "" {
-			continue
-		}
-		// Tag module that is a pin dep is already freeHost. Pure free tags
-		// (label not only a pin consumer) also keep peels early.
-		if _, onlyConsumer := pinConsumer[lab]; !onlyConsumer {
 			freeHost[lab] = struct{}{}
 		}
 	}

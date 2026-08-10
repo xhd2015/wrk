@@ -1,18 +1,19 @@
 ## Expected Output
 
-Peel consumer only, then cascade pin for droppable external replace (no leaf tag-next):
+Replace-only cascade pin for droppable external replace (no leaf tag-next).
+Pure pin-consumer peel is B1-deferred after cascade (matches apply):
 
 ```
 ==== unwind (dry-run) ====
-would: peel .
 would: pin example.com/root <- example.com/dot-pkgs @ v0.0.1
+would: peel .
 ```
 
 (Optional under-peel ship lines from `--tag-next` allowed. Optional root
 `would: tag-next example.com/root @ …` is allowed when root itself is
 owned-changed past its baseline tag — **must not** replace the pin contract.
-Cascade after peels. Trailing newline. **No** `would: tag-next` for the clean
-leaf; **no** peel for `external/…`.)
+Trailing newline. **No** `would: tag-next` for the clean leaf; **no** peel for
+`external/…`.)
 
 ## Expected
 
@@ -21,7 +22,7 @@ leaf; **no** peel for `external/…`.)
 - Cascade pin: `would: pin example.com/root <- example.com/dot-pkgs @ v0.0.1`
   (version = current require / latest tag — D3 keep-current).
 - **No** cascade `would: tag-next` for `example.com/dot-pkgs` (not owned-changed).
-- Cascade pin appears **after** peel lines.
+- B1: pure pin-consumer peel may follow cascade pin (not peels-then-cascade).
 - Zero mutations (HEAD + DIRTY preserved).
 
 ## Side Effects
@@ -72,7 +73,8 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		}
 	}
 
-	assertCascadeAfterPeels(t, out, req.PeelOrder)
+	// B1: consumer peel is deferred pure pin-consumer — pin may precede peel.
+	// Content contract above is the lock; order matches apply splitPeelOrderB1.
 	assertUnwindZeroMutations(t, req)
 }
 ```

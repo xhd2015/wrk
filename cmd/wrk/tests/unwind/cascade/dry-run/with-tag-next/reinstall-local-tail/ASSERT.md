@@ -1,15 +1,18 @@
 ## Expected Output
 
+B1 interleaved dry-run + reinstall tail:
+
 ```
 ==== unwind (dry-run) ====
 would: peel external/dot-pkgs-main-2026-06-30
-would: peel .
 would: tag-next example.com/dot-pkgs @ v0.0.2
 would: pin example.com/root <- example.com/dot-pkgs @ v0.0.2
+would: peel .
 would: reinstall local binaries
 ```
 
-(Optional under-peel ship lines allowed. Reinstall is the plan **tail** after cascade.)
+(Optional under-peel ship lines allowed. Reinstall is the plan **tail** after
+peels and cascade. B1 may place cascade between early and deferred peels.)
 
 ## Expected
 
@@ -63,7 +66,8 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		t.Fatalf("unwind+reinstall-local must be accepted; stderr=%q stdout=%q",
 			resp.Stderr, resp.Stdout)
 	}
-	assertCascadeAfterPeels(t, out, req.PeelOrder)
+	// B1 interleave OK: free peel → cascade → deferred consumer peel → reinstall.
+	// Do not require global peels-then-cascade (assertCascadeAfterPeels).
 	assertUnwindZeroMutations(t, req)
 }
 ```

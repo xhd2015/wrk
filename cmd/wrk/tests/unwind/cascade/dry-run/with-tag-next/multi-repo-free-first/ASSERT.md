@@ -1,21 +1,24 @@
 ## Expected Output
 
+B1 interleaved dry-run (early free peel → cascade → deferred consumer peel):
+
 ```
 ==== unwind (dry-run) ====
 would: peel external/dot-pkgs-main-2026-06-30
-would: peel .
 would: tag-next example.com/dot-pkgs @ v0.0.2
 would: pin example.com/root <- example.com/dot-pkgs @ v0.0.2
+would: peel .
 ```
 
-(Optional under-peel ship lines allowed. Cascade after peels. Trailing newline.)
+(Optional under-peel ship lines allowed. Optional root tag-next OK. Trailing newline.)
 
 ## Expected
 
 - Exit code 0.
 - Peel free-first: nested leaf external display path, then primary `.`.
 - Module cascade free-first: **tag-next leaf module** before **pin root <- leaf**.
-- Cascade lines after peels (global block, not interleaved per-repo sections required).
+- **B1 interleave:** free peel → free tag-next/pin → deferred consumer peel
+  (matches apply `splitPeelOrderB1`; not global peels-then-cascade).
 - Zero mutations.
 
 ## Side Effects
@@ -57,8 +60,15 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		"would: tag-next "+unwindDotPkgsModule+" @",
 		"would: pin "+unwindRootModule+" <- "+unwindDotPkgsModule,
 	)
-	// Peels before cascade block.
-	assertCascadeAfterPeels(t, out, req.PeelOrder)
+	// B1 interleave: free peel → cascade free tag/pin → deferred consumer peel.
+	if len(req.PeelOrder) >= 2 {
+		assertContainsInOrder(t, out,
+			peelLine(req.PeelOrder[0]),
+			"would: tag-next "+unwindDotPkgsModule+" @",
+			"would: pin "+unwindRootModule+" <- "+unwindDotPkgsModule,
+			peelLine(req.PeelOrder[1]),
+		)
+	}
 	assertUnwindZeroMutations(t, req)
 }
 ```
