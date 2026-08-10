@@ -1,4 +1,4 @@
-# wrk --unwind — stack DAG, dry-run plan + apply peel/pin + display/add-all fidelity
+# wrk --unwind — stack DAG, dry-run plan + apply peel/pin + show-graph + display fidelity
 
 ## Version
 0.0.2
@@ -19,28 +19,62 @@ Decision tree for **stack unwind**:
   lies outside the current scope.
 - **Prior cycle (still open RED on apply):** multi-module pin selectivity;
   tidy go-stderr surfacing; pin Path on linked consumer.
-- **This cycle (Classic TDD):** **follow local filesystem replaces** into the
-  stack inventory via full **BFS fixpoint** over all Go modules under known
-  checkouts. Resolve `NewPath` relative to the **module directory**, map to
-  git checkout via **ShowToplevel**, skip intra-repo, emit `warning:` for
-  missing/non-git targets, add synthetic DAG edge **C→D** when follow adds D
-  from C. Dirty-only peel (v1) unchanged. Dry-run leaves under
-  `dry-run/follow-local-replace/` are the primary RED drivers.
+- **Follow local-replace (prior cycle):** BFS fixpoint over local filesystem
+  replaces into stack inventory; synthetic edges; missing-target `warning:`.
+- **Show-graph (prior cycle):** read-only `wrk --unwind --show-graph [--json]
+  [--color|--no-color]`. Repo DAG + dirty free-first peel + full stack module
+  DAG + summary. Human polish + reject/cycle/json under `show-graph/`. **Do not
+  rewrite sealed show-graph assert meaning** in this cycle.
+- **P1 (sealed):** **global free-module cascade plan** under
+  `wrk --unwind --dry-run --tag-next` — after existing **repo peel** plan lines,
+  free-first **module** cascade `would: tag-next` / `would: pin` from
+  `PlanUnwindCascade`. Dry-run only (zero mutations). Leaves under
+  `cascade/dry-run/` — do not rewrite sealed asserts unjustifiably.
+- **P2 (sealed GREEN):** **apply cascade core** (clean tree or `--add-all`) under
+  `wrk --unwind --tag-next` (not dry-run). After free-first **repo land prelude**,
+  global free-module cascade: tag **one scope** → pin consumers (**keep local
+  replace**; bump require) → selective commit when pin dirties → drop free; push
+  when a main has no remaining pending modules. **No TagNextAll on this path.**
+  Leaves under `cascade/apply/clean/` and `dirty-gomod/with-add-all/` sealed.
+- **P3 (partial edit):** when cascade must pin, **no `--add-all`**, and WT
+  go.mod/go.sum differ from Base (index else HEAD): save WIP → write Base → pin
+  + `go mod tidy` on Base → selective cascade commit → restore WIP + **surgical
+  require version bumps only** (no tidy on WT). On failure: restore WIP from
+  save, non-zero. **C-AP5** flipped from P2 hard Error to partial-edit
+  **success** (product intent D11). Leaves under `cascade/apply/partial-edit/`.
+- **This cycle (Classic TDD P4 — final ship gate):** prove original failure mode
+  fixed: **nested module previously “skip”** still requiring old dep → after
+  cascade, require matches new tag (**replace kept**) → **`--reinstall-local`**
+  without tidy / `unknown revision` failure. Leaves under
+  `cascade/apply/reinstall-local/`. Dry-run reinstall vocabulary remains sealed
+  **C-DR6**. Full cascade suite + full unwind suite must stay green; do not
+  break sealed 13 cascade leaves (P1–P3).
 
 **Layer:** **L2** — in-process CLI via `wrkcli.Capture` (`req.InProcess=true`).
 Fixture setup may use session-built `wrk` for `--new` / worktree materialization.
 Prefer pure cores: path display helper (statusDirLine policy), leave-N porcelain
-count, `PlanUnwind` / `FormatUnwindDryRun`, apply peel driver, inventory expand.
+count, `PlanUnwind` / `FormatUnwindDryRun`, **`PlanUnwindCascade`** + dry-run
+printer (P1), **apply cascade driver** (P2), **partial-edit pin path** (P3),
+**reinstall-local tail after cascade** (P4), **BuildUnwindGraphReport** /
+**FormatUnwindGraphHuman** / **FormatUnwindGraphJSON**, inventory expand.
 
-**Out of scope this cycle:** `--status` parity; opt-out flag; walking parent
-`external/` without a replace; module-path-only replaces as discovery seeds;
-implying land flags; global `--propagate-tags` as unwind default.
+**Out of scope this cycle (P4):** bare `--tag-next` multi-module cascade;
+propagate-tags redesign; show-graph feature work; redesign gen-commit-msg;
+per-repo cascade phases (global module graph only); softening sealed P1–P3
+asserts; L3 e2e.
 
 # DSN (Domain Specific Notion)
 
 - **wrk --unwind** — top-level primary mode. Compose with ship/land flags and
-  `--dry-run`, and the optional **reinstall-local tail**. Mutually exclusive with unrelated modes (`--list`, `--status`,
+  `--dry-run`, optional **reinstall-local tail**, or read-only **`--show-graph
+  [--json]`**. Mutually exclusive with unrelated modes (`--list`, `--status`,
   bare create, …). Event `command: "unwind"` when recorded (optional for leaves).
+- **Show-graph (read-only)** — `wrk --unwind --show-graph [--json]
+  [--color|--no-color]`. Collect stack inventory + repo DAG + PlanUnwind peel
+  order; scan full stack modules; print human graph (dir identity, collapsed
+  `→` edges, `replaced`, optional drift) or stable JSON. Rejects `--dry-run`
+  and apply partners; does **not** run ValidateUnwindFlags / ApplyUnwind; never
+  mutates.
 - **Stack** — inventory of checkouts for unwind:
   1. **Seed:** **primary** git toplevel (main or linked) plus **nested
      external** independent repos under that root (status-like
@@ -110,30 +144,35 @@ implying land flags; global `--propagate-tags` as unwind default.
   2. Linked WT + `--merge-back`/`--done` → land as today; already main → skip land.
   3. `--sync` / `--tag-next` / `--push` / `--reinstall-local` as flags;
      reinstall **soft** (P1).
-  4. After peeling **U** that has stack consumers: for each consumer **C**
-     depending on U, for each module of U that **C requires or replaces**
-     (module-path match — **not** a Cartesian product of every dep module dir
-     into every consumer module dir):
-     `Pin(…)` at **C's in-scope StackMember.Path** (the checkout discovered
-     in the current stack inventory — primary ShowToplevel and nested
-     externals). **Do not** rewrite the pin target to `C.MainRepo` when
-     Path is a linked/nested checkout and MainRepo is outside this scope.
-     When the scope primary *is* main, Path is main (in scope) and pin
-     **does** edit that path. **Do not** force-add a nested dep module path
-     the consumer never required/replaced. Then `go mod tidy` in those
-     consumer module dirs.
-  5. Prefer **per-module** versions from this peel's tag-next created tags
-     when available; do not invent a nested version from the root tag when
-     that nested scope was not tagged this peel (prefer skip / leave that
-     require alone). Else latest on main for modules that are actually pinned.
-     (Dep land/tag/push still use peeled dep **main** after merge — not changed
-     by this pin-path / pin-selectivity rule.)
-  6. `--done` removes worktree as usual.
+  4. **Legacy peel pin (pre-cascade / non-tag-next paths):** after peeling **U**
+     that has stack consumers: for each consumer **C** depending on U, for each
+     module of U that **C requires or replaces** (module-path match — **not**
+     Cartesian): `Pin(…)` at **C's in-scope Path**; tidy. Prefer per-module
+     versions from this peel's created tags.
+  5. **Global free-module cascade apply (P2, when `--tag-next`):** after free-first
+     **land prelude** for dirty linked repos, run `PlanUnwindCascade` order:
+     - Tag **one scope** only (not TagNextAll whole main).
+     - Pin each stack consumer that requires/replaces it: bump require; **keep
+       existing local replace** (do not drop replace).
+     - `go mod tidy` on consumer module dir (on Base for clean / `--add-all`).
+     - If pin dirtied go.mod/go.sum: selective commit
+       `wrk: cascade pin <mod> @ <ver>` (stage those files; with `--add-all` may
+       add more).
+     - Drop module from pending; push each main when it has no remaining pending
+       cascade modules (if `--push`).
+     - **Commit-before-tag:** a module free only after receiving pins is tagged
+       only after its cascade pin commits are on history.
+     - **Dirty go.mod/go.sum without `--add-all` (P3 partial edit):** save WT
+       go.mod/go.sum → write Base → pin+tidy on Base → selective commit
+       (Base+pin+tidy, no WIP) → restore WT + surgical require bumps only. On
+       failure restore save and exit non-zero. Ordinary WIP is **not** hard Error.
+  6. `--done` removes worktree as usual (land prelude).
   7. Fail-fast on hard errors (land/tag/push/pin/tidy); reinstall soft.
      On tidy failure: error must include **trimmed go child stderr** (concrete
      diagnostic such as `unknown revision` / missing proxy file / module path),
      not only `exit status 1`. Quiet success without `-v` (no spam on OK tidy).
-  8. Apply banner: `==== unwind: peel <display-path> ====` (same display as dry-run).
+  8. Apply banner: `==== unwind: peel <display-path> ====` (same display as dry-run)
+     for land/peel prelude when printed.
   9. Pin log: basename short form; one line per **real** pin (no cartesian spam
      for non-matching modules).
 - **Dry-run stdout vocabulary (locked)**  
@@ -147,24 +186,63 @@ implying land flags; global `--propagate-tags` as unwind default.
     - if **no `--add-all`** and peel has **N>0** not-fully-staged porcelain
       paths (unstaged + untracked):  
       `  would: leave N file(s) uncommitted (use --add-all if necessary)`  
-      (singular `file` / plural `files`); then generate/commit line.  
+      (singular `file` / plural `files`); then generate/commit plan language.  
     - if no `--add-all` and fully staged only: **no** leave-N line; still
       generate/commit plan language when gen-commit is set.
-  - Optional ship lines under peel: merge-back / sync / tag / push / pin as flags.
-  - Tail: `would: reinstall local binaries` when `--reinstall-local`.
-  - Trailing newline on plan; exit **0**; **zero mutations**.
+  - Optional ship lines under peel: merge-back / sync / tag / push / pin as flags
+    (legacy under-peel vocabulary may still print `  would: create release tag`
+    / `  would: pin stack consumers` — **distinct** from cascade module lines).
+  - **Global free-module cascade (P1, only when `--tag-next`)** — after **all**
+    peel lines (and their under-peel ship lines), emit free-first cascade steps
+    from the **stack module DAG** (same inventory / edges as show-graph; Kahn
+    free-first on module edges where **From depends on To**):
+    - Pending modules = owned-changed ∪ modules that require a pending stack
+      module ∪ modules with require-drift vs stack latest.
+    - Exclude tagscope forever-skip / **testdata** scopes from **`would: tag-next`**
+      lines (scan already prunes `testdata/` go.mod; tagscope path scopes under
+      `testdata/` must also never appear as cascade tags).
+    - Tag line (top-level, no indent):  
+      `would: tag-next <module-path> @ <next-tag>`  
+      (`module-path` = Go module path; `next-tag` = tagscope planned full tag,
+      e.g. `v0.0.2` or `pkgs/shared/v0.0.2`).
+    - Pin line (top-level):  
+      `would: pin <consumer-module-path> <- <dep-module-path> @ <ver>`  
+      when a consumer must pin a dep that was / would be tagged earlier in the
+      cascade (keep-local-replace is apply-time; dry-run still shows pin).
+    - Free-first order: **leaf/dep module before consumer module** across the
+      **global** graph (not per-repo cascade sections).
+    - Without `--tag-next`: **no** cascade `would: tag-next` / cascade pin lines
+      (`would: pin … <- … @ …`). Status-quo peel-only (+ reinstall tail).
+    - Cycle reject: still `cycle` error; **no** successful cascade body
+      (no ordered multi-step `would: tag-next` plan).
+  - Tail: `would: reinstall local binaries` when `--reinstall-local` (after peels
+    and cascade when both present).
+  - Trailing newline on plan; exit **0**; **zero mutations** on dry-run.
 - **Apply asserts** — side effects over multi-stage stdout. Prefer: tags on
   leaf main / bare origin, consumer **Path** `go.mod` require version (and
   separate consumer **MainRepo** `go.mod` baseline when Path ≠ MainRepo),
   worktree presence/absence, main HEAD advanced, zero mutation on cycle reject,
   banner display path, staging honor for `--add-all`.
+- **Show-graph output (locked structure)**  
+  - Human banners: `==== unwind graph (repo) ====`, `==== unwind graph (module) ====`,
+    `==== status summary ====`.  
+  - Repo: all stack members (dirty + clean); peel order = dirty free-first only
+    (`(none)` when empty); display paths via peelDisplayPath policy.  
+  - Module: all go.mod under stack; require/replace edges among stack modules.  
+  - Summary counts + optional `hint: apply would need …` (not an error).  
+  - `--json`: snake_case keys `repos` / `modules` / `summary` / `warnings`;
+    `repos.peel_order` array; no ANSI.
 - **Error surfaces**  
-  - Cycle: combined stderr/stdout contains `cycle`; exit ≠ 0; no mutations.  
-  - Missing pin flags when edges exist: names `--tag-next` and `--push`; exit ≠ 0.
+  - Cycle: combined stderr/stdout contains `cycle`; exit ≠ 0; no mutations;
+    show-graph must not print a successful graph body.  
+  - Missing pin flags when edges exist (dry-run/apply only): names `--tag-next`
+    and `--push`; exit ≠ 0. Show-graph does **not** require those flags.  
+  - Show-graph + `--dry-run` / apply partner: Error mentions `--show-graph` and
+    the partner flag; exit ≠ 0.  
   - Tidy fail: mentions `go mod tidy` (and consumer path); **includes go child
     diagnostic body** (not only `exit status 1`).
-  - Missing / non-git local-replace target: **`warning:`** on stderr; plan
-    continues; exit 0 when otherwise OK (not a hard fail).
+  - Missing / non-git local-replace target: **`warning:`** on stderr; plan or
+    show-graph continues; exit 0 when otherwise OK (not a hard fail).
 - **Local remotes / offline tidy** — apply leaves attach **local bare** origins
   for `--push` (no network). Pin+tidy leaves may set `GOPROXY=file://…` via
   `req.ExtraEnv` and seed `{WorkRoot}/modproxy`. Multi-module pin leaves seed
@@ -208,19 +286,85 @@ unwind/
 │   ├── tidy-error-surfaces-go-stderr/    # tidy fail must include go child diagnostic
 │   ├── already-main-no-land/             # single main; tag-next+push; no land
 │   └── done-removes-leaf-wt/             # --done peels leaf; external path gone
-└── cycle/
-    ├── two-cycle/                        # dry-run cycle reject
-    └── apply-two-cycle/                  # apply-mode cycle still pre-mutation
+├── cycle/
+│   ├── two-cycle/                        # dry-run cycle reject
+│   └── apply-two-cycle/                  # apply-mode cycle still pre-mutation
+├── cascade/                              # free-module cascade (P1–P3 sealed; P4 reinstall)
+│   ├── dry-run/                          # P1 sealed plan vocabulary (6 leaves)
+│   │   ├── with-tag-next/                # cascade section emitted
+│   │   │   ├── single-repo-two-modules/  # C-DR1: free-first tag leaf → pin root
+│   │   │   ├── multi-repo-free-first/    # C-DR2: peel + module free-first across stack
+│   │   │   ├── skip-testdata-scope/      # C-DR4: no tag-next for testdata scopes
+│   │   │   └── reinstall-local-tail/     # C-DR6: cascade + reinstall tail; zero mut
+│   │   ├── without-tag-next/             # C-DR3: peel-only; no cascade tag/pin
+│   │   │   └── peel-only-no-cascade/
+│   │   └── cycle/                        # C-DR5: cycle reject; no cascade body
+│   │       └── two-cycle-no-cascade/
+│   └── apply/                            # P2 clean; P3 partial-edit; P4 reinstall
+│       ├── clean/
+│       │   ├── single-repo-two-modules/  # C-AP1+3+4: tag/pin/commit-before-tag/keep-replace
+│       │   └── multi-repo-free-first/    # C-AP2: free-first across repos + pin commit
+│       ├── dirty-gomod/
+│       │   ├── without-add-all/          # C-AP5 / P3-1: partial-edit success + WIP preserve
+│       │   └── with-add-all/             # C-AP6 / P3-5: --add-all → succeed (no partial)
+│       ├── partial-edit/                 # P3 variants (no --add-all)
+│       │   ├── unrelated-wip-file/       # P3-2: only go.mod/go.sum in pin commit
+│       │   ├── sequential-two-pins/      # P3-3: two pins same consumer; both bumps
+│       │   └── tidy-fail-restores/       # P3-4: tidy fail → exact WIP restore
+│       └── reinstall-local/              # P4: cascade + reinstall-local ship gate
+│           ├── nested-skip-consumer/     # C-RI1: nested skip pin + reinstall success
+│           └── multi-repo/               # C-RI2: multi-repo cascade + reinstall tail
+└── show-graph/                           # read-only repo+module graph
+    ├── reject/                           # mutual exclusion with dry-run / apply partners
+    │   ├── with-dry-run/
+    │   ├── with-tag-next/
+    │   ├── with-done/
+    │   ├── with-merge-back/
+    │   ├── with-reinstall-local/
+    │   └── with-gen-commit-msg/
+    ├── cycle/
+    │   └── two-cycle/                    # show-graph cycle reject (no success body)
+    └── success/                          # acyclic → graph printed; exit 0; zero mutations
+        ├── human/                        # polished human format (dir / → / replaced)
+        │   ├── single-repo/
+        │   │   ├── clean-peel-none/      # clean main; peel (none); dir .
+        │   │   └── dirty-peel-dot/       # dirty main; peel .; dir identity
+        │   ├── multi-repo/
+        │   │   ├── free-first-order/     # 3 dirty free-first + modules @
+        │   │   ├── clean-leaf-listed/    # clean leaf in nodes; not in peel
+        │   │   ├── require-edges/        # collapsed require edges + modules @
+        │   │   └── apply-hint/           # hint: apply would need land/pin flags
+        │   ├── module/
+        │   │   ├── replace-edge/         # replaced (not replace =>); multi-repo keys
+        │   │   ├── nested-module-listed/ # dirs . + pkgs/shared; collapsed replaced
+        │   │   └── require-drift/        # (latest …) when require ≠ dep latest
+        │   ├── tagscope/
+        │   │   └── latest-and-next/      # latest + next / owned-changed on dir .
+        │   ├── inventory-warn/
+        │   │   └── missing-replace-target/  # warning: + graph + exit 0
+        │   └── color/
+        │       ├── force-color/          # --color → ANSI on stdout
+        │       └── no-color/             # --no-color → plain stdout
+        └── json/
+            ├── shape-keys/               # repos/modules/summary/warnings + peel_order
+            └── free-first-peel-order/    # peel_order free-first array
 ```
 
 Split factor (MECE, significance-first):
 
-1. **Mode** — dry-run plan | apply mutation | cycle preflight.
+1. **Mode** — dry-run plan | apply mutation | cycle preflight | **cascade** |
+   **show-graph**.
 2. Within dry-run: **order/skip/flags** | **gen-commit staging vocabulary** |
    **follow-local-replace inventory expansion**.
-3. Within apply: **pin target Path** | **pin module selectivity (multi-mod)** |
+3. Within **cascade**: **dry-run vs apply** → (dry-run) `--tag-next`/cycle/shape;
+   (apply) **go.mod dirt policy** (clean | dirty+`--add-all` | partial-edit without
+   add-all) **or reinstall-local** integration → shape / multi-pin / fail-restore /
+   nested-skip reinstall.
+4. Within apply (non-cascade): **pin target Path** | **pin module selectivity** |
    **tidy error surfacing** | **already-main no land** | **done removes WT**.
-4. Cycle: dry-run vs apply-mode (same reject, no mutations).
+5. Cycle (repo): dry-run vs apply-mode (same reject, no mutations).
+6. Within **show-graph**: **outcome** (reject | cycle | success) → stack shape /
+   graph content → format (human | json).
 
 ## Test Case Index
 
@@ -249,12 +393,64 @@ Split factor (MECE, significance-first):
 | A2 | apply/already-main-no-land | single main dirty + tag-next+push; no land | **GREEN** |
 | A3 | apply/done-removes-leaf-wt | `--done` peels leaf; external path gone; pin on root Path (main) | **GREEN** |
 | C2 | cycle/apply-two-cycle | A↔B apply-mode; cycle error before mutation | **GREEN** |
+| G1 | show-graph/reject/with-dry-run | `--show-graph --dry-run` mutual exclusion | **RED** until show-graph |
+| G2 | show-graph/reject/with-tag-next | exclusive with `--tag-next` | **RED** |
+| G3 | show-graph/reject/with-done | exclusive with `--done` | **RED** |
+| G4 | show-graph/reject/with-merge-back | exclusive with `--merge-back` | **RED** |
+| G5 | show-graph/reject/with-reinstall-local | exclusive with `--reinstall-local` | **RED** |
+| G6 | show-graph/reject/with-gen-commit-msg | exclusive with `--gen-commit-msg` | **RED** |
+| G7 | show-graph/cycle/two-cycle | cycle → non-zero; no success graph body | **RED** |
+| G8 | show-graph/success/human/single-repo/clean-peel-none | clean main; peel (none); **dir** `.` identity | **RED** (human polish) |
+| G9 | show-graph/success/human/single-repo/dirty-peel-dot | dirty main; peel `.`; dir identity | **RED** |
+| G10 | show-graph/success/human/multi-repo/free-first-order | free-first + `modules @` grouping | **RED** |
+| G11 | show-graph/success/human/multi-repo/clean-leaf-listed | clean leaf listed; not in peel | **RED** |
+| G12 | show-graph/success/human/multi-repo/require-edges | collapsed `→` require + modules @ | **RED** |
+| G13 | show-graph/success/human/multi-repo/apply-hint | hint names land/pin flags (not error) | soft/GREEN-ok |
+| G14 | show-graph/success/human/module/replace-edge | **`replaced`** not `replace =>`; multi-repo keys | **RED** |
+| G15 | show-graph/success/human/module/nested-module-listed | dirs + collapsed `→` + `replaced` | **RED** |
+| G15b | show-graph/success/human/module/require-drift | `(latest …)` require-drift | **RED** |
+| G16 | show-graph/success/human/tagscope/latest-and-next | latest + next on dir `.` | **RED** |
+| G17 | show-graph/success/human/inventory-warn/missing-replace-target | warning: + graph + exit 0 | soft/GREEN-ok |
+| G18 | show-graph/success/json/shape-keys | JSON keys repos/modules/summary/warnings | **GREEN** |
+| G19 | show-graph/success/json/free-first-peel-order | peel_order free-first array | **GREEN** |
+| G20 | show-graph/success/human/color/force-color | `--color` → ANSI on stdout | **RED** |
+| G21 | show-graph/success/human/color/no-color | `--no-color` → plain / flag accepted | **RED** until flag |
+| C-DR1 | cascade/dry-run/with-tag-next/single-repo-two-modules | single-repo root→shared; free-first tag shared then pin root; peel `.`; zero mut | **GREEN** (P1 sealed) |
+| C-DR2 | cascade/dry-run/with-tag-next/multi-repo-free-first | multi-repo both dirty; peel free-first **and** module cascade leaf before consumer | **GREEN** (P1 sealed) |
+| C-DR3 | cascade/dry-run/without-tag-next/peel-only-no-cascade | no `--tag-next` → peel-only; no cascade tag/pin lines | **GREEN** |
+| C-DR4 | cascade/dry-run/with-tag-next/skip-testdata-scope | real free module tag-next present; **no** tag-next for testdata scopes | **GREEN** (P1 sealed) |
+| C-DR5 | cascade/dry-run/cycle/two-cycle-no-cascade | cycle → non-zero `cycle`; no successful cascade body | **GREEN** |
+| C-DR6 | cascade/dry-run/with-tag-next/reinstall-local-tail | tag-next cascade + `would: reinstall local binaries` tail; zero mut | **GREEN** (P1 sealed) |
+| C-AP1 | cascade/apply/clean/single-repo-two-modules | clean Base; tag shared; pin root keep-replace; pin commit; root tag after pin; push | **GREEN** (P2 sealed) |
+| C-AP2 | cascade/apply/clean/multi-repo-free-first | multi-repo free-first land + cascade; leaf tagged/pushed; root pin commit | **GREEN** (P2 sealed) |
+| C-AP5 | cascade/apply/dirty-gomod/without-add-all | **P3-1:** dirty go.mod WIP, no `--add-all` → partial-edit success; WIP preserve + pin commit Base-only | **RED** until partial edit (justified flip from P2 Error) |
+| C-AP6 | cascade/apply/dirty-gomod/with-add-all | **P3-5:** dirty go.mod + `--add-all` → cascade success (no partial restore) | **GREEN** (P2 sealed / regression) |
+| P3-2 | cascade/apply/partial-edit/unrelated-wip-file | dirty go.mod + unrelated WIP file; pin commit only go.mod/go.sum; file stays untracked | **RED** / may GREEN after P3 |
+| P3-3 | cascade/apply/partial-edit/sequential-two-pins | two free modules pin same dirty consumer; both bumps on WT + commits | **RED** / may GREEN after P3 |
+| P3-4 | cascade/apply/partial-edit/tidy-fail-restores | tidy fail mid partial-edit → exact WIP restore; non-zero | **RED** / may GREEN after P3 |
+| C-RI1 | cascade/apply/reinstall-local/nested-skip-consumer | nested skip consumer old require+replace; cascade pin + `--reinstall-local`; no tidy/unknown revision | **RED** if nested reinstall still fails; **GREEN** backfill OK after P2/P3 |
+| C-RI2 | cascade/apply/reinstall-local/multi-repo | multi-repo free-first cascade + reinstall-local tail; exit 0; no tidy/unknown revision | mixed / often **GREEN** after P2 |
+| C-RI3 | *(covered)* | dry-run reinstall vocabulary = **C-DR6** sealed; C-RI1 soft-checks apply pin/tag-next log | no new leaf |
+
+### C-AP5 sealed-test modification (P3 justification)
+
+P2 C-AP5 expected **hard Error** for dirty go.mod without `--add-all`. Product
+intent **D11** (P3): ordinary WIP uses **partial edit success**, not hard fail.
+Orchestrator pre-approved rewriting C-AP5 ASSERT to success + WIP preserve.
+Do not silently flip other sealed P2 leaves.
 
 ## How to Run
 
 ```sh
 doctest vet ./cmd/wrk/tests/unwind
+doctest vet ./cmd/wrk/tests/unwind/show-graph
 doctest test -count=1 ./cmd/wrk/tests/unwind
+doctest test -count=1 ./cmd/wrk/tests/unwind/cascade
+doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/apply
+doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/apply/reinstall-local
+doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/apply/partial-edit
+doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/apply/dirty-gomod/without-add-all
+doctest test -count=1 ./cmd/wrk/tests/unwind/show-graph
 doctest test -count=1 ./cmd/wrk/tests/unwind/dry-run/follow-local-replace
 doctest test -count=1 ./cmd/wrk/tests/unwind/dry-run/free-first-order
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/multi-module-pin-require-root-only
@@ -263,10 +459,12 @@ doctest test -count=1 ./cmd/wrk/tests/unwind/apply/pin-on-linked-consumer-not-ma
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/leaf-then-pin
 ```
 
-Expected **RED** this cycle on **F1, F2, F6, F7, F8** (follow expansion / warning /
-toplevel map) until implementer lands. **F3, F5** and **D1/F4** free-first
-regression stay **GREEN** (or report unexpected RED). Prior apply RED (**A4–A6**)
-unchanged. Other prior leaves stay **GREEN**.
+Expected this cycle (**P4**): new **C-RI1** / **C-RI2** reinstall leaves under
+`cascade/apply/reinstall-local/` — Classic **RED** if nested reinstall still
+fails; mixed **GREEN** OK if P2/P3 already fixed the path (coverage backfill).
+**GREEN** regression: sealed 13 cascade leaves (P1 dry-run 6 + P2/P3 apply 7),
+full `cmd/wrk/tests/unwind`. Do not rewrite sealed dry-run / clean / partial-edit
+asserts.
 
 ```go
 import (

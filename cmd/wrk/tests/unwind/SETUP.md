@@ -1,6 +1,6 @@
 # Scenario
 
-**Feature**: wrk --unwind dry-run + apply peel/pin over checkout stack DAG
+**Feature**: wrk --unwind dry-run + apply peel/pin + show-graph over checkout stack DAG
 
 ```
 # isolated WRK_HOME + multi-repo stack under consumer checkout
@@ -9,11 +9,16 @@ stack (primary + nested external/* + BFS local-filesystem replace follow) + edge
   -> cycle? Error mentioning cycle (no mutations)
   -> missing pin flags with edges? Error naming --tag-next/--push
   -> else would: peel <display-path>… free-first among dirty pending
+  -> --tag-next dry-run: global free-module cascade would: tag-next / would: pin (P1)
+  -> --tag-next apply: land prelude + cascade tag/pin/commit/push (P2; no TagNextAll)
+  -> dirty go.mod without --add-all: partial edit save/Base pin/restore+surgical (P3)
   -> gen-commit: would: git add -A and/or leave-N as flags/porcelain
   -> apply (no --dry-run): peel free-first + pin at in-scope Path (not MainRepo remap)
   -> multi-mod dep: pin only modules C requires/replaces; tidy errors include go stderr
   -> follow-local-replace: sibling/out-of-tree + transitive + missing-target warning
+  -> show-graph [--json]: read-only repo+module graph; reject dry-run/apply partners
 ```
+
 
 ## Preconditions
 

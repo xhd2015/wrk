@@ -46,9 +46,17 @@ type UnwindFlags struct {
 	MergeBack      bool
 	ReinstallLocal bool
 	Color          bool
+	NoColor        bool // --no-color: force plain stdout (mutually exclusive with Color)
 	Sync           bool
 	GenCommitMsg   bool
 	GenCommitArgs  []string
+	// AddAll stages all changes when cascade pin commits (and gen-commit when set).
+	// Top-level --add-all is accepted with --unwind without requiring --commit.
+	AddAll bool
+	// ShowGraph is the read-only inspect path (--unwind --show-graph).
+	ShowGraph bool
+	// JSON requests machine-readable show-graph output (only with ShowGraph).
+	JSON bool
 }
 
 // UnwindPlan is the free-first peel plan for dirty pending stack members.
@@ -643,6 +651,13 @@ func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string,
 			b.WriteString("  would: pin stack consumers\n")
 		}
 	}
+	// Global free-module cascade after peels (only when --tag-next).
+	// Errors are soft: peel plan still prints; empty cascade on failure.
+	if f.TagNext && len(members) > 0 {
+		if cascade, err := PlanUnwindCascade(members); err == nil {
+			b.WriteString(formatUnwindCascadeDryRun(cascade))
+		}
+	}
 	if f.ReinstallLocal {
 		b.WriteString("would: reinstall local binaries\n")
 	}
@@ -688,7 +703,19 @@ func countNotFullyStagedPaths(repoPath string) (int, error) {
 
 // runUnwind implements wrk --unwind [flags]. Dry-run prints the free-first plan;
 // apply peels free-first with explicit ship/land flags and pins consumers.
+// --show-graph is a read-only early path (no ValidateUnwindFlags / ApplyUnwind).
 func runUnwind(workDir string, flags UnwindFlags) error {
+	if flags.ShowGraph {
+		if flags.Color && flags.NoColor {
+			return fmt.Errorf("wrk: --color and --no-color are mutually exclusive")
+		}
+		// JSON never colors; human uses three-mode stdout policy.
+		colorOn := false
+		if !flags.JSON {
+			colorOn = resolveStdoutColor(flags.Color, flags.NoColor)
+		}
+		return runUnwindShowGraph(workDir, flags.JSON, colorOn)
+	}
 	wrkHome, err := resolveWrkHome()
 	if err != nil {
 		return err
@@ -725,17 +752,18 @@ func runUnwind(workDir string, flags UnwindFlags) error {
 	return ApplyUnwind(workDir, wrkHome, members, edges, plan, flags)
 }
 
-// ApplyUnwind peels free-first dirty stack repos with explicit ship/land flags,
-// then pins stack consumers of each peeled dep to the new (or latest) tags.
+// ApplyUnwind peels free-first dirty stack repos with explicit ship/land flags.
+// With --tag-next: land prelude then global free-module cascade (one-scope tags,
+// keep-local-replace pins, selective cascade pin commits, push when main clears).
+// Without --tag-next: land peels and legacy pinConsumersOfPeeled (latest tags).
 // Preflight (cycle + flags) must already have passed; this mutates.
 func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdge, plan *UnwindPlan, flags UnwindFlags) error {
-	_ = workDir
 	if plan == nil {
 		return nil
 	}
 	byLabel := pickPeelMembersByLabel(members)
-	// Reinstall is a tail stage: collect each peeled main repository in the
-	// deterministic free-first order, then run it only after every peel and pin
+	// Reinstall is a tail stage: collect each peeled/cascade main repository in
+	// deterministic free-first order, then run only after every peel and cascade
 	// succeeds. This avoids rebuilding from intermediate stack states.
 	reinstallMainPaths := make([]string, 0, len(plan.PeelOrder))
 	seenReinstallMainPath := make(map[string]struct{}, len(plan.PeelOrder))
@@ -751,6 +779,7 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		reinstallMainPaths = append(reinstallMainPaths, path)
 	}
 
+	// Land prelude (and legacy full peel when not --tag-next).
 	for i, label := range plan.PeelOrder {
 		m, ok := byLabel[label]
 		if !ok {
@@ -768,7 +797,7 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		}
 
 		// Linked worktree: land with --done (remove) or --merge-back (keep).
-		// Already-main: skip land; ship tag/push against main checkout.
+		// Already-main: skip land; ship/cascade against main checkout.
 		if m.Linked {
 			if !flags.Done && !flags.MergeBack {
 				return fmt.Errorf("wrk: --unwind for linked worktrees requires --done or --merge-back")
@@ -782,7 +811,7 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 					// Empty index without --add-all: AI gen-commit has nothing
 					// to work on. Soft-skip and let auto-commit / land handle
 					// remaining dirt (fixtures with only untracked dirt).
-					if genArgsHasFlag(flags.GenCommitArgs, "--add-all") || !isNoStagedGenCommitErr(err) {
+					if genArgsHasFlag(flags.GenCommitArgs, "--add-all") || flags.AddAll || !isNoStagedGenCommitErr(err) {
 						return err
 					}
 					if err := autoCommitIfDirty(m.Path); err != nil {
@@ -828,31 +857,29 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 			}
 		}
 
-		var createdTags []string
-		if flags.TagNext {
-			if err := requireMainActiveRoot(mainPath, "--tag-next"); err != nil {
+		// With --tag-next: land prelude only; tag/pin/push are global cascade.
+		if !flags.TagNext {
+			// Legacy: optional push without tag-next, pin consumers to latest.
+			if flags.Push {
+				fmt.Println()
+				if err := runPushMain(mainPath, false, flags.Force, nil); err != nil {
+					return err
+				}
+			}
+			if err := pinConsumersOfPeeled(label, mainPath, nil, members, edges); err != nil {
 				return err
 			}
-			fmt.Println()
-			tagRes, err := runTagNextAtResult(mainPath, "HEAD", false, false, false)
-			if err != nil {
-				return err
-			}
-			createdTags = tagRes.Tags
-		}
-		if flags.Push {
-			fmt.Println()
-			// Publish branch + tags created by this peel's tag-next (if any).
-			if err := runPushMain(mainPath, false, flags.Force, createdTags); err != nil {
-				return err
-			}
-		}
-
-		// After peeling U: Pin every stack consumer that depends on U, then tidy.
-		if err := pinConsumersOfPeeled(label, mainPath, createdTags, members, edges); err != nil {
-			return err
 		}
 		addReinstallMainPath(mainPath)
+	}
+
+	if flags.TagNext {
+		// Linked paths may be removed by --done; remap to MainRepo so cascade
+		// graph/scan and tagscope plan against landed mains.
+		cascadeMembers := refreshStackMembersAfterLand(members)
+		if err := applyUnwindCascade(cascadeMembers, flags, addReinstallMainPath); err != nil {
+			return err
+		}
 	}
 
 	if flags.ReinstallLocal {

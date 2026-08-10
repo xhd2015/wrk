@@ -69,3 +69,27 @@ func colorDiagnosticPrefix(msg, prefix, code string) string {
 	}
 	return msg
 }
+
+// paint wraps s with ANSI code when on is true; otherwise returns s unchanged.
+func paint(s, code string, on bool) string {
+	if !on || s == "" {
+		return s
+	}
+	return colorize(s, code)
+}
+
+// resolveStdoutColor is the go-best-practice three-mode policy for stdout:
+// --no-color always off; --color always on; else TTY + empty NO_COLOR.
+// Callers must reject both --color and --no-color before calling.
+func resolveStdoutColor(forceColor, noColor bool) bool {
+	if noColor {
+		return false
+	}
+	if forceColor {
+		return true
+	}
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
