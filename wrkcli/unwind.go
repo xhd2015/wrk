@@ -880,6 +880,15 @@ func applyUnwindPeelOne(
 			return fmt.Errorf("wrk: --unwind for linked worktrees requires --done or --merge-back")
 		}
 		if flags.GenCommitMsg {
+			// B1 freeHost hole: same-label free+consumer peels early, so global
+			// cascade pin has not run yet. Pin ready droppable external stack
+			// replaces on this checkout first (separate pin auto-commit), then
+			// feature gen-commit sees go.mod without external replace (D7).
+			if flags.TagNext {
+				if err := pinReadyExternalReplacesBeforeGenCommit(m.Path, members, flags, stats); err != nil {
+					return err
+				}
+			}
 			fmt.Println("---- generate commit message ----")
 			// Stage only when --add-all is in GenCommitArgs (library honors
 			// it). Do not unconditional git add -A before gen-commit so

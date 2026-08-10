@@ -29,8 +29,10 @@ dirty consumer (+ optional dirty free) + external replace
 
 1. Grouping provides B1 apply seeders, fake-opencode install, no-local-replace
    pre-commit hook, and pin-before-feature history asserts.
-2. Leaves split on free dep dirt: clean replace-only (T1) vs free dirty +
-   consumer gen-commit (T2).
+2. Leaves split on free-host shape:
+   - T1: pure multi-repo clean external replace-only
+   - T2: free dirty external then consumer gen-commit
+   - T-M1: **monorepo freeHost** (intra owned-changed) + clean external replace
 
 ## Context
 
@@ -39,8 +41,10 @@ dirty consumer (+ optional dirty free) + external replace
 - Classic TDD: leaves are **RED** until product reorders pin before consumer
   feature gen-commit (today peels all then cascade; gen-commit hits hook while
   replace still present).
+- **T-M1 hole:** same-label freeHost (intra free pin dep) blocks pure consumer
+  deferral, so ready external pins never run before freeHost feature gen-commit.
 - Do not rewrite sealed ASSERT contracts under `clean/`, `dirty-gomod/`,
-  `partial-edit/`, `reinstall-local/`.
+  `partial-edit/`, `reinstall-local/`, or sealed T1/T2 leaves.
 
 ```go
 import (
@@ -225,16 +229,23 @@ func cascadeUnwindGenCommitArgs(t *testing.T, req *Request, stages ...string) []
 	return append(args, stages...)
 }
 
-// dirtyCascadeFeatureWIP writes uncommitted FEATURE_WIP.md under checkout.
+// dirtyCascadeFeatureWIP writes FEATURE_WIP.md and stages it (git add).
+// Staging reproduces the real-world pin scoop bug: a pre-staged feature index
+// must not land in the cascade pin commit (only go.mod/go.sum).
 func dirtyCascadeFeatureWIP(t *testing.T, checkout string) {
 	t.Helper()
 	if checkout == "" {
 		t.Fatal("dirtyCascadeFeatureWIP: empty checkout")
 	}
 	writeFile(t, filepath.Join(checkout, cascadeFeatureWIPFile), cascadeFeatureWIPBody)
+	runGitIsolated(t, checkout, "add", "--", cascadeFeatureWIPFile)
 	status := gitOutputIsolated(t, checkout, "status", "--porcelain", "--", cascadeFeatureWIPFile)
 	if strings.TrimSpace(status) == "" {
 		t.Fatal("expected uncommitted feature WIP after dirtyCascadeFeatureWIP")
+	}
+	// porcelain "A  FEATURE_WIP.md" = staged new file (index scoop repro).
+	if !strings.HasPrefix(strings.TrimSpace(status), "A") {
+		t.Fatalf("expected staged feature WIP (A…); porcelain=%q", status)
 	}
 }
 
@@ -438,6 +449,218 @@ func setupApplyPinBeforeFeatureFreeDirty(t *testing.T, req *Request) {
 	setPeelOrderDisplays(t, req, leafExt, wtDir)
 }
 
+// setupApplyPinBeforeFeatureMonorepoFreeHostExternal is T-M1 fixture:
+//
+//	One dirty **linked monorepo** (primary peel `.`):
+//	  - root requires cascadeSharedModule @ v0.0.1 + example.com/dot-pkgs @ v0.0.1
+//	  - intra replace shared => ./pkgs/shared (keep-local; not droppable)
+//	  - pkgs/shared owned-changed after pkgs/shared/v0.0.1 → freeHost same label
+//	  - droppable external replace => ./external/… for clean free leaf @ v0.0.1
+//	  - uncommitted FEATURE_WIP.md for gen-commit
+//	Clean external free leaf under external/ at tag v0.0.1 (no owned-changed)
+//	pre-commit: no external local replace (hook sim; ./pkgs/… allowed)
+//	modproxy: v0.0.1 for pin+tidy after drop external replace
+//
+// freeHost (intra free pin dep) + pinConsumer (external pin) share monorepo label
+// → B1 keeps peel early; pure consumer deferral never pins external first.
+// Expected external pin version = v0.0.1 (D3 keep-current; ready free).
+func setupApplyPinBeforeFeatureMonorepoFreeHostExternal(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyOldTag // D3 keep-current on ready external
+
+	// --- clean external free leaf main: baseline tag only ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	installCascadePermissivePreCommit(t, leafMain)
+
+	// --- monorepo main: root + pkgs/shared + require external ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+
+	sharedDir := filepath.Join(rootMain, filepath.FromSlash(cascadeSharedDir))
+	mkdirAll(t, sharedDir)
+	writeGoModRequire(t, sharedDir, cascadeSharedModule)
+	writeFile(t, filepath.Join(sharedDir, "shared.go"),
+		"package shared\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+
+	// Root requires both intra free + external free @ matching baseline.
+	writeGoModRequire(t, rootMain, unwindRootModule,
+		cascadeSharedModule+"@"+unwindApplyOldTag,
+		unwindDotPkgsModule+"@"+unwindApplyOldTag,
+	)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport (\n\t_ \""+cascadeSharedModule+"\"\n\t_ \""+unwindDotPkgsModule+"\"\n)\n")
+	// Intra keep-local replace (must survive; hook allows ./pkgs/…).
+	appendLocalReplace(t, rootMain, cascadeSharedModule, "./"+cascadeSharedDir)
+
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go", "pkgs")
+	runGitIsolated(t, rootMain, "commit", "-m", "root + shared + require external")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "HEAD")
+	createLightweightTag(t, rootMain, cascadeSharedOldTag, "HEAD")
+
+	// Owned change on shared only → freeHost same monorepo label (cascade tag + pin).
+	writeFile(t, filepath.Join(sharedDir, "shared.go"),
+		"package shared\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, rootMain, "add", "pkgs")
+	runGitIsolated(t, rootMain, "commit", "-m", "shared owned change for freeHost")
+
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	// Linked monorepo = stack primary (gen-commit only runs for linked peels).
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	// Nest clean external free under consumer WT/external.
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate()+"-leaf", leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+	// Leave external free clean (no markDirty; HEAD at v0.0.1).
+
+	relReplace := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, "./"+relReplace)
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	runGitIsolated(t, wtDir, "add", "go.mod", ".gitignore")
+	runGitIsolated(t, wtDir, "commit", "-m", "external stack replace + ignore")
+
+	// Feature WIP for monorepo freeHost gen-commit (external replace committed).
+	dirtyCascadeFeatureWIP(t, wtDir)
+	markDirty(t, wtDir)
+
+	// Hook: fail gen-commit while external replace remains (T-M1 RED surface).
+	// Intra ./pkgs/shared is allowed by cascadeNoLocalReplacePreCommit.
+	installCascadeNoLocalReplacePreCommit(t, wtDir)
+
+	// Offline proxy for pin+tidy after drop external replace @ current require.
+	seedDotPkgsProxyVersions(t, req, map[string]string{
+		unwindApplyOldTag: "", // synthetic seed
+	})
+
+	req.RepoDir = wtDir
+	req.PeelOrder = []string{"."}
+}
+
+// pinCommitSHAForDep returns the newest cascade pin commit SHA whose subject
+// mentions depModule (empty if none). Prefer this over pinCommitSHA when the
+// monorepo may also pin intra free modules after the ready-external pin.
+func pinCommitSHAForDep(t *testing.T, repo, depModule string) string {
+	t.Helper()
+	if repo == "" || depModule == "" {
+		return ""
+	}
+	needle := cascadePinCommitPrefix + depModule
+	return strings.TrimSpace(gitOutputIsolated(t, repo, "log", "-1", "--format=%H", "--grep", needle))
+}
+
+// assertPinCommitForDepFilesOnlyModSum fails if the dep's pin commit touches
+// paths other than go.mod/go.sum (catches scooping staged FEATURE_WIP into pin).
+func assertPinCommitForDepFilesOnlyModSum(t *testing.T, repo, depModule string) {
+	t.Helper()
+	sha := pinCommitSHAForDep(t, repo, depModule)
+	if sha == "" {
+		t.Fatalf("missing cascade pin commit for dep %s\nlog:\n%s", depModule,
+			gitOutputIsolated(t, repo, "log", "--oneline", "-20"))
+	}
+	names := gitOutputIsolated(t, repo, "show", "--pretty=format:", "--name-only", sha)
+	for _, line := range strings.Split(names, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		base := filepath.Base(line)
+		if base != "go.mod" && base != "go.sum" {
+			t.Fatalf("cascade pin for %s must only include go.mod/go.sum; got %q\nfiles:\n%s",
+				depModule, line, names)
+		}
+	}
+}
+
+// assertCascadePinForDepBeforeFeatureCommit requires the cascade pin commit for
+// depModule @ pinVer to be an ancestor of the feature gen-commit (ready pin
+// before feature on freeHost peels — T-M1 / D7). Does not use newest-any-pin.
+func assertCascadePinForDepBeforeFeatureCommit(t *testing.T, repo, depModule, pinVer, featureSubject string) {
+	t.Helper()
+	if repo == "" {
+		t.Fatal("repo required for pin-before-feature history assert")
+	}
+	if depModule == "" {
+		t.Fatal("depModule required")
+	}
+	assertCascadePinCommitPresent(t, repo, depModule, pinVer)
+	pinSHA := pinCommitSHAForDep(t, repo, depModule)
+	if pinSHA == "" {
+		t.Fatalf("missing cascade pin commit for dep %s on %s\nlog:\n%s",
+			depModule, repo, gitOutputIsolated(t, repo, "log", "--oneline", "-25"))
+	}
+	if featureSubject == "" {
+		featureSubject = cascadeFeatureCommitSubject
+	}
+	featSHA := featureCommitSHA(t, repo, featureSubject)
+	if featSHA == "" {
+		t.Fatalf("missing feature gen-commit (subject containing %q) on %s\nlog:\n%s",
+			featureSubject, repo, gitOutputIsolated(t, repo, "log", "--oneline", "-25"))
+	}
+	err := git_isolated.Command(repo, "merge-base", "--is-ancestor", pinSHA, featSHA).Run()
+	if err != nil {
+		t.Fatalf("T-M1 order: cascade pin for %s must be ancestor of feature gen-commit\npin=%s feature=%s\nlog:\n%s",
+			depModule, pinSHA, featSHA, gitOutputIsolated(t, repo, "log", "--oneline", "-25"))
+	}
+	// Feature commit tree must not reintroduce external replace for this dep.
+	featGoMod := gitOutputIsolated(t, repo, "show", featSHA+":go.mod")
+	if strings.Contains(featGoMod, depModule) &&
+		(strings.Contains(featGoMod, "=> ./external/") || strings.Contains(featGoMod, "=> ../")) {
+		// Fail only when this dep still has an external-style replace line.
+		for _, line := range strings.Split(featGoMod, "\n") {
+			trim := strings.TrimSpace(line)
+			if !strings.Contains(trim, depModule) || !strings.Contains(trim, "=>") {
+				continue
+			}
+			if strings.Contains(trim, "./external/") || strings.Contains(trim, "../") {
+				t.Fatalf("feature commit go.mod must not carry external replace for %s\n%s",
+					depModule, featGoMod)
+			}
+		}
+	}
+}
+
+// assertIntraSharedReplaceKept fails if monorepo go.mod dropped the keep-local
+// replace for cascadeSharedModule (intra must not be force-dropped with external pin).
+func assertIntraSharedReplaceKept(t *testing.T, req *Request) {
+	t.Helper()
+	checkout := req.MainRepo
+	if req.WtDir != "" {
+		if _, err := os.Stat(req.WtDir); err == nil {
+			checkout = req.WtDir
+		}
+	}
+	if checkout == "" {
+		t.Fatal("MainRepo or WtDir required")
+	}
+	goMod := filepath.Join(checkout, "go.mod")
+	if !goModHasReplace(t, goMod, cascadeSharedModule) {
+		t.Fatalf("monorepo go.mod must KEEP intra replace for %s (not force-drop with external pin):\n%s",
+			cascadeSharedModule, readFile(t, goMod))
+	}
+}
+
 // assertExternalReplaceDropped fails if consumer go.mod still has a replace for
 // LeafModulePath (droppable external replace must be gone after pin).
 func assertExternalReplaceDropped(t *testing.T, goModPath, modulePath string) {
@@ -573,6 +796,11 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = dirtyCascadeFeatureWIP
 	_ = setupApplyPinBeforeFeatureExternalCleanDep
 	_ = setupApplyPinBeforeFeatureFreeDirty
+	_ = setupApplyPinBeforeFeatureMonorepoFreeHostExternal
+	_ = pinCommitSHAForDep
+	_ = assertPinCommitForDepFilesOnlyModSum
+	_ = assertCascadePinForDepBeforeFeatureCommit
+	_ = assertIntraSharedReplaceKept
 	_ = assertExternalReplaceDropped
 	_ = assertConsumerRequireAndNoExternalReplace
 	_ = assertCascadePinBeforeFeatureCommit

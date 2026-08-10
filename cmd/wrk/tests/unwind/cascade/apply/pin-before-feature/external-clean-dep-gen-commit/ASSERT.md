@@ -7,7 +7,8 @@
 - Git history on consumer main: cascade pin commit
   `wrk: cascade pin example.com/dot-pkgs @ v0.0.1` is an **ancestor** of the
   feature gen-commit (`feat: add feature`) — pin before feature (D7 / B1).
-- Feature WIP content (`FEATURE_WIP.md`) landed via gen-commit.
+- Feature WIP content (`FEATURE_WIP.md`) landed via gen-commit (not in pin commit).
+- Pin commit touches **only** go.mod/go.sum.
 - Pre-commit hook never blocks (pin removed external replace first).
 
 ## Side Effects
@@ -51,6 +52,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	// History: pin commit before feature gen-commit (D7).
 	hist := historyRepoForConsumer(t, req)
 	assertCascadePinBeforeFeatureCommit(t, hist, req.LeafModulePath, req.ExpectedPinVersion, cascadeFeatureCommitSubject)
+	assertPinCommitForDepFilesOnlyModSum(t, hist, req.LeafModulePath)
 	assertFeatureWIPLanded(t, hist)
 
 	// go.mod/go.sum should not leave uncommitted pin dirt after successful apply

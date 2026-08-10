@@ -406,6 +406,217 @@ func refreshStackMembersAfterLand(members []StackMember) []StackMember {
 	return out
 }
 
+// pinReadyExternalReplacesBeforeGenCommit applies cascade pins for **ready**
+// droppable external stack replaces whose consumer modules live on checkout,
+// as separate `wrk: cascade pin …` auto-commits, before feature gen-commit.
+//
+// Used on freeHost early peels (same-label free+consumer): B1 defers only pure
+// pin-consumers, so external replace would otherwise still be present at
+// gen-commit. Does not pin deps that still need tag-next (owned-changed free
+// not yet landed/tagged) — those stay post-land cascade. Idempotent when the
+// replace is already gone / require already matches.
+func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMember, flags UnwindFlags, stats *UnwindApplyStats) error {
+	if checkout == "" || len(members) == 0 {
+		return nil
+	}
+	checkout = storage.NormalizePath(checkout)
+	plan, err := PlanUnwindCascade(members)
+	if err != nil {
+		return err
+	}
+	if plan == nil || len(plan.Steps) == 0 {
+		return nil
+	}
+
+	byLabel := pickPeelMembersByLabel(members)
+	nodes, edges, err := buildUnwindModuleGraph(members, byLabel)
+	if err != nil {
+		return err
+	}
+	nodeByPath := make(map[string]UnwindGraphModuleNode, len(nodes))
+	for _, n := range nodes {
+		if n.Path != "" {
+			nodeByPath[n.Path] = n
+		}
+	}
+
+	// droppableExternal: same policy as cascade planner (cross-repo / module-path replaces).
+	droppableExternal := make(map[string]struct{})
+	for _, e := range edges {
+		if e.Kind != "replace" || e.From == "" || e.To == "" {
+			continue
+		}
+		from, ok1 := nodeByPath[e.From]
+		to, ok2 := nodeByPath[e.To]
+		if !ok1 || !ok2 {
+			continue
+		}
+		if isDroppableExternalStackReplace(from, to, e) {
+			droppableExternal[e.From+"\x00"+e.To] = struct{}{}
+		}
+	}
+
+	// Modules hosted on this checkout (linked Path or main matching checkout).
+	onCheckout := make(map[string]struct{})
+	for _, n := range nodes {
+		if n.Path == "" || n.RepoLabel == "" {
+			continue
+		}
+		m, ok := byLabel[n.RepoLabel]
+		if !ok {
+			continue
+		}
+		if memberCheckoutPath(m) == checkout {
+			onCheckout[n.Path] = struct{}{}
+		}
+	}
+	if len(onCheckout) == 0 {
+		return nil
+	}
+
+	addAll := flags.AddAll || genArgsHasFlag(flags.GenCommitArgs, "--add-all")
+
+	for _, step := range plan.Steps {
+		if step.Kind != CascadePin {
+			continue
+		}
+		if step.ModulePath == "" || step.DepModulePath == "" || step.TagOrVersion == "" {
+			continue
+		}
+		if _, ok := onCheckout[step.ModulePath]; !ok {
+			continue
+		}
+		// Only droppable external stack replaces (not intra keep-local / require-only).
+		if _, ok := droppableExternal[step.ModulePath+"\x00"+step.DepModulePath]; !ok {
+			continue
+		}
+		depNode, ok := nodeByPath[step.DepModulePath]
+		if !ok {
+			continue
+		}
+		// Ready: dep is not waiting for a cascade tag-next (owned-changed free).
+		// Clean free with LatestTag / current require is ready; dirty free that
+		// still needs tag stays for post-land cascade.
+		if cascadeModuleShouldTag(depNode) {
+			continue
+		}
+
+		consumerNode, ok := nodeByPath[step.ModulePath]
+		if !ok {
+			continue
+		}
+		consumerLabel := consumerNode.RepoLabel
+		depLabel := depNode.RepoLabel
+
+		consumerModDir := moduleDirOnCheckout(checkout, consumerNode)
+		if consumerModDir == "" {
+			return fmt.Errorf("wrk: ready-external pin: empty consumer module dir for %s", step.ModulePath)
+		}
+
+		// Idempotent: replace already gone → nothing to pin for this path.
+		if !goModHasLocalReplace(consumerModDir, step.DepModulePath) {
+			continue
+		}
+		// Safety: if policy says keep (intra), do not force-drop.
+		if keep, _ := localReplacePolicy(consumerModDir, step.DepModulePath); keep {
+			continue
+		}
+
+		// Dirty go.mod/go.sum without --add-all → partial edit (same as cascade pin).
+		usePartial := false
+		var saved goModSumSnap
+		if !addAll {
+			dirty, err := goModSumUncommittedAt(checkout, consumerModDir)
+			if err != nil {
+				return err
+			}
+			if dirty {
+				usePartial = true
+				saved, err = saveGoModSumSnap(consumerModDir)
+				if err != nil {
+					return fmt.Errorf("wrk: ready-external pin save go.mod/go.sum in %s: %w", consumerModDir, err)
+				}
+				if err := writeBaseGoModSum(checkout, consumerModDir); err != nil {
+					_ = restoreGoModSumSnap(consumerModDir, saved)
+					return fmt.Errorf("wrk: ready-external pin restore Base go.mod/go.sum in %s: %w", consumerModDir, err)
+				}
+			}
+		}
+
+		logConsumer := consumerLabel
+		if logConsumer == "" {
+			logConsumer = filepath.Base(checkout)
+		}
+		logDep := depLabel
+		if logDep == "" {
+			logDep = filepath.Base(step.DepModulePath)
+		}
+		fmt.Printf("pin %s <- %s @ %s\n", logConsumer, logDep, step.TagOrVersion)
+
+		pinFail := func(err error) error {
+			if usePartial {
+				_ = restoreGoModSumSnap(consumerModDir, saved)
+			}
+			return err
+		}
+
+		if err := cascadePinKeepLocalReplace(consumerModDir, step.DepModulePath, step.TagOrVersion, depNode, byLabel); err != nil {
+			return pinFail(fmt.Errorf("wrk: ready-external pin %s <- %s: %w", step.ModulePath, step.DepModulePath, err))
+		}
+		if err := goModTidy(consumerModDir); err != nil {
+			return pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
+		}
+		_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
+
+		// Selective pin commit only (D7); never scoop feature WIP into pin.
+		if err := cascadeCommitPin(checkout, consumerModDir, step.DepModulePath, step.TagOrVersion, false); err != nil {
+			return pinFail(err)
+		}
+		if stats != nil {
+			stats.Pinned++
+		}
+
+		if usePartial {
+			if err := restoreGoModSumSnap(consumerModDir, saved); err != nil {
+				return fmt.Errorf("wrk: ready-external pin restore WIP go.mod/go.sum in %s: %w", consumerModDir, err)
+			}
+			if err := goModEditRequire(consumerModDir, step.DepModulePath, step.TagOrVersion); err != nil {
+				_ = restoreGoModSumSnap(consumerModDir, saved)
+				return fmt.Errorf("wrk: ready-external pin surgical require bump %s@%s in %s: %w",
+					step.DepModulePath, step.TagOrVersion, consumerModDir, err)
+			}
+			_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
+		}
+	}
+	return nil
+}
+
+// memberCheckoutPath prefers still-present Path over MainRepo (same as cascade checkoutForEdit).
+func memberCheckoutPath(m StackMember) string {
+	if m.Path != "" {
+		if st, err := os.Stat(m.Path); err == nil && st.IsDir() {
+			return storage.NormalizePath(m.Path)
+		}
+	}
+	main := m.MainRepo
+	if main == "" {
+		main = m.Path
+	}
+	return storage.NormalizePath(main)
+}
+
+// moduleDirOnCheckout joins module Dir under checkout (root module → checkout).
+func moduleDirOnCheckout(checkout string, n UnwindGraphModuleNode) string {
+	if checkout == "" {
+		return ""
+	}
+	dir := n.Dir
+	if dir == "" || dir == "." {
+		return checkout
+	}
+	return filepath.Join(checkout, filepath.FromSlash(dir))
+}
+
 // applyUnwindCascade runs PlanUnwindCascade steps after the land prelude:
 // one-scope tags, keep-local-replace pins, selective commits, push when a main
 // has no remaining cascade modules. addReinstallMainPath records mains for the
@@ -993,45 +1204,68 @@ func readBaseBlob(checkout, rel string) ([]byte, error) {
 
 // cascadeCommitPin stages the consumer module's go.mod/go.sum (paths relative to
 // checkout — nested e.g. tools/go.mod) or -A with addAll, then commits with locked
-// subject prefix "wrk: cascade pin <mod> @ <ver>". No-op when nothing staged.
+// subject prefix "wrk: cascade pin <mod> @ <ver>". No-op when nothing to commit.
+//
+// Selective path (addAll=false) uses `git commit --only` so a pre-staged index of
+// feature WIP is never scooped into the pin commit (D7). Plain `git add go.mod`
+// + `git commit` would commit the entire index.
 func cascadeCommitPin(repo, modDir, depModule, ver string, addAll bool) error {
 	if repo == "" {
 		return nil
 	}
+	msg := "wrk: cascade pin " + depModule + " @ " + ver
+
 	if addAll {
 		if err := gitRunDir(repo, "add", "-A"); err != nil {
 			return fmt.Errorf("wrk: cascade pin git add -A: %w", err)
 		}
-	} else {
-		// Selective: only this consumer module's go.mod/go.sum.
-		// Paths are checkout-relative so nested modules (tools/) stage correctly.
-		// Add paths separately so a missing go.sum pathspec does not abort go.mod.
-		modRel, sumRel := "go.mod", "go.sum"
-		if modDir != "" {
-			if r, s, err := goModSumRelPaths(repo, modDir); err == nil {
-				modRel, sumRel = r, s
-			}
+		staged, err := gitOutputDir(repo, "diff", "--cached", "--name-only")
+		if err != nil {
+			return fmt.Errorf("wrk: cascade pin check staged: %w", err)
 		}
-		_ = gitRunDir(repo, "add", "--", modRel)
-		sumPath := filepath.Join(repo, sumRel)
-		if modDir != "" {
-			sumPath = filepath.Join(modDir, "go.sum")
+		if strings.TrimSpace(staged) == "" {
+			return nil
 		}
-		if _, err := os.Stat(sumPath); err == nil {
-			_ = gitRunDir(repo, "add", "--", sumRel)
+		// --no-verify: cascade pin is a tool-authored deps commit; user hooks that
+		// scan removed external worktrees must not block free-module cascade.
+		if err := gitRunDir(repo, "commit", "--no-verify", "-m", msg); err != nil {
+			return fmt.Errorf("wrk: cascade pin commit: %w", err)
+		}
+		return nil
+	}
+
+	// Selective: only this consumer module's go.mod/go.sum.
+	// Paths are checkout-relative so nested modules (tools/) stage correctly.
+	modRel, sumRel := "go.mod", "go.sum"
+	if modDir != "" {
+		if r, s, err := goModSumRelPaths(repo, modDir); err == nil {
+			modRel, sumRel = r, s
 		}
 	}
-	staged, err := gitOutputDir(repo, "diff", "--cached", "--name-only")
+	paths := []string{modRel}
+	sumPath := filepath.Join(repo, sumRel)
+	if modDir != "" {
+		sumPath = filepath.Join(modDir, "go.sum")
+	}
+	if _, err := os.Stat(sumPath); err == nil {
+		paths = append(paths, sumRel)
+	}
+	// Stage pin paths so the index reflects go.mod/go.sum edits for --only.
+	for _, p := range paths {
+		_ = gitRunDir(repo, "add", "--", p)
+	}
+	diffArgs := append([]string{"diff", "--cached", "--name-only", "--"}, paths...)
+	staged, err := gitOutputDir(repo, diffArgs...)
 	if err != nil {
 		return fmt.Errorf("wrk: cascade pin check staged: %w", err)
 	}
 	if strings.TrimSpace(staged) == "" {
 		return nil
 	}
-	msg := "wrk: cascade pin " + depModule + " @ " + ver
-	// --no-verify: cascade pin is a tool-authored deps commit; user hooks that
-	// scan removed external worktrees must not block free-module cascade.
-	if err := gitRunDir(repo, "commit", "--no-verify", "-m", msg); err != nil {
+	// --only: commit these paths only; ignore any other already-staged WIP.
+	// --no-verify: tool-authored deps commit (see addAll branch).
+	commitArgs := append([]string{"commit", "--only", "--no-verify", "-m", msg, "--"}, paths...)
+	if err := gitRunDir(repo, commitArgs...); err != nil {
 		return fmt.Errorf("wrk: cascade pin commit: %w", err)
 	}
 	return nil
