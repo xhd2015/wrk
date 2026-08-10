@@ -72,6 +72,8 @@ var wrkModeFlags = map[string]struct{}{
 	"--main":                 {},
 	"--unwind":               {},
 	"--pin-locals":           {},
+	"--dep-replace":          {},
+	"--dep-update":           {},
 }
 
 func skillUsage() string {

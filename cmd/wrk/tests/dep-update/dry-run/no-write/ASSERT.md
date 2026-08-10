@@ -1,0 +1,29 @@
+## Expected
+
+- Exit 0.
+- Stdout contains `would: dep-update example.com/dep -> v0.0.2`.
+- No bare `dep-update ` apply lines.
+- go.mod unchanged (replace still present); no go.sum.
+
+## Side Effects
+
+- None: dry-run must not mutate go.mod.
+
+## Exit Code
+
+- 0
+
+```go
+import (
+	"github.com/xhd2015/doctest/session"
+)
+
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
+	assertErrIsNil(t, err)
+	assertExitZero(t, resp)
+	assertWouldDepUpdateLine(t, resp.Stdout, modDep, req.WantVersion)
+	assertGoModUnchanged(t, req)
+	assertNoTidyArtifacts(t, req)
+}
+```

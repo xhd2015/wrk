@@ -208,6 +208,8 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var showGraph bool
 	var verify bool
 	var pinLocals bool
+	var depReplacePaths []string
+	var depUpdatePaths []string
 	var execArgs []string
 	// Manual commit message path: --commit -m/--message (wrk-owned; not AI gen).
 	// When --gen-commit-msg peels --commit/--no-verify/--add-all, those stay in genArgs.
@@ -268,6 +270,8 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--show-graph", &showGraph).
 		Bool("--verify", &verify).
 		Bool("--pin-locals", &pinLocals).
+		StringSlice("--dep-replace", &depReplacePaths).
+		StringSlice("--dep-update", &depUpdatePaths).
 		Bool("--reinstall-local", &reinstallLocal).
 		Bool("--tag-next", &tagNext).
 		Bool("--propagate-tags", &propagateTags).
@@ -319,6 +323,24 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		return err
 	}
 
+	// --dep-replace / --dep-update: multi-value sugar (remaining args are extra
+	// dep dirs). Absorb before remaining-count limits so multi-dir works with
+	// StringSlice (one value per flag occurrence). Clear remaining so they are
+	// not treated as sourceDir/workDir overrides.
+	if len(depReplacePaths) > 0 && len(depUpdatePaths) > 0 {
+		return fmt.Errorf("wrk: --dep-replace and --dep-update are mutually exclusive")
+	}
+	if len(depReplacePaths) > 0 {
+		depReplacePaths = append(depReplacePaths, remaining...)
+		remaining = nil
+	}
+	if len(depUpdatePaths) > 0 {
+		depUpdatePaths = append(depUpdatePaths, remaining...)
+		remaining = nil
+	}
+	depReplaceMode := len(depReplacePaths) > 0
+	depUpdateMode := len(depUpdatePaths) > 0
+
 	// --force-cd and --no-cd are mutually exclusive (hard error before any work).
 	if forceCd && noCd {
 		return fmt.Errorf("wrk: --force-cd and --no-cd are mutually exclusive")
@@ -339,9 +361,29 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			taskDesc != nil || setTaskDesc != nil || cd || mainFlag || unwind || showGraph ||
 			commitFlag || addAll || genCommitMsg || newFlag || webFlag || scanGitRepos ||
 			noCd || forceCd || confirmFromStdin || forceConfirm || noInModuleReplace || noDep ||
-			forcePush || len(execArgs) > 0
+			forcePush || len(execArgs) > 0 || depReplaceMode || depUpdateMode
 		if other {
 			return fmt.Errorf("wrk: --pin-locals is mutually exclusive with other modes")
+		}
+	}
+
+	// --dep-replace / --dep-update: exclusive modes (partners: --dry-run, --color/--no-color, -v).
+	// Same exclusivity family as --pin-locals.
+	if depReplaceMode || depUpdateMode {
+		modeName := "--dep-replace"
+		if depUpdateMode {
+			modeName = "--dep-update"
+		}
+		bringModeEarly := len(bringPaths) > 0
+		other := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
+			addPath != nil || removePath != nil || where || bringModeEarly || reinstallLocal ||
+			tagNext || propagateTags || syncFlag || pushFlag || prFlag || jsonFlag ||
+			taskDesc != nil || setTaskDesc != nil || cd || mainFlag || unwind || showGraph ||
+			commitFlag || addAll || genCommitMsg || newFlag || webFlag || scanGitRepos ||
+			noCd || forceCd || confirmFromStdin || forceConfirm || noInModuleReplace || noDep ||
+			forcePush || len(execArgs) > 0 || pinLocals
+		if other {
+			return fmt.Errorf("wrk: %s is mutually exclusive with other modes", modeName)
 		}
 	}
 
@@ -387,6 +429,12 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		ctx.command = resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, bringMode, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, prFlag, cd, mainFlag, unwind)
 		if pinLocals {
 			ctx.command = "pin-locals"
+		}
+		if depReplaceMode {
+			ctx.command = "dep-replace"
+		}
+		if depUpdateMode {
+			ctx.command = "dep-update"
 		}
 		// P1: pure bare no-args is dashboard, not create. --new / positionals / -t
 		// and create modifiers keep command "create".
@@ -669,7 +717,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 
 	// Resolve sourceDir to absolute; default to process cwd when absent.
 	// Passed to every sub-command as workDir instead of using os.Getwd/Chdir.
-	createMode := isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status, bringMode, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, prFlag, list, done, mergeBack, cd, mainFlag, unwind) && !pinLocals
+	createMode := isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status, bringMode, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, prFlag, list, done, mergeBack, cd, mainFlag, unwind) && !pinLocals && !depReplaceMode && !depUpdateMode
 	uxFlags := createUXFlags{
 		newWindow:     newWindow,
 		noNewWindow:   noNewWindow,
@@ -1046,10 +1094,11 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	}
 	// --dry-run is valid with bare --sync / --tag-next / --propagate-tags /
 	// --reinstall-local / --push, with --done / --merge-back composition (full multi-stage plan is later phases),
-	// with --unwind (stack peel plan), with --pin-locals, with --gen-commit-msg (handled early via runGenCommitMsg),
+	// with --unwind (stack peel plan), with --pin-locals / --dep-replace / --dep-update,
+	// with --gen-commit-msg (handled early via runGenCommitMsg),
 	// and with manual --commit -m/--message.
-	if dryRun && !done && !mergeBack && !tagNext && !propagateTags && !syncFlag && !reinstallLocal && !pushFlag && !unwind && !manualCommit && !pinLocals {
-		return fmt.Errorf("wrk: --dry-run is only valid with --done, --merge-back, --tag-next, --propagate-tags, --sync, --reinstall-local, --push, --unwind, --pin-locals, --gen-commit-msg, or --commit -m/--message")
+	if dryRun && !done && !mergeBack && !tagNext && !propagateTags && !syncFlag && !reinstallLocal && !pushFlag && !unwind && !manualCommit && !pinLocals && !depReplaceMode && !depUpdateMode {
+		return fmt.Errorf("wrk: --dry-run is only valid with --done, --merge-back, --tag-next, --propagate-tags, --sync, --reinstall-local, --push, --unwind, --pin-locals, --dep-replace, --dep-update, --gen-commit-msg, or --commit -m/--message")
 	}
 	// -f/--force is a push modifier only (D5): never a bare primary.
 	if forcePush && !pushFlag {
@@ -1242,6 +1291,14 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	// --pin-locals: exclusive reverse-peel; relative replace for stack deps already required.
 	if pinLocals {
 		return runPinLocals(workDir, dryRun, colorFlag)
+	}
+	// --dep-replace: absolute replace into nearest consumer go.mod (no tidy).
+	if depReplaceMode {
+		return runDepReplace(workDir, depReplacePaths, dryRun)
+	}
+	// --dep-update: drop replace + require latest tag (no tidy).
+	if depUpdateMode {
+		return runDepUpdate(workDir, depUpdatePaths, dryRun)
 	}
 	// Bare / --main --reinstall-local before bare --main so compose does not open a nested shell.
 	// Multi-stage reinstall is handled by activeRoot pipeline below.
@@ -1519,6 +1576,10 @@ Flags:
                                   (exit 1 when any error check fails; exclusive with --show-graph and apply partners)
   --pin-locals [--dry-run]        add/normalize relative replace for already-required stack deps
                                   (inventory = unwind stack only; go mod tidy per consumer; soft tidy fails)
+  --dep-replace <dir>… [--dry-run]
+                                  absolute replace into nearest consumer go.mod (no tidy; fail-fast multi-dir)
+  --dep-update <dir>… [--dry-run]
+                                  drop replace + require latest git tag in nearest consumer go.mod (no tidy)
   --projects                      list recorded main repository paths
   --projects-dep-graph            module-level dep graph across registered projects
   --scan-git-repos [ROOT...]      list valid git repos under roots (print-only; never mutates projects.json; default: ~)
@@ -1551,7 +1612,7 @@ Flags:
                                   compose dry-run uses planned next tags when with --tag-next)
   --sync [--dry-run]              FF-only bi-directional sync main ↔ linked worktrees
                                   (also: after successful --done / --merge-back)
-  --dry-run                       with --done/--merge-back/--tag-next/--propagate-tags/--sync/--push/--reinstall-local/--unwind/--pin-locals/--gen-commit-msg/--commit -m: plan only
+  --dry-run                       with --done/--merge-back/--tag-next/--propagate-tags/--sync/--push/--reinstall-local/--unwind/--pin-locals/--dep-replace/--dep-update/--gen-commit-msg/--commit -m: plan only
   --push                          push current checkout branch to upstream/origin;
                                   with --done/--merge-back: push main branch (and tags when with --tag-next);
                                   with --tag-next: also push newly created tags (branch + tags);
