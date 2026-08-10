@@ -28,7 +28,8 @@ stack modules (pending) -> PlanUnwindCascade
   leaves under `cascade/dry-run/with-tag-next/replace-only-*` — Classic **RED**
   until planner treats droppable external replaces as pin triggers.
 - **P2 apply** clean / `--add-all` leaves under `cascade/apply/clean/` and
-  `dirty-gomod/with-add-all/` are **sealed GREEN**.
+  `dirty-gomod/with-add-all/` are **sealed GREEN** (includes
+  `clean/root-only-nested-tool-pin/` — root-only tagscope + pin-only nested tool).
 - **P3 partial edit** leaves under `cascade/apply/partial-edit/` and C-AP5
   (`dirty-gomod/without-add-all`) — do not break dry-run or clean apply leaves.
 - **P4 reinstall** leaves under `cascade/apply/reinstall-local/` — nested skip
@@ -70,6 +71,11 @@ const (
 	cascadeTestdataRelDir  = "testdata/x"
 	cascadeTestdataOldTag  = "testdata/x/v0.0.1"
 	cascadeTestdataNextTag = "testdata/x/v0.0.2"
+	// Root-only tagscope + pin-only nested tool (ai-critic script/browser-debug shape).
+	// Nested module path is intentionally NOT under root module path and has no
+	// path-scoped release tags — only bare root tags v0.0.x exist.
+	cascadeToolModule = "browser-debug"
+	cascadeToolRelDir = "script/browser-debug"
 )
 
 // cascadeTagNextLine is the locked dry-run vocabulary for a module tag step.
@@ -86,6 +92,20 @@ func cascadePinLine(consumerMod, depMod, ver string) string {
 // (prefix match so next-tag may vary slightly while module identity is locked).
 func hasCascadeTagNext(stdout, modulePath string) bool {
 	return strings.Contains(stdout, "would: tag-next "+modulePath+" @")
+}
+
+// assertNoCascadeTagNextForModule fails if apply/dry-run stdout plans/tags that module.
+func assertNoCascadeTagNextForModule(t *testing.T, stdout, modulePath string) {
+	t.Helper()
+	for _, needle := range []string{
+		"would: tag-next " + modulePath + " @",
+		"tag-next " + modulePath + " @",
+	} {
+		if strings.Contains(stdout, needle) {
+			t.Fatalf("module %s must not get cascade tag-next (%q)\nstdout:\n%s",
+				modulePath, needle, stdout)
+		}
+	}
 }
 
 // hasCascadePin reports a top-level cascade pin (consumer <- dep), not under-peel
@@ -197,6 +217,52 @@ func setupCascadeSingleRepoTwoModules(t *testing.T, req *Request) {
 	req.MainRepo = mainRepo
 	req.RepoDir = mainRepo
 	req.LeafModulePath = cascadeSharedModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+	markDirty(t, mainRepo)
+	req.PeelOrder = []string{"."}
+}
+
+// setupCascadeRootOnlyNestedToolPin builds ai-critic-style single main:
+//   - root module example.com/root with ONLY bare tags v0.0.1 (no path scopes)
+//   - nested script/browser-debug (module browser-debug) requires root@v0.0.1
+//     + keep-local replace => ../../
+//   - owned change on root only → tagscope next tag v0.0.2 for root scope
+// Regression: root NextTag must not attach to nested go.mod without a path-scope
+// (was: tag root, pin tool, re-tag same bare name → "tag already exists").
+func setupCascadeRootOnlyNestedToolPin(t *testing.T, req *Request) {
+	t.Helper()
+
+	mainRepo := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, mainRepo)
+
+	writeGoModRequire(t, mainRepo, unwindRootModule)
+	writeFile(t, filepath.Join(mainRepo, "root.go"),
+		"package root\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+
+	toolDir := filepath.Join(mainRepo, filepath.FromSlash(cascadeToolRelDir))
+	mkdirAll(t, toolDir)
+	writeGoModRequire(t, toolDir, cascadeToolModule, unwindRootModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(toolDir, "main.go"),
+		"package main\n\nimport _ \""+unwindRootModule+"\"\n\nfunc main() {}\n")
+	appendLocalReplace(t, toolDir, unwindRootModule, "../..")
+
+	runGitIsolated(t, mainRepo, "add", "go.mod", "root.go", "script")
+	runGitIsolated(t, mainRepo, "commit", "-m", "root + script/browser-debug tool module")
+	// Only root-scope tags (no pkgs/… or script/… path tags).
+	createLightweightTag(t, mainRepo, unwindApplyOldTag, "HEAD")
+
+	// Owned change on root → next bare tag v0.0.2.
+	writeFile(t, filepath.Join(mainRepo, "root.go"),
+		"package root\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, mainRepo, "add", "root.go")
+	runGitIsolated(t, mainRepo, "commit", "-m", "root owned change for next tag")
+
+	mainRepo = resolvePath(t, mainRepo)
+	req.MainRepo = mainRepo
+	req.RepoDir = mainRepo
+	// LeafModulePath = free/root (pin dep), not the tool consumer.
+	req.LeafModulePath = unwindRootModule
 	req.OldRequireVersion = unwindApplyOldTag
 	req.ExpectedPinVersion = unwindApplyNextTag
 	markDirty(t, mainRepo)
@@ -489,11 +555,14 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = assertNoSuccessfulCascadeBody
 	_ = assertCascadeAfterPeels
 	_ = setupCascadeSingleRepoTwoModules
+	_ = setupCascadeRootOnlyNestedToolPin
 	_ = setupCascadeSingleRepoTwoModulesWithTestdata
 	_ = setupCascadeMultiRepoBothDirty
 	_ = setupCascadeReplaceOnlyExternalCleanDep
 	_ = setupCascadeReplaceOnlyIntraCleanShared
 	_ = setupCascadeFalseFreeHostIntraPins
+	_ = cascadeToolModule
+	_ = cascadeToolRelDir
 	return nil
 }
 ```

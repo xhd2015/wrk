@@ -391,21 +391,6 @@ func assertNestedSkipConsumerPinned(t *testing.T, req *Request) {
 	}
 }
 
-// assertNoCascadeTagNextForModule fails if apply/dry-run stdout plans/tags that module.
-func assertNoCascadeTagNextForModule(t *testing.T, stdout, modulePath string) {
-	t.Helper()
-	// Dry-run form and apply form.
-	for _, needle := range []string{
-		"would: tag-next " + modulePath + " @",
-		"tag-next " + modulePath + " @",
-	} {
-		if strings.Contains(stdout, needle) {
-			t.Fatalf("module %s is skip consumer — must not get cascade tag-next (%q)\nstdout:\n%s",
-				modulePath, needle, stdout)
-		}
-	}
-}
-
 // assertNoTidyOrUnknownRevisionFail fails on classic pre-cascade reinstall/tidy
 // failure surfaces (unknown revision, go mod tidy required / failed).
 func assertNoTidyOrUnknownRevisionFail(t *testing.T, resp *Response) {
@@ -488,7 +473,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = toolsGoModPath
 	_ = assertNestedSkipConsumerPinned
 	_ = assertNestedCmdRequiresParentPinned
-	_ = assertNoCascadeTagNextForModule
+	// assertNoCascadeTagNextForModule: cascade/SETUP.md (exported for leaves)
 	_ = assertNoTidyOrUnknownRevisionFail
 	_ = assertReinstallTailNoHardFail
 	_ = assertReinstallInstalledAtLeastOne

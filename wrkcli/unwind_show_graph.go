@@ -464,31 +464,41 @@ func attachTagScopeToModules(nodes []UnwindGraphModuleNode, members []StackMembe
 			nodes[i].SkipReason = "unknown"
 			continue
 		}
-		// Match decision by path prefix of module dir when monorepo scopes exist.
-		// Root scope (empty PathPrefix) is the default for fixtures.
-		var best *tagscope.ScopeDecision
+		// Match tagscope decisions to modules by scope ownership:
+		//  - path-prefix scopes bind nested modules whose Dir (or module path)
+		//    falls under that prefix (prefer longest prefix when several match)
+		//  - root scope (empty PathPrefix) binds only the repo-root module
+		//    (Dir empty / ".")
+		// Nested go.mod trees without a matching path-scope (e.g. script/tool
+		// pin-only modules under root-only tags v0.0.x) must NOT inherit root
+		// NextTag — that double-planned the same bare tag after pin (tag already exists).
 		modDir := nodes[i].Dir
 		if modDir == "." {
 			modDir = ""
 		}
+		isRootModule := modDir == ""
 		if modDir != "" && !strings.HasSuffix(modDir, "/") {
 			modDir += "/"
 		}
+		var best *tagscope.ScopeDecision
+		bestPrefixLen := -1
+		var rootDecision *tagscope.ScopeDecision
 		for j := range plan.Decisions {
 			d := &plan.Decisions[j]
 			pp := d.Scope.PathPrefix
 			if pp == "" {
-				if best == nil {
-					best = d
-				}
+				rootDecision = d
 				continue
 			}
 			if strings.HasPrefix(modDir, pp) || strings.HasPrefix(nodes[i].Path, pp) {
-				best = d
+				if len(pp) > bestPrefixLen {
+					best = d
+					bestPrefixLen = len(pp)
+				}
 			}
 		}
-		if best == nil && len(plan.Decisions) > 0 {
-			best = &plan.Decisions[0]
+		if best == nil && isRootModule {
+			best = rootDecision
 		}
 		if best == nil {
 			continue

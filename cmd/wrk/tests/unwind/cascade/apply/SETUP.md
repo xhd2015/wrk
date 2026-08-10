@@ -93,6 +93,38 @@ const (
 	pushCrossNestedCmdNext = "cmd/v0.0.2"
 )
 
+// setupApplyCascadeRootOnlyNestedToolPin extends setupCascadeRootOnlyNestedToolPin
+// with bare origin for --push. Clean go.mod Base; DIRTY peel marker only.
+//
+// Desired free-first cascade (ai-critic browser-debug shape):
+//  1. tag root @ v0.0.2
+//  2. pin browser-debug require root → v0.0.2; KEEP replace => ../../
+//  3. selective pin commit — NO second tag-next for browser-debug (no path scope)
+//  4. push main + tag
+// Classic RED today: cascade also plans tag-next browser-debug @ v0.0.2 → after
+// pin HEAD moves, git tag fails with "tag already exists".
+func setupApplyCascadeRootOnlyNestedToolPin(t *testing.T, req *Request) {
+	t.Helper()
+	setupCascadeRootOnlyNestedToolPin(t, req)
+
+	_ = os.Remove(filepath.Join(req.MainRepo, "DIRTY"))
+	if _, err := os.Stat(filepath.Join(req.MainRepo, "go.sum")); err == nil {
+		runGitIsolated(t, req.MainRepo, "add", "go.sum")
+		if strings.TrimSpace(gitOutputIsolated(t, req.MainRepo, "diff", "--cached", "--name-only")) != "" {
+			runGitIsolated(t, req.MainRepo, "commit", "-m", "commit go.sum baseline")
+		}
+	}
+	markDirty(t, req.MainRepo)
+
+	bare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, req.MainRepo, bare)
+	if tagRefExists(t, req.MainRepo, unwindApplyOldTag) {
+		runGitIsolated(t, req.MainRepo, "push", "origin", unwindApplyOldTag)
+	}
+	req.OriginBare = bare
+	req.PeelOrder = []string{"."}
+}
+
 // setupApplyCascadeSingleRepoTwoModules extends the dry-run single-repo fixture
 // for apply: bare origin + pushable main, root owned-change so consumer also
 // gets a cascade tag after pin, go.mod/go.sum clean at HEAD (DIRTY peel marker only).
@@ -818,11 +850,14 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.InProcess = true
 	// Keep apply cascade helpers referenced for the generator.
 	_ = setupApplyCascadeSingleRepoTwoModules
+	_ = setupApplyCascadeRootOnlyNestedToolPin
 	_ = setupApplyCascadeMultiRepoBothDirty
 	_ = setupApplyCascadeSingleRepoThreeModules
 	_ = setupApplyCascadePartialEditTidyFail
 	_ = setupApplyCascadePushBeforeCrossRepoPin
 	_ = assertFreePushBeforeCrossRepoPinOfFree
+	_ = cascadeToolModule
+	_ = cascadeToolRelDir
 	_ = pushCrossAppLabel
 	_ = pushCrossAppModule
 	_ = pushCrossNestedCmdMod

@@ -315,7 +315,8 @@ unwind/
 │   └── apply/                            # P2 clean; P3 partial-edit; P4 reinstall; B1 pin-before-feature
 │       ├── clean/
 │       │   ├── single-repo-two-modules/  # C-AP1+3+4: tag/pin/commit-before-tag/keep-replace
-│       │   └── multi-repo-free-first/    # C-AP2: free-first across repos + pin commit
+│       │   ├── multi-repo-free-first/    # C-AP2: free-first across repos + pin commit
+│       │   └── root-only-nested-tool-pin/ # C-AP: root-only tagscope + browser-debug pin; no tag collide
 │       ├── dirty-gomod/
 │       │   ├── without-add-all/          # C-AP5 / P3-1: partial-edit success + WIP preserve
 │       │   └── with-add-all/             # C-AP6 / P3-5: --add-all → succeed (no partial)
