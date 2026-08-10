@@ -1,4 +1,4 @@
-# wrk --unwind — stack DAG, dry-run plan + apply peel/pin + show-graph + display fidelity
+# wrk --unwind — stack DAG, dry-run plan + apply peel/pin + show-graph + verify + display fidelity
 
 ## Version
 0.0.2
@@ -42,13 +42,16 @@ Decision tree for **stack unwind**:
   require version bumps only** (no tidy on WT). On failure: restore WIP from
   save, non-zero. **C-AP5** flipped from P2 hard Error to partial-edit
   **success** (product intent D11). Leaves under `cascade/apply/partial-edit/`.
-- **This cycle (Classic TDD P4 — final ship gate):** prove original failure mode
-  fixed: **nested module previously “skip”** still requiring old dep → after
-  cascade, require matches new tag (**replace kept**) → **`--reinstall-local`**
-  without tidy / `unknown revision` failure. Leaves under
-  `cascade/apply/reinstall-local/`. Dry-run reinstall vocabulary remains sealed
-  **C-DR6**. Full cascade suite + full unwind suite must stay green; do not
-  break sealed 13 cascade leaves (P1–P3).
+- **P4 reinstall-local (prior):** nested skip pin + reinstall under
+  `cascade/apply/reinstall-local/`. Dry-run reinstall vocabulary sealed **C-DR6**.
+- **This cycle (Classic TDD — verify):** read-only post-job audit
+  `wrk --unwind --verify [--json] [--color|--no-color]`. Six error-severity
+  checks (dirty-peel, needs-land, owned-changed, require-drift,
+  droppable-replace, cascade-pending); exit **1** on any FAIL with report on
+  stdout (no `Error:` for logical FAIL); exit **0** when all pass; soft
+  `warning:` allowed. Leaves under `verify/`. **Do not** rewrite sealed
+  show-graph / cascade asserts. No product implementation yet → verify leaves
+  **RED**.
 
 **Layer:** **L2** — in-process CLI via `wrkcli.Capture` (`req.InProcess=true`).
 Fixture setup may use session-built `wrk` for `--new` / worktree materialization.
@@ -56,19 +59,26 @@ Prefer pure cores: path display helper (statusDirLine policy), leave-N porcelain
 count, `PlanUnwind` / `FormatUnwindDryRun`, **`PlanUnwindCascade`** + dry-run
 printer (P1), **apply cascade driver** (P2), **partial-edit pin path** (P3),
 **reinstall-local tail after cascade** (P4), **BuildUnwindGraphReport** /
-**FormatUnwindGraphHuman** / **FormatUnwindGraphJSON**, inventory expand.
+**FormatUnwindGraphHuman** / **FormatUnwindGraphJSON**, inventory expand,
+**BuildUnwindVerifyReport** / human+JSON verify formatters (this cycle).
 
-**Out of scope this cycle (P4):** bare `--tag-next` multi-module cascade;
-propagate-tags redesign; show-graph feature work; redesign gen-commit-msg;
-per-repo cascade phases (global module graph only); softening sealed P1–P3
-asserts; L3 e2e.
+**Out of scope this cycle (verify):** remote push checks; projects.json /
+propagate-tags; worktree-removed / tag-points-at-main-HEAD; rewriting sealed
+show-graph/cascade asserts; L3 e2e.
 
 # DSN (Domain Specific Notion)
 
 - **wrk --unwind** — top-level primary mode. Compose with ship/land flags and
   `--dry-run`, optional **reinstall-local tail**, or read-only **`--show-graph
-  [--json]`**. Mutually exclusive with unrelated modes (`--list`, `--status`,
-  bare create, …). Event `command: "unwind"` when recorded (optional for leaves).
+  [--json]`** / **`--verify [--json]`**. Mutually exclusive with unrelated modes
+  (`--list`, `--status`, bare create, …). Event `command: "unwind"` when recorded
+  (optional for leaves).
+- **Verify (read-only post-job audit)** — `wrk --unwind --verify [--json]
+  [--color|--no-color]`. Same stack inventory / edges as show-graph + cascade;
+  emits six error-severity checks and status summary. Exit **1** if any check
+  FAILs (report on stdout; no `Error:` for logical FAIL); exit **0** when all
+  pass. Soft inventory `warning:` on stderr. Rejects dry-run/apply partners and
+  `--show-graph`; bare `--verify` requires `--unwind`. Never mutates.
 - **Show-graph (read-only)** — `wrk --unwind --show-graph [--json]
   [--color|--no-color]`. Collect stack inventory + repo DAG + PlanUnwind peel
   order; scan full stack modules; print human graph (dir identity, collapsed
@@ -319,46 +329,78 @@ unwind/
 │       └── pin-before-feature/           # B1 interleaved: pin auto-commit before feature gen-commit
 │           ├── external-clean-dep-gen-commit/       # T1: clean free + hook; pin @ v0.0.1 then feature
 │           └── free-dirty-then-consumer-gen-commit/ # T2: free peel/tag → pin → consumer gen-commit
-└── show-graph/                           # read-only repo+module graph
-    ├── reject/                           # mutual exclusion with dry-run / apply partners
+├── show-graph/                           # read-only repo+module graph
+│   ├── reject/                           # mutual exclusion with dry-run / apply partners
+│   │   ├── with-dry-run/
+│   │   ├── with-tag-next/
+│   │   ├── with-done/
+│   │   ├── with-merge-back/
+│   │   ├── with-reinstall-local/
+│   │   └── with-gen-commit-msg/
+│   ├── cycle/
+│   │   └── two-cycle/                    # show-graph cycle reject (no success body)
+│   └── success/                          # acyclic → graph printed; exit 0; zero mutations
+│       ├── human/                        # polished human format (dir / → / replaced)
+│       │   ├── single-repo/
+│       │   │   ├── clean-peel-none/      # clean main; peel (none); dir .
+│       │   │   └── dirty-peel-dot/       # dirty main; peel .; dir identity
+│       │   ├── multi-repo/
+│       │   │   ├── free-first-order/     # 3 dirty free-first + modules @
+│       │   │   ├── clean-leaf-listed/    # clean leaf in nodes; not in peel
+│       │   │   ├── require-edges/        # collapsed require edges + modules @
+│       │   │   └── apply-hint/           # hint: apply would need land/pin flags
+│       │   ├── module/
+│       │   │   ├── replace-edge/         # replaced (not replace =>); multi-repo keys
+│       │   │   ├── nested-module-listed/ # dirs . + pkgs/shared; collapsed replaced
+│       │   │   └── require-drift/        # (latest …) when require ≠ dep latest
+│       │   ├── tagscope/
+│       │   │   └── latest-and-next/      # latest + next / owned-changed on dir .
+│       │   ├── inventory-warn/
+│       │   │   └── missing-replace-target/  # warning: + graph + exit 0
+│       │   └── color/
+│       │       ├── force-color/          # --color → ANSI on stdout
+│       │       └── no-color/             # --no-color → plain stdout
+│       └── json/
+│           ├── shape-keys/               # repos/modules/summary/warnings + peel_order
+│           └── free-first-peel-order/    # peel_order free-first array
+└── verify/                               # read-only post-job audit (Classic TDD RED)
+    ├── reject/                           # mutual exclusion + bare --verify
+    │   ├── bare-verify-without-unwind/
+    │   ├── with-show-graph/
     │   ├── with-dry-run/
     │   ├── with-tag-next/
     │   ├── with-done/
     │   ├── with-merge-back/
     │   ├── with-reinstall-local/
-    │   └── with-gen-commit-msg/
+    │   ├── with-gen-commit-msg/
+    │   └── with-push/
     ├── cycle/
-    │   └── two-cycle/                    # show-graph cycle reject (no success body)
-    └── success/                          # acyclic → graph printed; exit 0; zero mutations
-        ├── human/                        # polished human format (dir / → / replaced)
-        │   ├── single-repo/
-        │   │   ├── clean-peel-none/      # clean main; peel (none); dir .
-        │   │   └── dirty-peel-dot/       # dirty main; peel .; dir identity
-        │   ├── multi-repo/
-        │   │   ├── free-first-order/     # 3 dirty free-first + modules @
-        │   │   ├── clean-leaf-listed/    # clean leaf in nodes; not in peel
-        │   │   ├── require-edges/        # collapsed require edges + modules @
-        │   │   └── apply-hint/           # hint: apply would need land/pin flags
-        │   ├── module/
-        │   │   ├── replace-edge/         # replaced (not replace =>); multi-repo keys
-        │   │   ├── nested-module-listed/ # dirs . + pkgs/shared; collapsed replaced
-        │   │   └── require-drift/        # (latest …) when require ≠ dep latest
-        │   ├── tagscope/
-        │   │   └── latest-and-next/      # latest + next / owned-changed on dir .
-        │   ├── inventory-warn/
-        │   │   └── missing-replace-target/  # warning: + graph + exit 0
-        │   └── color/
-        │       ├── force-color/          # --color → ANSI on stdout
-        │       └── no-color/             # --no-color → plain stdout
-        └── json/
-            ├── shape-keys/               # repos/modules/summary/warnings + peel_order
-            └── free-first-peel-order/    # peel_order free-first array
+    │   └── two-cycle/                    # cycle preflight; no verify body
+    ├── pass/                             # all error checks pass → exit 0
+    │   ├── clean-stack/
+    │   ├── multi-repo-pinned/            # require == latest; no droppable replace
+    │   ├── inventory-warn/
+    │   │   └── missing-replace-target/   # warning: + exit 0
+    │   └── color/
+    │       ├── force-color/
+    │       └── no-color/
+    ├── fail/                             # any error check FAIL → exit 1
+    │   ├── dirty-peel/
+    │   ├── needs-land/
+    │   ├── owned-changed/
+    │   ├── require-drift/
+    │   ├── droppable-replace/
+    │   ├── cascade-pending/
+    │   └── force-color/                  # ANSI on FAIL
+    └── json/
+        ├── shape-keys-pass/
+        └── fail-status/
 ```
 
 Split factor (MECE, significance-first):
 
 1. **Mode** — dry-run plan | apply mutation | cycle preflight | **cascade** |
-   **show-graph**.
+   **show-graph** | **verify**.
 2. Within dry-run: **order/skip/flags** | **gen-commit staging vocabulary** |
    **follow-local-replace inventory expansion**.
 3. Within **cascade**: **dry-run vs apply** → (dry-run) `--tag-next`/cycle/shape;
@@ -370,6 +412,8 @@ Split factor (MECE, significance-first):
 5. Cycle (repo): dry-run vs apply-mode (same reject, no mutations).
 6. Within **show-graph**: **outcome** (reject | cycle | success) → stack shape /
    graph content → format (human | json).
+7. Within **verify**: **outcome** (reject | cycle | pass | fail | json) →
+   primary check id / soft-warn / color / JSON shape.
 
 ## Test Case Index
 
@@ -420,6 +464,30 @@ Split factor (MECE, significance-first):
 | G19 | show-graph/success/json/free-first-peel-order | peel_order free-first array | **GREEN** |
 | G20 | show-graph/success/human/color/force-color | `--color` → ANSI on stdout | **RED** |
 | G21 | show-graph/success/human/color/no-color | `--no-color` → plain / flag accepted | **RED** until flag |
+| V1 | verify/reject/bare-verify-without-unwind | bare `--verify` requires `--unwind` | **RED** until verify flag |
+| V2 | verify/reject/with-show-graph | exclusive with `--show-graph` | **RED** |
+| V3 | verify/reject/with-dry-run | exclusive with `--dry-run` | **RED** |
+| V4 | verify/reject/with-tag-next | exclusive with `--tag-next` | **RED** |
+| V5 | verify/reject/with-done | exclusive with `--done` | **RED** |
+| V6 | verify/reject/with-merge-back | exclusive with `--merge-back` | **RED** |
+| V7 | verify/reject/with-reinstall-local | exclusive with `--reinstall-local` | **RED** |
+| V8 | verify/reject/with-gen-commit-msg | exclusive with `--gen-commit-msg` | **RED** |
+| V9 | verify/reject/with-push | exclusive with `--push` | **RED** |
+| V10 | verify/cycle/two-cycle | cycle → non-zero; no verify body | **RED** |
+| V11 | verify/pass/clean-stack | clean tagged main; all 6 checks pass; exit 0 | **RED** |
+| V12 | verify/pass/multi-repo-pinned | require==latest; no droppable replace; pass | **RED** |
+| V13 | verify/pass/inventory-warn/missing-replace-target | `warning:` + checks pass; exit 0 | **RED** |
+| V14 | verify/pass/color/force-color | `--color` → ANSI on pass stdout | **RED** |
+| V15 | verify/pass/color/no-color | `--no-color` → plain | **RED** |
+| V16 | verify/fail/dirty-peel | dirty stack → dirty-peel FAIL; exit 1 | **RED** |
+| V17 | verify/fail/needs-land | linked dirty → needs-land FAIL; exit 1 | **RED** |
+| V18 | verify/fail/owned-changed | next tag planned → owned-changed FAIL | **RED** |
+| V19 | verify/fail/require-drift | require ≠ latest → require-drift FAIL | **RED** |
+| V20 | verify/fail/droppable-replace | external replace remains → FAIL | **RED** |
+| V21 | verify/fail/cascade-pending | cascade would still run → FAIL | **RED** |
+| V22 | verify/fail/force-color | `--color` ANSI on FAIL report | **RED** |
+| V23 | verify/json/shape-keys-pass | JSON keys + 6 pass checks; exit 0 | **RED** |
+| V24 | verify/json/fail-status | JSON require-drift fail; result fail; exit 1 | **RED** |
 | C-DR1 | cascade/dry-run/with-tag-next/single-repo-two-modules | single-repo root→shared; free-first tag shared then pin root; peel `.`; zero mut | **GREEN** (P1 sealed) |
 | C-DR2 | cascade/dry-run/with-tag-next/multi-repo-free-first | multi-repo both dirty; peel free-first **and** module cascade leaf before consumer | **GREEN** (P1 sealed) |
 | C-DR3 | cascade/dry-run/without-tag-next/peel-only-no-cascade | no `--tag-next` → peel-only; no cascade tag/pin lines | **GREEN** |
@@ -460,6 +528,7 @@ doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/apply/dirty-gomod/without-a
 doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/dry-run/with-tag-next/replace-only-external-clean-dep
 doctest test -count=1 ./cmd/wrk/tests/unwind/cascade/dry-run/with-tag-next/replace-only-intra-no-pin
 doctest test -count=1 ./cmd/wrk/tests/unwind/show-graph
+doctest test -count=1 ./cmd/wrk/tests/unwind/verify
 doctest test -count=1 ./cmd/wrk/tests/unwind/dry-run/follow-local-replace
 doctest test -count=1 ./cmd/wrk/tests/unwind/dry-run/free-first-order
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/multi-module-pin-require-root-only
@@ -468,11 +537,9 @@ doctest test -count=1 ./cmd/wrk/tests/unwind/apply/pin-on-linked-consumer-not-ma
 doctest test -count=1 ./cmd/wrk/tests/unwind/apply/leaf-then-pin
 ```
 
-Expected this cycle (**P1 extension — external replace needs-pin**): new **C-DR7**
-(Classic **RED** until planner treats droppable external stack replaces as
-needs-pin even when free dep is clean and require matches) and **C-DR8**
-(GREEN D4 control: intra replace alone must not invent pin). Do **not** rewrite
-sealed C-DR1–C-DR6 / apply cascade asserts. Apply interleaving remains P2+.
+Expected this cycle (**verify**): all **V1–V24** leaves **RED** until `--verify`
+flag, mutual exclusion, six-check report (human+JSON), and exit policy land.
+Do **not** rewrite sealed show-graph / cascade asserts.
 
 ```go
 import (

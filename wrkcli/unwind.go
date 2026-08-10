@@ -55,7 +55,9 @@ type UnwindFlags struct {
 	AddAll bool
 	// ShowGraph is the read-only inspect path (--unwind --show-graph).
 	ShowGraph bool
-	// JSON requests machine-readable show-graph output (only with ShowGraph).
+	// Verify is the read-only post-job audit path (--unwind --verify).
+	Verify bool
+	// JSON requests machine-readable show-graph / verify output.
 	JSON bool
 }
 
@@ -713,7 +715,7 @@ func countNotFullyStagedPaths(repoPath string) (int, error) {
 
 // runUnwind implements wrk --unwind [flags]. Dry-run prints the free-first plan;
 // apply peels free-first with explicit ship/land flags and pins consumers.
-// --show-graph is a read-only early path (no ValidateUnwindFlags / ApplyUnwind).
+// --show-graph / --verify are read-only early paths (no ValidateUnwindFlags / ApplyUnwind).
 func runUnwind(workDir string, flags UnwindFlags) error {
 	if flags.ShowGraph {
 		if flags.Color && flags.NoColor {
@@ -725,6 +727,16 @@ func runUnwind(workDir string, flags UnwindFlags) error {
 			colorOn = resolveStdoutColor(flags.Color, flags.NoColor)
 		}
 		return runUnwindShowGraph(workDir, flags.JSON, colorOn)
+	}
+	if flags.Verify {
+		if flags.Color && flags.NoColor {
+			return fmt.Errorf("wrk: --color and --no-color are mutually exclusive")
+		}
+		colorOn := false
+		if !flags.JSON {
+			colorOn = resolveStdoutColor(flags.Color, flags.NoColor)
+		}
+		return runUnwindVerify(workDir, flags.JSON, colorOn)
 	}
 	wrkHome, err := resolveWrkHome()
 	if err != nil {

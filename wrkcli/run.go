@@ -206,6 +206,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var mainFlag bool
 	var unwind bool
 	var showGraph bool
+	var verify bool
 	var pinLocals bool
 	var execArgs []string
 	// Manual commit message path: --commit -m/--message (wrk-owned; not AI gen).
@@ -265,6 +266,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--main", &mainFlag).
 		Bool("--unwind", &unwind).
 		Bool("--show-graph", &showGraph).
+		Bool("--verify", &verify).
 		Bool("--pin-locals", &pinLocals).
 		Bool("--reinstall-local", &reinstallLocal).
 		Bool("--tag-next", &tagNext).
@@ -1023,8 +1025,8 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		}
 	}
 	// --json is only valid with bare --tag-next (optionally --push), or with
-	// --unwind --show-graph; never with multi-stage compose or --done / --merge-back /
-	// --propagate-tags.
+	// --unwind --show-graph / --unwind --verify; never with multi-stage compose
+	// or --done / --merge-back / --propagate-tags.
 	if jsonFlag && done {
 		return fmt.Errorf("wrk: --json is not valid with --done")
 	}
@@ -1035,8 +1037,9 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		return fmt.Errorf("wrk: --json is not valid with --propagate-tags")
 	}
 	jsonWithShowGraph := unwind && showGraph
-	if jsonFlag && !tagNext && !jsonWithShowGraph {
-		return fmt.Errorf("wrk: --json is only valid with --tag-next or --unwind --show-graph")
+	jsonWithVerify := unwind && verify
+	if jsonFlag && !tagNext && !jsonWithShowGraph && !jsonWithVerify {
+		return fmt.Errorf("wrk: --json is only valid with --tag-next or --unwind --show-graph or --unwind --verify")
 	}
 	if jsonFlag && tagNext && (syncFlag || reinstallLocal || genCommitMsg || manualCommit || hasExec) {
 		return fmt.Errorf("wrk: --json is not valid with multi-stage compose (only with bare --tag-next)")
@@ -1070,22 +1073,25 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		return fmt.Errorf("wrk: unexpected arguments")
 	}
 
-	// --show-graph is only valid with --unwind (read-only stack graph).
+	// --show-graph / --verify are only valid with --unwind (read-only submodes).
 	if showGraph && !unwind {
 		return fmt.Errorf("wrk: --show-graph is only valid with --unwind")
+	}
+	if verify && !unwind {
+		return fmt.Errorf("wrk: --verify is only valid with --unwind")
 	}
 
 	// --unwind is a primary mode: stack DAG plan / cycle preflight / free-first peel.
 	// Composes with ship/land flags and repository-local post stages.
-	// --show-graph is a read-only submode: exclusive with dry-run and apply partners.
+	// --show-graph / --verify are read-only submodes: exclusive with dry-run and apply partners.
 	if unwind {
 		otherMode := list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || bringMode ||
 			propagateTags ||
 			taskFlagSet || setTaskFlagSet || cd || mainFlag ||
 			newFlag || hasExec || spawnTarget != ""
-		// --json is allowed only with --show-graph (G6); bare unwind rejects --json.
-		if jsonFlag && !showGraph {
+		// --json is allowed with --show-graph or --verify; bare unwind rejects --json.
+		if jsonFlag && !showGraph && !verify {
 			otherMode = true
 		}
 		if otherMode {
@@ -1093,6 +1099,9 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		}
 		if confirmFromStdin || forceConfirm || noInModuleReplace {
 			return fmt.Errorf("wrk: --unwind is mutually exclusive with other modes")
+		}
+		if showGraph && verify {
+			return fmt.Errorf("wrk: --verify is mutually exclusive with --show-graph")
 		}
 		if showGraph {
 			if dryRun {
@@ -1129,6 +1138,41 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 				return fmt.Errorf("wrk: --show-graph is mutually exclusive with --propagate-tags")
 			}
 		}
+		if verify {
+			if dryRun {
+				return fmt.Errorf("wrk: --verify cannot be used with --dry-run")
+			}
+			if done {
+				return fmt.Errorf("wrk: --verify is mutually exclusive with --done")
+			}
+			if mergeBack {
+				return fmt.Errorf("wrk: --verify is mutually exclusive with --merge-back")
+			}
+			if tagNext {
+				return fmt.Errorf("wrk: --verify is mutually exclusive with --tag-next")
+			}
+			if pushFlag {
+				return fmt.Errorf("wrk: --verify is mutually exclusive with --push")
+			}
+			if forcePush {
+				return fmt.Errorf("wrk: --verify is mutually exclusive with -f/--force")
+			}
+			if syncFlag {
+				return fmt.Errorf("wrk: --verify is mutually exclusive with --sync")
+			}
+			if reinstallLocal {
+				return fmt.Errorf("wrk: --verify is mutually exclusive with --reinstall-local")
+			}
+			if genCommitMsg {
+				return fmt.Errorf("wrk: --verify is mutually exclusive with --gen-commit-msg")
+			}
+			if manualCommit {
+				return fmt.Errorf("wrk: --verify is mutually exclusive with --commit")
+			}
+			if propagateTags {
+				return fmt.Errorf("wrk: --verify is mutually exclusive with --propagate-tags")
+			}
+		}
 		return runUnwind(workDir, UnwindFlags{
 			DryRun:         dryRun,
 			TagNext:        tagNext,
@@ -1144,6 +1188,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			GenCommitArgs:  genCommitArgs,
 			AddAll:         addAll,
 			ShowGraph:      showGraph,
+			Verify:         verify,
 			JSON:           jsonFlag,
 		})
 	}
@@ -1469,6 +1514,9 @@ Flags:
   --unwind --show-graph [--json] [--color|--no-color]
                                   read-only: print repo + module stack graph and peel order
                                   (mutually exclusive with --dry-run and apply/land/pin partners)
+  --unwind --verify [--json] [--color|--no-color]
+                                  read-only: post-job audit of peel/land/tags/require/replace/cascade
+                                  (exit 1 when any error check fails; exclusive with --show-graph and apply partners)
   --pin-locals [--dry-run]        add/normalize relative replace for already-required stack deps
                                   (inventory = unwind stack only; go mod tidy per consumer; soft tidy fails)
   --projects                      list recorded main repository paths
@@ -1521,7 +1569,7 @@ Flags:
                                   (order: commit → push → pr; with --push full-pushes tip before PR path)
   --title <title>                 with --pr create/attach: PR title (required, non-empty; only used on create)
   --comment <body>                with --pr: comment-only body, or create/attach initial body / additive comment
-  --json                          with bare --tag-next or --unwind --show-graph: machine-readable stdout
+  --json                          with bare --tag-next or --unwind --show-graph|--verify: machine-readable stdout
                                   (not valid with --propagate-tags)
   --task <desc>                   append task slug to worktree/branch names
   --set-task <desc>               rename worktree/branch to match new task
