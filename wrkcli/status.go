@@ -267,8 +267,17 @@ func runRepos(workDir string) error {
 	return nil
 }
 
+// discoverStatusRepos returns every live git checkout under root (consumer and
+// nested ./external/* dep worktrees of foreign mains, etc.).
+//
+// NoCache forces a complete cold walk so incomplete warm indexes (e.g. only the
+// consumer path after bring) cannot hide live under-root checkouts. Status and
+// --repos must report disk truth under the status root, not stale path rows.
 func discoverStatusRepos(ctx context.Context, root string) ([]scan_repo.Repo, error) {
-	result, err := scan_repo.Scan(ctx, scan_repo.Options{Roots: []string{root}})
+	result, err := scan_repo.Scan(ctx, scan_repo.Options{
+		Roots:   []string{root},
+		NoCache: true,
+	})
 	return result.Repos, err
 }
 
