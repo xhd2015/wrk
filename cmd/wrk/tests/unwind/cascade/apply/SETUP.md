@@ -80,6 +80,17 @@ const (
 
 	// Unrelated WIP path (not go.mod/go.sum) for selective-commit asserts (P3-2).
 	cascadeUnrelatedWIPFile = "WIP_NOTES.md"
+
+	// Push-before-cross-repo-pin (C-PUSH1): free monorepo nested cmd + external
+	// consumer whose module path sorts *before* nested so Kahn free order runs
+	// cross-repo network pin while same-main nested pin still defers free push.
+	// Consumer label/module must stay < example.com/dot-pkgs/cmd alphabetically.
+	pushCrossAppLabel      = "app"
+	pushCrossAppModule     = "example.com/app"
+	pushCrossNestedCmdDir  = "cmd"
+	pushCrossNestedCmdMod  = "example.com/dot-pkgs/cmd"
+	pushCrossNestedCmdOld  = "cmd/v0.0.1"
+	pushCrossNestedCmdNext = "cmd/v0.0.2"
 )
 
 // setupApplyCascadeSingleRepoTwoModules extends the dry-run single-repo fixture
@@ -627,6 +638,180 @@ func assertSequentialPinsOnWTAndCommits(t *testing.T, req *Request) {
 	}
 }
 
+// setupApplyCascadePushBeforeCrossRepoPin builds C-PUSH1:
+//
+//	free monorepo (dot-pkgs main under external):
+//	  example.com/dot-pkgs owned-changed → tag-next v0.0.2
+//	  example.com/dot-pkgs/cmd under cmd/ requires free @ v0.0.1 + keep-local
+//	    replace => ../ ; owned-changed → pin free then tag-next cmd/v0.0.2
+//	  bare origin for --push
+//	consumer main (primary, label "app", module example.com/app):
+//	  require free root @ v0.0.1 + droppable replace => ./external/…
+//	  path sorts before nested cmd so free-first Kahn runs cross-repo pin while
+//	  same-main nested pin still counts as remainingTouchesMain on free
+//	modproxy: free root old+next (tidy can resolve if push is late — order assert
+//	is the RED surface for deferred free push before network pin)
+//
+// Production analogue: agent-pro tag + cmd-doctest-harness same-main pin pending
+// while spl (earlier alpha module path) pins and go mod tidy needs remote tag.
+func setupApplyCascadePushBeforeCrossRepoPin(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.NestedModulePath = pushCrossNestedCmdMod
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- free monorepo main: root + nested cmd ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+
+	cmdDir := filepath.Join(leafMain, pushCrossNestedCmdDir)
+	mkdirAll(t, cmdDir)
+	writeGoModRequire(t, cmdDir, pushCrossNestedCmdMod, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	appendLocalReplace(t, cmdDir, unwindDotPkgsModule, "../")
+	writeFile(t, filepath.Join(cmdDir, "cmd.go"),
+		"package freecmd\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go",
+		filepath.Join(pushCrossNestedCmdDir, "go.mod"),
+		filepath.Join(pushCrossNestedCmdDir, "cmd.go"))
+	runGitIsolated(t, leafMain, "commit", "-m", "add free monorepo root + nested cmd")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	createLightweightTag(t, leafMain, pushCrossNestedCmdOld, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	if tagRefExists(t, leafMain, pushCrossNestedCmdOld) {
+		runGitIsolated(t, leafMain, "push", "origin", pushCrossNestedCmdOld)
+	}
+	req.OriginBare = leafBare
+
+	// --- consumer main: example.com/app (path before nested cmd for Kahn free order) ---
+	appMain := filepath.Join(req.WorkRoot, pushCrossAppLabel)
+	initGitRepoOnMain(t, appMain)
+	writeGoModRequire(t, appMain, pushCrossAppModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(appMain, "app.go"),
+		"package app\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, appMain, "add", "go.mod", "app.go")
+	runGitIsolated(t, appMain, "commit", "-m", "add app consumer require free root")
+	createLightweightTag(t, appMain, unwindApplyOldTag, "")
+	appMain = resolvePath(t, appMain)
+	req.MainRepo = appMain
+
+	appBare := setupBareOrigin(t, req.WorkRoot, "app-origin")
+	attachOriginAndPushMain(t, appMain, appBare)
+	if tagRefExists(t, appMain, unwindApplyOldTag) {
+		runGitIsolated(t, appMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "app-origin.path"), appBare+"\n")
+
+	// Nest free multi-module WT under consumer/external.
+	extDir := filepath.Join(appMain, "external")
+	mkdirAll(t, extDir)
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate(), leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+	req.WtBranch = branchNameMainDate()
+
+	// Owned change on free root + nested cmd (both need cascade work after peel).
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	writeFile(t, filepath.Join(leafExt, pushCrossNestedCmdDir, "cmd.go"),
+		"package freecmd\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, leafExt, "add", "pkg.go", filepath.Join(pushCrossNestedCmdDir, "cmd.go"))
+	runGitIsolated(t, leafExt, "commit", "-m", "free root + nested cmd owned change for next tags")
+	markDirty(t, leafExt)
+
+	// Droppable external replace free root only (cross-repo network pin after drop).
+	relReplace := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, appMain, unwindDotPkgsModule, "./"+relReplace)
+	writeFile(t, filepath.Join(appMain, ".gitignore"), "/external\n")
+	runGitIsolated(t, appMain, "add", "go.mod", ".gitignore")
+	runGitIsolated(t, appMain, "commit", "-m", "external free replace + ignore")
+
+	// Offline proxy: free root old+next so tidy can succeed even if push is late.
+	// The leaf asserts free *push* appears before cross-repo pin (ordering bug).
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	oldSeed := filepath.Join(req.WorkRoot, "seed-free-root-"+unwindApplyOldTag)
+	mkdirAll(t, oldSeed)
+	writeGoModRequire(t, oldSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(oldSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyOldTag, oldSeed)
+
+	nextSeed := filepath.Join(req.WorkRoot, "seed-free-root-"+unwindApplyNextTag)
+	mkdirAll(t, nextSeed)
+	writeGoModRequire(t, nextSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(nextSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyNextTag, nextSeed)
+
+	// Nested cmd baseline only (keep-local pin should not need next on proxy).
+	cmdOldSeed := filepath.Join(req.WorkRoot, "seed-free-cmd-"+unwindApplyOldTag)
+	mkdirAll(t, cmdOldSeed)
+	writeGoModRequire(t, cmdOldSeed, pushCrossNestedCmdMod)
+	writeFile(t, filepath.Join(cmdOldSeed, "cmd.go"),
+		"package freecmd\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, pushCrossNestedCmdMod, unwindApplyOldTag, cmdOldSeed)
+	enableFileModuleProxy(t, req, proxyRoot)
+
+	req.RepoDir = appMain
+	setPeelOrderDisplays(t, req, leafExt)
+}
+
+// assertFreePushBeforeCrossRepoPinOfFree locks C-PUSH1: after free root tag-next,
+// free main must be published (pushed main → …) before the cross-repo consumer
+// pin of free @ next. Nested same-main pins must not hold free push past that pin.
+func assertFreePushBeforeCrossRepoPinOfFree(t *testing.T, out string) {
+	t.Helper()
+	tagNeedle := "tag-next " + unwindDotPkgsModule + " @ " + unwindApplyNextTag
+	// Apply pin log uses stack repo labels (basenames), not module paths.
+	pinNeedle := "pin " + pushCrossAppLabel + " <- " + labelDotPkgs + " @ " + unwindApplyNextTag
+	pushNeedle := "pushed main →"
+
+	tagIdx := strings.Index(out, tagNeedle)
+	if tagIdx < 0 {
+		t.Fatalf("C-PUSH1: missing free root tag-next %q\nout:\n%s", tagNeedle, out)
+	}
+	pinIdx := strings.Index(out, pinNeedle)
+	if pinIdx < 0 {
+		// Tolerate label spelling variants still carrying free next pin.
+		alt := "<- " + labelDotPkgs + " @ " + unwindApplyNextTag
+		pinIdx = strings.Index(out, alt)
+		if pinIdx < 0 {
+			t.Fatalf("C-PUSH1: missing cross-repo pin of free @ next (want %q)\nout:\n%s",
+				pinNeedle, out)
+		}
+		pinNeedle = alt
+	}
+
+	// First free publish after free root tag (ignore earlier peels without tags).
+	searchFrom := tagIdx
+	relPush := strings.Index(out[searchFrom:], pushNeedle)
+	if relPush < 0 {
+		t.Fatalf("C-PUSH1: missing %q after free root tag-next (free must be pushed before cross-repo network pin)\nout:\n%s",
+			pushNeedle, out)
+	}
+	pushIdx := searchFrom + relPush
+
+	if !(tagIdx < pushIdx && pushIdx < pinIdx) {
+		t.Fatalf("C-PUSH1: want free tag-next, then free push, then cross-repo pin of free @ next\n"+
+			"tag@%d push@%d pin@%d\nneedles: %q → %q → %q\nout:\n%s",
+			tagIdx, pushIdx, pinIdx, tagNeedle, pushNeedle, pinNeedle, out)
+	}
+}
+
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = d
 	_ = t
@@ -636,6 +821,12 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = setupApplyCascadeMultiRepoBothDirty
 	_ = setupApplyCascadeSingleRepoThreeModules
 	_ = setupApplyCascadePartialEditTidyFail
+	_ = setupApplyCascadePushBeforeCrossRepoPin
+	_ = assertFreePushBeforeCrossRepoPinOfFree
+	_ = pushCrossAppLabel
+	_ = pushCrossAppModule
+	_ = pushCrossNestedCmdMod
+	_ = pushCrossNestedCmdNext
 	_ = dirtyRootGoModWIP
 	_ = dirtyUnrelatedWIPFile
 	_ = snapshotPartialEditWIP

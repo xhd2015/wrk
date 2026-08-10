@@ -724,9 +724,11 @@ func moduleDirOnCheckout(checkout string, n UnwindGraphModuleNode) string {
 
 // applyUnwindCascade runs PlanUnwindCascade steps after the land prelude:
 // one-scope tags, keep-local-replace pins, selective commits, push when a main
-// has no remaining cascade modules. addReinstallMainPath records mains for the
-// reinstall-local tail (may be nil). stats may be nil; when set, Tagged/Pinned/
-// Pushed are incremented on successful steps.
+// has no remaining cascade modules. Before a network pin (droppable external /
+// non-keep-local replace), free dep mains publish recorded tags first so
+// go mod tidy can resolve the new version (C-PUSH1). addReinstallMainPath
+// records mains for the reinstall-local tail (may be nil). stats may be nil;
+// when set, Tagged/Pinned/Pushed are incremented on successful steps.
 func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMainPath func(string), stats *UnwindApplyStats, tagCache tagScopePlanCache) error {
 	if len(members) == 0 {
 		return nil
@@ -753,6 +755,10 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 
 	// Tags created per main repo (for push).
 	tagsByMain := make(map[string][]string)
+	// pushedTagSet: tag refs already sent for a main (early network-pin push may
+	// publish root tags before nested same-main pins/tags advance the branch).
+	pushedTagSet := make(map[string]map[string]struct{})
+	// pushedMain: main has had at least one cascade push (branch and/or tags).
 	pushedMain := make(map[string]struct{})
 	// addAll: top-level flag or gen-commit peeled --add-all.
 	addAll := flags.AddAll || genArgsHasFlag(flags.GenCommitArgs, "--add-all")
@@ -818,33 +824,100 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 		return false
 	}
 
+	// pushMainTagsNow publishes cascade tags not yet sent for main, plus the
+	// branch. allowBranchRepush: when cascade work on main is finished, re-push
+	// the branch even if all tags were already published (early C-PUSH1 push
+	// then nested pin commits advance HEAD).
+	pushMainTagsNow := func(main string, allowBranchRepush bool) error {
+		if !flags.Push || main == "" {
+			return nil
+		}
+		main = storage.NormalizePath(main)
+		tags := tagsByMain[main]
+		if len(tags) == 0 {
+			return nil
+		}
+		seen := pushedTagSet[main]
+		if seen == nil {
+			seen = make(map[string]struct{})
+			pushedTagSet[main] = seen
+		}
+		var unpushed []string
+		for _, t := range tags {
+			if t == "" {
+				continue
+			}
+			if _, ok := seen[t]; ok {
+				continue
+			}
+			unpushed = append(unpushed, t)
+		}
+		if len(unpushed) == 0 {
+			if !allowBranchRepush {
+				return nil
+			}
+			if _, ok := pushedMain[main]; !ok {
+				// Never published this main; no unpushed tags left to send.
+				return nil
+			}
+			// Branch may have advanced after an early tag push (nested pin commit).
+			fmt.Println()
+			if err := runPushMain(main, false, flags.Force, nil); err != nil {
+				return err
+			}
+			return nil
+		}
+		fmt.Println()
+		if err := runPushMain(main, false, flags.Force, unpushed); err != nil {
+			return err
+		}
+		for _, t := range unpushed {
+			seen[t] = struct{}{}
+		}
+		if _, ok := pushedMain[main]; !ok {
+			pushedMain[main] = struct{}{}
+			if stats != nil {
+				stats.Pushed++
+			}
+		}
+		return nil
+	}
+
 	maybePushMain := func(main string, stepIdx int) error {
 		if !flags.Push || main == "" {
 			return nil
 		}
 		main = storage.NormalizePath(main)
-		if _, ok := pushedMain[main]; ok {
-			return nil
-		}
 		// Push when this main has no remaining cascade work and has tags to
 		// publish. Pin-only consumer mains (no cascade tag) are left local —
 		// matches pre-cascade peel push scope and fixtures without root origin.
+		// Nested same-main pins still defer here; network pins force publish via
+		// ensureDepPublishedForNetworkPin before tidy (C-PUSH1).
 		if remainingTouchesMain(stepIdx+1, main) {
 			return nil
 		}
-		tags := tagsByMain[main]
-		if len(tags) == 0 {
+		return pushMainTagsNow(main, true)
+	}
+
+	// ensureDepPublishedForNetworkPin pushes the dep main's cascade tags before
+	// a pin that will drop replace / resolve the require via proxy or VCS.
+	// Keep-local (intra filesystem replace) pins tidy against the local path and
+	// do not require the dep tag on the remote.
+	ensureDepPublishedForNetworkPin := func(consumerModDir, depModule string) error {
+		if !flags.Push || consumerModDir == "" || depModule == "" {
 			return nil
 		}
-		fmt.Println()
-		if err := runPushMain(main, false, flags.Force, tags); err != nil {
-			return err
+		keep, _ := localReplacePolicy(consumerModDir, depModule)
+		if keep {
+			return nil
 		}
-		pushedMain[main] = struct{}{}
-		if stats != nil {
-			stats.Pushed++
+		depMain, _, ok := mainForModule(depModule)
+		if !ok || depMain == "" {
+			return nil
 		}
-		return nil
+		// Only unpushed tags (no branch-only re-push): free may still receive
+		// nested pin commits after this early publish.
+		return pushMainTagsNow(depMain, false)
 	}
 
 	recordTag := func(main, tag string) {
@@ -913,6 +986,14 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			consumerModDir := moduleDirOn(consumerCheckout, consumerNode)
 			if consumerModDir == "" {
 				return fmt.Errorf("wrk: cascade pin: empty consumer module dir for %s", step.ModulePath)
+			}
+
+			// C-PUSH1: publish free dep tags before network pin+tidy. Nested
+			// same-main cascade work can leave remainingTouchesMain true, so
+			// maybePushMain after tag-next would still defer; cross-repo pin
+			// must not drop replace onto an unpublished version.
+			if err := ensureDepPublishedForNetworkPin(consumerModDir, step.DepModulePath); err != nil {
+				return err
 			}
 
 			// Dirty go.mod/go.sum without --add-all → partial edit (P3/D11):
@@ -1003,22 +1084,11 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 		}
 	}
 
-	// Push any tagged main not yet published (defensive).
+	// Push any tagged main not yet fully published (defensive).
 	if flags.Push {
-		for main, tags := range tagsByMain {
-			if _, ok := pushedMain[main]; ok {
-				continue
-			}
-			if len(tags) == 0 {
-				continue
-			}
-			fmt.Println()
-			if err := runPushMain(main, false, flags.Force, tags); err != nil {
+		for main := range tagsByMain {
+			if err := pushMainTagsNow(main, true); err != nil {
 				return err
-			}
-			pushedMain[main] = struct{}{}
-			if stats != nil {
-				stats.Pushed++
 			}
 		}
 	}
