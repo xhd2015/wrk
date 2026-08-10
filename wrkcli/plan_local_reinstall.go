@@ -618,6 +618,13 @@ func binAction(binDir, binName string) Action {
 	return ActionSkip
 }
 
+// ReinstallExecStats counts execute-path outcomes for --reinstall-local.
+type ReinstallExecStats struct {
+	Reinstalled int
+	Skipped     int
+	Failed      int
+}
+
 // runReinstallLocal implements wrk --reinstall-local [--dry-run] [--main] [--color].
 // dry-run prints the plan and does not run go install/run.
 // Without --dry-run, installs run sequentially (continue on failure).
@@ -627,19 +634,27 @@ func binAction(binDir, binName string) Action {
 // (from --main) scans the main repository of this checkout.
 // colorFlag forces ANSI on diagnostic prefixes when true.
 func runReinstallLocal(workDir string, dryRun bool, useMain bool, colorFlag bool) error {
+	_, err := runReinstallLocalEx(workDir, dryRun, useMain, colorFlag, false)
+	return err
+}
+
+// runReinstallLocalEx is runReinstallLocal with NoColor and returned execute stats.
+func runReinstallLocalEx(workDir string, dryRun bool, useMain bool, colorFlag, noColor bool) (ReinstallExecStats, error) {
+	var empty ReinstallExecStats
 	binDir, err := resolveLocalReinstallBinDir()
 	if err != nil {
-		return err
+		return empty, err
 	}
 	plan, err := PlanLocalReinstallsFromWorkDir(workDir, binDir, useMain)
 	if err != nil {
-		return err
+		return empty, err
 	}
-	colorOn := reinstallDiagColorEnabled(colorFlag)
+	diagColor := reinstallDiagColorEnabled(colorFlag)
+	stdoutColor := resolveStdoutColor(colorFlag, noColor)
 	if dryRun {
-		return printMultiLocalReinstallDryRun(plan, colorOn)
+		return empty, printMultiLocalReinstallDryRun(plan, diagColor)
 	}
-	return executeMultiLocalReinstalls(plan, colorOn)
+	return executeMultiLocalReinstalls(plan, diagColor, stdoutColor)
 }
 
 // reinstallDiagColorEnabled reports whether diagnostic prefix tokens should use ANSI.
@@ -854,15 +869,15 @@ func printPlanItemsDryRun(moduleRoot string, items []PlanItem, binDir string, nI
 // Skip items print the same skip: line as dry-run and do not invoke go.
 // Child stdout/stderr are streamed to the process. Continues after failures.
 // Summary: reinstalled N, skipped M, failed F. Soft: failed > 0 → stderr warning, exit 0.
-func executeLocalReinstalls(plan *LocalReinstallPlan, colorOn bool) error {
-	printReinstallDiagnostics(plan.Diagnostics, colorOn)
+func executeLocalReinstalls(plan *LocalReinstallPlan, diagColor, stdoutColor bool) error {
+	printReinstallDiagnostics(plan.Diagnostics, diagColor)
 	nReinstalled, nSkip, nFailed := 0, 0, 0
-	if err := executePlanItems(plan.ModuleRoot, plan.BinDir, plan.Items, &nReinstalled, &nSkip, &nFailed); err != nil {
+	if err := executePlanItems(plan.ModuleRoot, plan.BinDir, plan.Items, stdoutColor, &nReinstalled, &nSkip, &nFailed); err != nil {
 		return err
 	}
-	fmt.Printf("reinstalled %d, skipped %d, failed %d\n", nReinstalled, nSkip, nFailed)
+	fmt.Println(formatReinstallSummaryLine(nReinstalled, nSkip, nFailed, stdoutColor))
 	if nFailed > 0 {
-		printReinstallFailedWarning(nFailed, colorOn)
+		printReinstallFailedWarning(nFailed, diagColor)
 	}
 	return nil
 }
@@ -871,21 +886,23 @@ func executeLocalReinstalls(plan *LocalReinstallPlan, colorOn bool) error {
 // (module order, then BinName order within each module). Same progress/skip
 // lines and summary as single-module execute. Continues after failures.
 // Soft: failed > 0 → stderr warning, exit 0 (hard plan errors still fail).
-func executeMultiLocalReinstalls(plan *MultiLocalReinstallPlan, colorOn bool) error {
+func executeMultiLocalReinstalls(plan *MultiLocalReinstallPlan, diagColor, stdoutColor bool) (ReinstallExecStats, error) {
+	var st ReinstallExecStats
 	for _, mod := range plan.Modules {
-		printReinstallDiagnostics(mod.Diagnostics, colorOn)
+		printReinstallDiagnostics(mod.Diagnostics, diagColor)
 	}
 	nReinstalled, nSkip, nFailed := 0, 0, 0
 	for _, mod := range plan.Modules {
-		if err := executePlanItems(mod.ModuleRoot, plan.BinDir, mod.Items, &nReinstalled, &nSkip, &nFailed); err != nil {
-			return err
+		if err := executePlanItems(mod.ModuleRoot, plan.BinDir, mod.Items, stdoutColor, &nReinstalled, &nSkip, &nFailed); err != nil {
+			return st, err
 		}
 	}
-	fmt.Printf("reinstalled %d, skipped %d, failed %d\n", nReinstalled, nSkip, nFailed)
+	fmt.Println(formatReinstallSummaryLine(nReinstalled, nSkip, nFailed, stdoutColor))
 	if nFailed > 0 {
-		printReinstallFailedWarning(nFailed, colorOn)
+		printReinstallFailedWarning(nFailed, diagColor)
 	}
-	return nil
+	st = ReinstallExecStats{Reinstalled: nReinstalled, Skipped: nSkip, Failed: nFailed}
+	return st, nil
 }
 
 // printReinstallFailedWarning emits a soft-failure notice when installs fail.
@@ -902,7 +919,8 @@ func printReinstallFailedWarning(nFailed int, colorOn bool) {
 // Unknown method/action returns a hard error (stops the plan).
 // Install/run paths are re-rooted to the nearest go.mod under moduleRoot
 // (progress lines and cmd.Dir use the post-re-root path/root).
-func executePlanItems(moduleRoot, binDir string, items []PlanItem, nReinstalled, nSkip, nFailed *int) error {
+// stdoutColor greens the go install/run verb when true.
+func executePlanItems(moduleRoot, binDir string, items []PlanItem, stdoutColor bool, nReinstalled, nSkip, nFailed *int) error {
 	for _, it := range items {
 		switch it.Action {
 		case ActionInstall:
@@ -914,10 +932,10 @@ func executePlanItems(moduleRoot, binDir string, items []PlanItem, nReinstalled,
 			}
 			switch it.Method {
 			case MethodGoInstall:
-				fmt.Printf("go install %s\n", ownRel)
+				fmt.Println(formatGoInstallProgressLine(MethodGoInstall, ownRel, stdoutColor))
 				err = runGoInModule(ownRoot, "install", ownRel)
 			case MethodGoRunInstall:
-				fmt.Printf("go run %s\n", ownRel)
+				fmt.Println(formatGoInstallProgressLine(MethodGoRunInstall, ownRel, stdoutColor))
 				err = runGoInModule(ownRoot, "run", ownRel)
 			default:
 				return fmt.Errorf("unknown reinstall method %q for %s", it.Method, it.BinName)

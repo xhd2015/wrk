@@ -1,0 +1,33 @@
+## Expected
+
+- Exit code 0.
+- Help text (stdout and/or stderr) contains `--pin-locals`.
+
+## Exit Code
+
+- 0
+
+```go
+import (
+	"strings"
+
+	"github.com/xhd2015/doctest/assert"
+	"github.com/xhd2015/doctest/session"
+)
+
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
+	_ = req
+	assertErrIsNil(t, err)
+	if resp.ExitCode != 0 {
+		t.Fatalf("expected exit 0 for -h, got %d stdout=%q stderr=%q", resp.ExitCode, resp.Stdout, resp.Stderr)
+	}
+	help := resp.Stdout + resp.Stderr
+	if !strings.Contains(help, "--pin-locals") {
+		t.Fatalf("help must mention --pin-locals; got stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
+	}
+	assert.Output(t, help, `<contains>
+--pin-locals
+</contains>`)
+}
+```

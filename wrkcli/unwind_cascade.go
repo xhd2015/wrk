@@ -344,8 +344,9 @@ func refreshStackMembersAfterLand(members []StackMember) []StackMember {
 // applyUnwindCascade runs PlanUnwindCascade steps after the land prelude:
 // one-scope tags, keep-local-replace pins, selective commits, push when a main
 // has no remaining cascade modules. addReinstallMainPath records mains for the
-// reinstall-local tail (may be nil).
-func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMainPath func(string)) error {
+// reinstall-local tail (may be nil). stats may be nil; when set, Tagged/Pinned/
+// Pushed are incremented on successful steps.
+func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMainPath func(string), stats *UnwindApplyStats) error {
 	if len(members) == 0 {
 		return nil
 	}
@@ -459,6 +460,9 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			return err
 		}
 		pushedMain[main] = struct{}{}
+		if stats != nil {
+			stats.Pushed++
+		}
 		return nil
 	}
 
@@ -493,6 +497,9 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			}
 			fmt.Printf("tag-next %s @ %s\n", step.ModulePath, step.TagOrVersion)
 			recordTag(main, step.TagOrVersion)
+			if stats != nil {
+				stats.Tagged++
+			}
 			if addReinstallMainPath != nil {
 				addReinstallMainPath(main)
 			}
@@ -582,6 +589,9 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			if err := cascadeCommitPin(consumerCheckout, consumerModDir, step.DepModulePath, step.TagOrVersion, addAll); err != nil {
 				return pinFail(err)
 			}
+			if stats != nil {
+				stats.Pinned++
+			}
 
 			if usePartial {
 				// Restore original WIP bytes, then surgical require bump only (no tidy).
@@ -623,6 +633,9 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 				return err
 			}
 			pushedMain[main] = struct{}{}
+			if stats != nil {
+				stats.Pushed++
+			}
 		}
 	}
 	return nil

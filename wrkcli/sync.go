@@ -26,6 +26,13 @@ func IsWipSubject(subject string) bool {
 		strings.HasPrefix(s, "[wip]")
 }
 
+// SyncResult is the outcome of one runSync / runSyncOpts pass.
+type SyncResult struct {
+	IntoMain int
+	IntoWT   int
+	Skipped  int
+}
+
 // syncOpts configures runSync / composition dry-run planning.
 type syncOpts struct {
 	DryRun bool
@@ -33,6 +40,10 @@ type syncOpts struct {
 	// comparisons (composition dry-run after a planned merge that has not been
 	// applied yet). Real merges still use the named main branch.
 	PretendMainAt string
+	// Color forces stdout ANSI on the sync summary when true; with NoColor
+	// uses three-mode resolveStdoutColor.
+	Color   bool
+	NoColor bool
 }
 
 // runSync performs FF-only bi-directional sync between the main checkout and
@@ -42,34 +53,41 @@ type syncOpts struct {
 // Pass 2 distributes main into each strictly-behind worktree.
 // Partial skips warn on stderr and still exit 0.
 func runSync(workDir string, dryRun bool) error {
-	return runSyncOpts(workDir, syncOpts{DryRun: dryRun})
+	_, err := runSyncOpts(workDir, syncOpts{DryRun: dryRun})
+	return err
 }
 
-func runSyncOpts(workDir string, opts syncOpts) error {
+// runSyncWithColor is like runSync with explicit stdout color flags.
+func runSyncWithColor(workDir string, dryRun, color, noColor bool) (SyncResult, error) {
+	return runSyncOpts(workDir, syncOpts{DryRun: dryRun, Color: color, NoColor: noColor})
+}
+
+func runSyncOpts(workDir string, opts syncOpts) (SyncResult, error) {
+	var empty SyncResult
 	dryRun := opts.DryRun
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
-		return fmt.Errorf("resolve cwd: %w", err)
+		return empty, fmt.Errorf("resolve cwd: %w", err)
 	}
 	if !worktree.IsInsideWorkTree(cwd) {
-		return fmt.Errorf("%s is not a git repository", cwd)
+		return empty, fmt.Errorf("%s is not a git repository", cwd)
 	}
 
 	top, err := worktree.ShowToplevel(cwd)
 	if err != nil {
-		return fmt.Errorf("%s is not a git repository", cwd)
+		return empty, fmt.Errorf("%s is not a git repository", cwd)
 	}
 	mainRepo, err := worktree.ResolveMainRepo(top)
 	if err != nil {
-		return err
+		return empty, err
 	}
 
 	mainBranch, err := worktree.ReadBranch(mainRepo)
 	if err != nil {
-		return err
+		return empty, err
 	}
 	if mainBranch == "" || mainBranch == "HEAD" {
-		return fmt.Errorf("wrk: main repository is in detached HEAD (not on a named branch)")
+		return empty, fmt.Errorf("wrk: main repository is in detached HEAD (not on a named branch)")
 	}
 
 	// mainTipRef is used for CompareBranches / WIP range checks. When composition
@@ -81,7 +99,7 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 
 	linked, err := worktree.ListLinked(mainRepo)
 	if err != nil {
-		return err
+		return empty, err
 	}
 
 	var details []string
@@ -112,7 +130,7 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 		// Refresh main tip for successive FF harvests (or pretend tip on dry-run compose).
 		cmp, err := git.CompareBranches(mainRepo, mainTipRef, entry.Branch)
 		if err != nil {
-			return err
+			return empty, err
 		}
 		switch cmp.Relation {
 		case git.BranchRelationSame, git.BranchRelationBIsAncestorOfA:
@@ -141,7 +159,7 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 		}
 
 		if short, subject, ok, err := findFirstWipInRange(mainRepo, mainTipRef, entry.Branch); err != nil {
-			return err
+			return empty, err
 		} else if ok {
 			if _, seen := skipOnce[key]; !seen {
 				fmt.Fprintf(os.Stderr, "warning: skip %s: wip commit in range (%s %s)\n", entry.Branch, short, subject)
@@ -155,7 +173,7 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 		details = append(details, syncDetailPass1Line(entry.Branch, n))
 		if !dryRun {
 			if err := gitRunDir(mainRepo, "merge", "--ff-only", "--quiet", entry.Branch); err != nil {
-				return fmt.Errorf("git merge --ff-only %s: %w", entry.Branch, err)
+				return empty, fmt.Errorf("git merge --ff-only %s: %w", entry.Branch, err)
 			}
 			// Real harvest moves main tip; keep subsequent compares accurate.
 			mainTipRef = mainBranch
@@ -184,7 +202,7 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 
 		cmp, err := git.CompareBranches(mainRepo, mainTipRef, entry.Branch)
 		if err != nil {
-			return err
+			return empty, err
 		}
 		switch cmp.Relation {
 		case git.BranchRelationSame, git.BranchRelationAIsAncestorOfB:
@@ -212,14 +230,15 @@ func runSyncOpts(workDir string, opts syncOpts) error {
 		details = append(details, syncDetailPass2Line(entry.Branch, n))
 		if !dryRun {
 			if err := gitRunDir(entry.Path, "merge", "--ff-only", "--quiet", mainBranch); err != nil {
-				return fmt.Errorf("git merge --ff-only %s: %w", mainBranch, err)
+				return empty, fmt.Errorf("git merge --ff-only %s: %w", mainBranch, err)
 			}
 		}
 		intoWT++
 	}
 
-	writeSyncStdout(details, intoMain, intoWT, skipped, dryRun)
-	return nil
+	colorOn := resolveStdoutColor(opts.Color, opts.NoColor)
+	writeSyncStdout(details, intoMain, intoWT, skipped, dryRun, colorOn)
+	return SyncResult{IntoMain: intoMain, IntoWT: intoWT, Skipped: skipped}, nil
 }
 
 func syncEntryKey(e worktree.Entry) string {
@@ -244,7 +263,7 @@ func syncDetailPass2Line(branch string, n int) string {
 	return fmt.Sprintf("%s ← main  (+%d %s)", branch, n, syncCommitWord(n))
 }
 
-func writeSyncStdout(details []string, intoMain, intoWT, skipped int, dryRun bool) {
+func writeSyncStdout(details []string, intoMain, intoWT, skipped int, dryRun bool, colorOn bool) {
 	prefix := ""
 	if dryRun {
 		prefix = "would: "
@@ -259,7 +278,8 @@ func writeSyncStdout(details []string, intoMain, intoWT, skipped int, dryRun boo
 		b.WriteByte('\n')
 	}
 	b.WriteString(prefix)
-	fmt.Fprintf(&b, "synced: %d into main, %d into worktrees, %d skipped\n", intoMain, intoWT, skipped)
+	b.WriteString(formatSyncSummaryLine(intoMain, intoWT, skipped, colorOn))
+	b.WriteByte('\n')
 	fmt.Fprint(os.Stdout, b.String())
 }
 

@@ -59,6 +59,16 @@ type UnwindFlags struct {
 	JSON bool
 }
 
+// UnwindApplyStats counts successful apply stages for the end summary line.
+type UnwindApplyStats struct {
+	HadPeels    bool // true when PeelOrder was non-empty
+	Peeled      int
+	Tagged      int
+	Pinned      int
+	Pushed      int
+	Reinstalled int
+}
+
 // UnwindPlan is the free-first peel plan for dirty pending stack members.
 type UnwindPlan struct {
 	PeelOrder []string // labels, free-first
@@ -762,6 +772,10 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		return nil
 	}
 	byLabel := pickPeelMembersByLabel(members)
+	stdoutColor := resolveStdoutColor(flags.Color, flags.NoColor)
+	var stats UnwindApplyStats
+	stats.HadPeels = len(plan.PeelOrder) > 0
+
 	// Reinstall is a tail stage: collect each peeled/cascade main repository in
 	// deterministic free-first order, then run only after every peel and cascade
 	// succeeds. This avoids rebuilding from intermediate stack states.
@@ -852,7 +866,7 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 
 		if flags.Sync {
 			fmt.Println("---- sync linked worktrees ----")
-			if err := runSync(mainPath, false); err != nil {
+			if _, err := runSyncWithColor(mainPath, false, flags.Color, flags.NoColor); err != nil {
 				return err
 			}
 		}
@@ -865,46 +879,56 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 				if err := runPushMain(mainPath, false, flags.Force, nil); err != nil {
 					return err
 				}
+				stats.Pushed++
 			}
 			if err := pinConsumersOfPeeled(label, mainPath, nil, members, edges); err != nil {
 				return err
 			}
 		}
 		addReinstallMainPath(mainPath)
+		stats.Peeled++
 	}
 
 	if flags.TagNext {
 		// Linked paths may be removed by --done; remap to MainRepo so cascade
 		// graph/scan and tagscope plan against landed mains.
 		cascadeMembers := refreshStackMembersAfterLand(members)
-		if err := applyUnwindCascade(cascadeMembers, flags, addReinstallMainPath); err != nil {
+		if err := applyUnwindCascade(cascadeMembers, flags, addReinstallMainPath, &stats); err != nil {
 			return err
 		}
 	}
 
 	if flags.ReinstallLocal {
 		for _, mainPath := range reinstallMainPaths {
-			if err := runUnwindReinstallLocal(mainPath, flags.Color); err != nil {
+			n, err := runUnwindReinstallLocal(mainPath, flags.Color, flags.NoColor)
+			if err != nil {
 				return err
 			}
+			stats.Reinstalled += n
 		}
+	}
+
+	if line := formatUnwindSummaryLine(stats, flags, stdoutColor); line != "" {
+		fmt.Println()
+		fmt.Println(line)
 	}
 	return nil
 }
 
 // runUnwindReinstallLocal executes one unwind tail entry. A repository without
 // modules is not an error for a successful unwind, matching the compose tail.
-func runUnwindReinstallLocal(mainPath string, colorFlag bool) error {
-	err := runReinstallLocal(mainPath, false, true, colorFlag)
+// Returns the reinstalled binary count for the summary rollup.
+func runUnwindReinstallLocal(mainPath string, colorFlag, noColor bool) (int, error) {
+	st, err := runReinstallLocalEx(mainPath, false, true, colorFlag, noColor)
 	if err == nil {
-		return nil
+		return st.Reinstalled, nil
 	}
 	if strings.Contains(err.Error(), "no go.mod modules found") ||
 		strings.Contains(err.Error(), "no go.mod found") {
 		fmt.Fprintf(os.Stderr, "skip reinstall-local: %s\n", err.Error())
-		return nil
+		return 0, nil
 	}
-	return err
+	return 0, err
 }
 
 // pickPeelMembersByLabel chooses the checkout to peel for each label.

@@ -21,6 +21,7 @@ var genCommitMsgDisallowedFlags = []string{
 	"--fetch", "--github", "--add", "--rm", "--where", "--cd", "--main",
 	"--bring", "--no-dep", "--reinstall-local", "--tag-next",
 	"--propagate-tags", "--sync",
+	"--pin-locals",
 	"-t", "--task", "--set-task",
 	"--exec",
 	"--web", "--port", "--dev",

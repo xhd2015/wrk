@@ -16,6 +16,7 @@ var setConfigDisallowedFlags = []string{
 	"--scan-git-repos", "--no-cache", "--include-worktrees",
 	"--fetch", "--github", "--add", "--rm", "--where", "--cd", "--main",
 	"--bring", "--no-dep", "--tag-next", "--propagate-tags", "--sync", "--dry-run",
+	"--pin-locals",
 	"-t", "--task", "--set-task",
 	"--new",
 	"--exec",
