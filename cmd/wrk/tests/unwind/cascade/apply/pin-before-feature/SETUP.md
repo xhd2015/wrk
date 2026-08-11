@@ -31,9 +31,13 @@ dirty consumer (+ optional dirty free) + external replace
    pre-commit hook, and pin-before-feature history asserts.
 2. Leaves split on free-host shape / consumer dirt / replace form:
    - T1: pure multi-repo clean external replace-only
+   - A-clean-tag: **clean free already at LatestTag** → no free next tag / no free commit
+     (`external-clean-already-tagged-no-tag`; T1 seed + hard free-skip assert)
    - T2: free dirty external then consumer gen-commit
    - T-M1: **monorepo freeHost** (intra owned-changed) + clean external replace
    - T-tag1: **3-level freeHost** mid + dirty free (pin before free tag-next)
+   - A-root-tag: **diamond A←B, A←C, C←B all dirty** → consumer root **must** tag-next
+     (`diamond-all-dirty-consumer-must-tag`; hard assert A @ next at main HEAD)
    - T-spl / A1: **false freeHost** via noise intra pins + dirty free + replace-only
    - A2: false freeHost monorepo + **FEATURE_WIP** (pin then deferred feature)
    - A4: **clean** consumer porcelain + committed replace + dirty free
@@ -731,6 +735,167 @@ func setupApplyPinBeforeFeatureThreeLevelFreeHostDirty(t *testing.T, req *Reques
 		"package agentpro\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
 	seedFileModuleProxy(t, proxyRoot, unwindAgentProModule, unwindApplyNextTag, midNextSeed)
 	// Mid zip at next may require free@next from proxy during tidy of top.
+	enableFileModuleProxy(t, req, proxyRoot)
+
+	req.RepoDir = wtDir
+	setPeelOrderDisplays(t, req, leafExt, midExt, wtDir)
+}
+
+// setupApplyPinBeforeFeatureDiamondAllDirtyConsumerTag is A-root-tag fixture:
+//
+//	Diamond multi-repo stack (production-like A/external/B + A/external/C):
+//	  B leaf free (dot-pkgs): dirty owned-changed → next v0.0.2; bare origin
+//	  C mid freeHost (agent-pro): requires B; external replace → B; owned-changed
+//	    → next v0.0.2; FEATURE_WIP for early freeHost peel
+//	  A root consumer: requires B and C; external replaces → both; owned-changed
+//	    → next v0.0.2; FEATURE_WIP deferred peel after cascade pin
+//	modproxy: old+next for B and C (network pin after drop replace)
+//
+// Coverage gap: B1 multi-repo leaves lock free tags + consumer pins but never
+// assert consumer/root A receives tag-next at main HEAD after full recipe.
+// Expected GREEN: B, C, and A all tagged @ v0.0.2; A tag at main HEAD.
+func setupApplyPinBeforeFeatureDiamondAllDirtyConsumerTag(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- B leaf free main + origin (owned-changed → next tag) ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	installCascadePermissivePreCommit(t, leafMain)
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	req.OriginBare = leafBare
+
+	// --- C mid freeHost main + origin (requires free @ baseline) ---
+	midMain := filepath.Join(req.WorkRoot, labelAgentPro)
+	initGitRepoOnMain(t, midMain)
+	writeGoModRequire(t, midMain, unwindAgentProModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(midMain, "agent.go"),
+		"package agentpro\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, midMain, "add", "go.mod", "agent.go")
+	runGitIsolated(t, midMain, "commit", "-m", "add agent-pro mid freeHost")
+	createLightweightTag(t, midMain, unwindApplyOldTag, "")
+	midMain = resolvePath(t, midMain)
+	req.DepPath = midMain
+	installCascadePermissivePreCommit(t, midMain)
+
+	midBare := setupBareOrigin(t, req.WorkRoot, "mid-origin")
+	attachOriginAndPushMain(t, midMain, midBare)
+	if tagRefExists(t, midMain, unwindApplyOldTag) {
+		runGitIsolated(t, midMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "mid-origin.path"), midBare+"\n")
+
+	// --- A root consumer main + origin (requires B and C @ baseline) ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule,
+		unwindAgentProModule+"@"+unwindApplyOldTag,
+		unwindDotPkgsModule+"@"+unwindApplyOldTag,
+	)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport (\n\t_ \""+unwindAgentProModule+"\"\n\t_ \""+unwindDotPkgsModule+"\"\n)\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root diamond consumer")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "root-origin.path"), rootBare+"\n")
+
+	// Linked A = stack primary (cwd for inventory / deferred peel gen-commit).
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	// Nest C + B linked externals under A (sibling externals, production-like).
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+
+	midExtName := labelAgentPro + "-" + branchNameMainDate()
+	midExt := filepath.Join(extDir, midExtName)
+	runGitIsolated(t, midMain, "worktree", "add", "-b", branchNameMainDate()+"-mid", midExt)
+	midExt = resolvePath(t, midExt)
+	req.ExternalWtDir = midExt
+
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate()+"-leaf", leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+
+	// B dirty owned-changed after baseline tag → next v0.0.2.
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, leafExt, "add", "pkg.go")
+	runGitIsolated(t, leafExt, "commit", "-m", "leaf B feature for next tag")
+	markDirty(t, leafExt)
+
+	// C mid freeHost: droppable external replace → B + owned-changed + FEATURE_WIP.
+	appendLocalReplace(t, midExt, unwindDotPkgsModule, relLocalReplace(t, midExt, leafExt))
+	writeFile(t, filepath.Join(midExt, "agent.go"),
+		"package agentpro\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, midExt, "add", "go.mod", "agent.go")
+	runGitIsolated(t, midExt, "commit", "-m", "mid C replace to B + owned change")
+	dirtyCascadeFeatureWIP(t, midExt)
+	markDirty(t, midExt)
+	installCascadePermissivePreCommit(t, midExt)
+
+	// A root: droppable replaces → B and C; owned-changed → next; FEATURE_WIP deferred.
+	relMid := filepath.ToSlash(filepath.Join("external", midExtName))
+	relLeaf := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, wtDir, unwindAgentProModule, "./"+relMid)
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, "./"+relLeaf)
+	writeFile(t, filepath.Join(wtDir, "root.go"),
+		"package root\n\nimport (\n\t_ \""+unwindAgentProModule+"\"\n\t_ \""+unwindDotPkgsModule+"\"\n)\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	runGitIsolated(t, wtDir, "add", "go.mod", "root.go", ".gitignore")
+	runGitIsolated(t, wtDir, "commit", "-m", "root A diamond replaces + owned change")
+	dirtyCascadeFeatureWIP(t, wtDir)
+	markDirty(t, wtDir)
+	// Root hook: feature gen-commit must not see external replaces (pin first).
+	installCascadeNoLocalReplacePreCommit(t, wtDir)
+
+	// Offline proxy: B old+next, C old+next for pin+tidy after drop replace.
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyNextTag, leafExt)
+	oldLeafSeed := filepath.Join(req.WorkRoot, "seed-leaf-"+unwindApplyOldTag)
+	mkdirAll(t, oldLeafSeed)
+	writeGoModRequire(t, oldLeafSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(oldLeafSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyOldTag, oldLeafSeed)
+
+	seedFileModuleProxy(t, proxyRoot, unwindAgentProModule, unwindApplyOldTag, midMain)
+	midNextSeed := filepath.Join(req.WorkRoot, "seed-mid-"+unwindApplyNextTag)
+	mkdirAll(t, midNextSeed)
+	writeGoModRequire(t, midNextSeed, unwindAgentProModule, unwindDotPkgsModule+"@"+unwindApplyNextTag)
+	writeFile(t, filepath.Join(midNextSeed, "agent.go"),
+		"package agentpro\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindAgentProModule, unwindApplyNextTag, midNextSeed)
+	// Mid next zip may require free@next during tidy of root.
 	enableFileModuleProxy(t, req, proxyRoot)
 
 	req.RepoDir = wtDir
@@ -1701,6 +1866,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = setupApplyPinBeforeFeatureFreeDirty
 	_ = setupApplyPinBeforeFeatureMonorepoFreeHostExternal
 	_ = setupApplyPinBeforeFeatureThreeLevelFreeHostDirty
+	_ = setupApplyPinBeforeFeatureDiamondAllDirtyConsumerTag
 	_ = setupApplyPinBeforeFeatureFalseFreeHostIntraPins
 	_ = setupApplyPinBeforeFeatureFalseFreeHostIntraPinsWithFeatureWIP
 	_ = setupApplyPinBeforeFeatureCleanConsumerCommittedReplace

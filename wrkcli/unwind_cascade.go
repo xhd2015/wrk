@@ -759,22 +759,34 @@ func moduleDirOnCheckout(checkout string, n UnwindGraphModuleNode) string {
 // go mod tidy can resolve the new version (C-PUSH1). addReinstallMainPath
 // records mains for the reinstall-local tail (may be nil). stats may be nil;
 // when set, Tagged/Pinned/Pushed are incremented on successful steps.
-func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMainPath func(string), stats *UnwindApplyStats, tagCache tagScopePlanCache) error {
+//
+// deferTagLabels: pure pin-consumer RepoLabels from splitPeelOrderB1 whose
+// CascadeTagNext must wait until after deferred feature peels (B1 A-root-tag).
+// Pins for those modules still run; skipped TagNext steps are returned for
+// applyDeferredCascadeTags after peelLabels(deferred).
+func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMainPath func(string), stats *UnwindApplyStats, tagCache tagScopePlanCache, deferTagLabels []string) (skippedTags []UnwindCascadeStep, err error) {
 	if len(members) == 0 {
-		return nil
+		return nil, nil
 	}
 	plan, err := PlanUnwindCascadeCached(members, tagCache)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if plan == nil || len(plan.Steps) == 0 {
-		return nil
+		return nil, nil
+	}
+
+	deferTag := make(map[string]struct{}, len(deferTagLabels))
+	for _, lab := range deferTagLabels {
+		if lab != "" {
+			deferTag[lab] = struct{}{}
+		}
 	}
 
 	byLabel := pickPeelMembersByLabel(members)
 	nodes, _, err := buildUnwindModuleGraph(members, byLabel)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	nodeByPath := make(map[string]UnwindGraphModuleNode, len(nodes))
 	for _, n := range nodes {
@@ -961,15 +973,21 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			if step.ModulePath == "" || step.TagOrVersion == "" {
 				continue
 			}
-			main, _, ok := mainForModule(step.ModulePath)
+			main, label, ok := mainForModule(step.ModulePath)
 			if !ok {
-				return fmt.Errorf("wrk: cascade tag-next %s: no stack main for module", step.ModulePath)
+				return skippedTags, fmt.Errorf("wrk: cascade tag-next %s: no stack main for module", step.ModulePath)
+			}
+			// Pure pin-consumers deferred for feature peel: skip self-tag now so
+			// HEAD does not move past the tag later (A-root-tag). Pins still run.
+			if _, deferSelfTag := deferTag[label]; deferSelfTag {
+				skippedTags = append(skippedTags, step)
+				continue
 			}
 			if err := requireMainActiveRoot(main, "--tag-next"); err != nil {
-				return err
+				return skippedTags, err
 			}
 			if err := cascadeCreateOneTag(main, step.TagOrVersion); err != nil {
-				return err
+				return skippedTags, err
 			}
 			fmt.Printf("tag-next %s @ %s\n", step.ModulePath, step.TagOrVersion)
 			recordTag(main, step.TagOrVersion)
@@ -980,7 +998,7 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 				addReinstallMainPath(main)
 			}
 			if err := maybePushMain(main, i); err != nil {
-				return err
+				return skippedTags, err
 			}
 
 		case CascadePin:
@@ -989,15 +1007,15 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			}
 			consumerNode, ok := nodeByPath[step.ModulePath]
 			if !ok {
-				return fmt.Errorf("wrk: cascade pin: unknown consumer module %s", step.ModulePath)
+				return skippedTags, fmt.Errorf("wrk: cascade pin: unknown consumer module %s", step.ModulePath)
 			}
 			depNode, ok := nodeByPath[step.DepModulePath]
 			if !ok {
-				return fmt.Errorf("wrk: cascade pin: unknown dep module %s", step.DepModulePath)
+				return skippedTags, fmt.Errorf("wrk: cascade pin: unknown dep module %s", step.DepModulePath)
 			}
 			consumerMain, consumerLabel, ok := mainForModule(step.ModulePath)
 			if !ok {
-				return fmt.Errorf("wrk: cascade pin %s: no stack main", step.ModulePath)
+				return skippedTags, fmt.Errorf("wrk: cascade pin %s: no stack main", step.ModulePath)
 			}
 			_, depLabel, _ := mainForModule(step.DepModulePath)
 
@@ -1010,7 +1028,7 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			}
 			consumerModDir := moduleDirOn(consumerCheckout, consumerNode)
 			if consumerModDir == "" {
-				return fmt.Errorf("wrk: cascade pin: empty consumer module dir for %s", step.ModulePath)
+				return skippedTags, fmt.Errorf("wrk: cascade pin: empty consumer module dir for %s", step.ModulePath)
 			}
 
 			// C-PUSH1: publish free dep tags before network pin+tidy. Nested
@@ -1018,7 +1036,7 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			// maybePushMain after tag-next would still defer; cross-repo pin
 			// must not drop replace onto an unpublished version.
 			if err := ensureDepPublishedForNetworkPin(consumerModDir, step.DepModulePath); err != nil {
-				return err
+				return skippedTags, err
 			}
 
 			// Dirty go.mod/go.sum without --add-all → partial edit (P3/D11):
@@ -1029,17 +1047,17 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			if !addAll {
 				dirty, err := goModSumUncommittedAt(consumerCheckout, consumerModDir)
 				if err != nil {
-					return err
+					return skippedTags, err
 				}
 				if dirty {
 					usePartial = true
 					saved, err = saveGoModSumSnap(consumerModDir)
 					if err != nil {
-						return fmt.Errorf("wrk: cascade pin save go.mod/go.sum in %s: %w", consumerModDir, err)
+						return skippedTags, fmt.Errorf("wrk: cascade pin save go.mod/go.sum in %s: %w", consumerModDir, err)
 					}
 					if err := writeBaseGoModSum(consumerCheckout, consumerModDir); err != nil {
 						_ = restoreGoModSumSnap(consumerModDir, saved)
-						return fmt.Errorf("wrk: cascade pin restore Base go.mod/go.sum in %s: %w", consumerModDir, err)
+						return skippedTags, fmt.Errorf("wrk: cascade pin restore Base go.mod/go.sum in %s: %w", consumerModDir, err)
 					}
 				}
 			}
@@ -1063,10 +1081,10 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			}
 
 			if err := cascadePinKeepLocalReplace(consumerModDir, step.DepModulePath, step.TagOrVersion, depNode, byLabel); err != nil {
-				return pinFail(fmt.Errorf("wrk: cascade pin %s <- %s: %w", step.ModulePath, step.DepModulePath, err))
+				return skippedTags, pinFail(fmt.Errorf("wrk: cascade pin %s <- %s: %w", step.ModulePath, step.DepModulePath, err))
 			}
 			if err := goModTidy(consumerModDir); err != nil {
-				return pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
+				return skippedTags, pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
 			}
 			_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
 
@@ -1077,7 +1095,7 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			// Commit while WT still holds Base+pin (no WIP); restore WIP after.
 			// Pass consumerModDir so nested modules stage tools/go.mod, not only root.
 			if err := cascadeCommitPin(consumerCheckout, consumerModDir, step.DepModulePath, step.TagOrVersion, false); err != nil {
-				return pinFail(err)
+				return skippedTags, pinFail(err)
 			}
 			if stats != nil {
 				stats.Pinned++
@@ -1086,11 +1104,11 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			if usePartial {
 				// Restore original WIP bytes, then surgical require bump only (no tidy).
 				if err := restoreGoModSumSnap(consumerModDir, saved); err != nil {
-					return fmt.Errorf("wrk: cascade pin restore WIP go.mod/go.sum in %s: %w", consumerModDir, err)
+					return skippedTags, fmt.Errorf("wrk: cascade pin restore WIP go.mod/go.sum in %s: %w", consumerModDir, err)
 				}
 				if err := goModEditRequire(consumerModDir, step.DepModulePath, step.TagOrVersion); err != nil {
 					_ = restoreGoModSumSnap(consumerModDir, saved)
-					return fmt.Errorf("wrk: cascade pin surgical require bump %s@%s in %s: %w",
+					return skippedTags, fmt.Errorf("wrk: cascade pin surgical require bump %s@%s in %s: %w",
 						step.DepModulePath, step.TagOrVersion, consumerModDir, err)
 				}
 				// go mod edit may emit single-line require; expand to parenthesized
@@ -1104,7 +1122,7 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			if err := maybePushMain(consumerMain, i); err != nil {
 				// Push runs after successful pin; partial WT already restored.
 				// Do not wipe surgical bump — push failure is independent of WIP.
-				return err
+				return skippedTags, err
 			}
 		}
 	}
@@ -1113,7 +1131,99 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 	if flags.Push {
 		for main := range tagsByMain {
 			if err := pushMainTagsNow(main, true); err != nil {
+				return skippedTags, err
+			}
+		}
+	}
+	return skippedTags, nil
+}
+
+// applyDeferredCascadeTags creates planned NextTags at main HEAD after deferred
+// pure pin-consumer peels. Reuses tag names from the cascade plan (no re-tagscope).
+// With --push, publishes those tags and branch after local create.
+func applyDeferredCascadeTags(members []StackMember, steps []UnwindCascadeStep, flags UnwindFlags, addReinstallMainPath func(string), stats *UnwindApplyStats) error {
+	if len(steps) == 0 {
+		return nil
+	}
+	// After deferred peels (--done may remove WTs), resolve mains from refreshed inventory.
+	members = refreshStackMembersAfterLand(members)
+	byLabel := pickPeelMembersByLabel(members)
+	nodes, _, err := buildUnwindModuleGraph(members, byLabel)
+	if err != nil {
+		return err
+	}
+	nodeByPath := make(map[string]UnwindGraphModuleNode, len(nodes))
+	for _, n := range nodes {
+		if n.Path != "" {
+			nodeByPath[n.Path] = n
+		}
+	}
+	mainForModule := func(modPath string) (mainRepo string, ok bool) {
+		n, ok := nodeByPath[modPath]
+		if !ok || n.RepoLabel == "" {
+			return "", false
+		}
+		m, ok := byLabel[n.RepoLabel]
+		if !ok {
+			return "", false
+		}
+		main := m.MainRepo
+		if main == "" {
+			main = m.Path
+		}
+		main = storage.NormalizePath(main)
+		return main, main != ""
+	}
+
+	tagsByMain := make(map[string][]string)
+	recordTag := func(main, tag string) {
+		if main == "" || tag == "" {
+			return
+		}
+		main = storage.NormalizePath(main)
+		for _, t := range tagsByMain[main] {
+			if t == tag {
+				return
+			}
+		}
+		tagsByMain[main] = append(tagsByMain[main], tag)
+	}
+
+	for _, step := range steps {
+		if step.Kind != CascadeTagNext || step.ModulePath == "" || step.TagOrVersion == "" {
+			continue
+		}
+		main, ok := mainForModule(step.ModulePath)
+		if !ok {
+			return fmt.Errorf("wrk: deferred tag-next %s: no stack main for module", step.ModulePath)
+		}
+		if err := requireMainActiveRoot(main, "--tag-next"); err != nil {
+			return err
+		}
+		if err := cascadeCreateOneTag(main, step.TagOrVersion); err != nil {
+			return err
+		}
+		fmt.Printf("tag-next %s @ %s\n", step.ModulePath, step.TagOrVersion)
+		recordTag(main, step.TagOrVersion)
+		if stats != nil {
+			stats.Tagged++
+		}
+		if addReinstallMainPath != nil {
+			addReinstallMainPath(main)
+		}
+	}
+
+	if flags.Push {
+		for main, tags := range tagsByMain {
+			if len(tags) == 0 {
+				continue
+			}
+			fmt.Println()
+			if err := runPushMain(main, false, flags.Force, tags); err != nil {
 				return err
+			}
+			if stats != nil {
+				stats.Pushed++
 			}
 		}
 	}

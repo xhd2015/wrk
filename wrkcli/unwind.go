@@ -847,6 +847,8 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		// B1 interleaved free-first: free peels → cascade pin → consumer peels.
 		// Consumers that only need pin of a free dep must not gen-commit while a
 		// droppable external replace remains (D7 separate pin then feature commit).
+		// Pure pin-consumer TagNext is deferred until after those peels so the
+		// consumer self-tag lands at main HEAD (not pre-feature cascade tip).
 		early, deferred := splitPeelOrderB1(plan.PeelOrder, members)
 		if err := peelLabels(early); err != nil {
 			return err
@@ -857,10 +859,16 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		// (else pin commits land only on the post-land linked branch).
 		cascadeMembers := refreshStackMembersAfterLand(members)
 		cascadeMembers = remapPeeledLabelsToMain(cascadeMembers, early)
-		if err := applyUnwindCascade(cascadeMembers, flags, addReinstallMainPath, &stats, tagCache); err != nil {
+		skippedTags, err := applyUnwindCascade(cascadeMembers, flags, addReinstallMainPath, &stats, tagCache, deferred)
+		if err != nil {
 			return err
 		}
 		if err := peelLabels(deferred); err != nil {
+			return err
+		}
+		// Deferred pure pin-consumer peels advanced main past cascade pin tip;
+		// create planned NextTags at current main HEAD (reuse cascade plan names).
+		if err := applyDeferredCascadeTags(cascadeMembers, skippedTags, flags, addReinstallMainPath, &stats); err != nil {
 			return err
 		}
 	}
