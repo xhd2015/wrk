@@ -519,8 +519,6 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 		}
 	}
 
-	addAll := flags.AddAll || genArgsHasFlag(flags.GenCommitArgs, "--add-all")
-
 	for _, step := range plan.Steps {
 		if step.Kind != CascadePin {
 			continue
@@ -577,19 +575,18 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 		if err != nil {
 			return fmt.Errorf("wrk: ready-external pin save go.mod/go.sum in %s: %w", consumerModDir, err)
 		}
-		// Dirty go.mod/go.sum without --add-all → partial edit (same as cascade pin).
+		// Dirty go.mod/go.sum → partial edit (same as cascade pin). --add-all must
+		// not disable pin WIP isolation; it only affects feature gen-commit staging.
 		usePartial := false
-		if !addAll {
-			dirty, err := goModSumUncommittedAt(checkout, consumerModDir)
-			if err != nil {
-				return err
-			}
-			if dirty {
-				usePartial = true
-				if err := writeBaseGoModSum(checkout, consumerModDir); err != nil {
-					_ = restoreGoModSumSnap(consumerModDir, saved)
-					return fmt.Errorf("wrk: ready-external pin restore Base go.mod/go.sum in %s: %w", consumerModDir, err)
-				}
+		dirty, err := goModSumUncommittedAt(checkout, consumerModDir)
+		if err != nil {
+			return err
+		}
+		if dirty {
+			usePartial = true
+			if err := writeBaseGoModSum(checkout, consumerModDir); err != nil {
+				_ = restoreGoModSumSnap(consumerModDir, saved)
+				return fmt.Errorf("wrk: ready-external pin restore Base go.mod/go.sum in %s: %w", consumerModDir, err)
 			}
 		}
 
@@ -625,12 +622,16 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 		}
 
 		if usePartial {
+			// Restore WIP, then re-apply pin effects without tidy: drop droppable
+			// external replace + surgical require bump (keep intra). Without the
+			// drop, restored WIP would reintroduce the external replace that pin
+			// just committed away (pin-only staged go.mod).
 			if err := restoreGoModSumSnap(consumerModDir, saved); err != nil {
 				return fmt.Errorf("wrk: ready-external pin restore WIP go.mod/go.sum in %s: %w", consumerModDir, err)
 			}
-			if err := goModEditRequire(consumerModDir, step.DepModulePath, step.TagOrVersion); err != nil {
+			if err := cascadePinKeepLocalReplace(consumerModDir, step.DepModulePath, step.TagOrVersion, depNode, byLabel); err != nil {
 				_ = restoreGoModSumSnap(consumerModDir, saved)
-				return fmt.Errorf("wrk: ready-external pin surgical require bump %s@%s in %s: %w",
+				return fmt.Errorf("wrk: ready-external pin surgical pin effects %s@%s in %s: %w",
 					step.DepModulePath, step.TagOrVersion, consumerModDir, err)
 			}
 			_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
@@ -802,8 +803,6 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 	pushedTagSet := make(map[string]map[string]struct{})
 	// pushedMain: main has had at least one cascade push (branch and/or tags).
 	pushedMain := make(map[string]struct{})
-	// addAll: top-level flag or gen-commit peeled --add-all.
-	addAll := flags.AddAll || genArgsHasFlag(flags.GenCommitArgs, "--add-all")
 
 	mainForModule := func(modPath string) (mainRepo string, label string, ok bool) {
 		n, ok := nodeByPath[modPath]
@@ -1039,26 +1038,25 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 				return skippedTags, err
 			}
 
-			// Dirty go.mod/go.sum without --add-all → partial edit (P3/D11):
+			// Dirty go.mod/go.sum → partial edit (P3/D11), even with --add-all:
 			// save WIP → write Base → pin+tidy → selective commit → restore WIP
 			// + surgical require bumps only. On failure after save: restore WIP.
+			// --add-all only affects feature gen-commit staging, not pin isolation.
 			usePartial := false
 			var saved goModSumSnap
-			if !addAll {
-				dirty, err := goModSumUncommittedAt(consumerCheckout, consumerModDir)
+			dirty, err := goModSumUncommittedAt(consumerCheckout, consumerModDir)
+			if err != nil {
+				return skippedTags, err
+			}
+			if dirty {
+				usePartial = true
+				saved, err = saveGoModSumSnap(consumerModDir)
 				if err != nil {
-					return skippedTags, err
+					return skippedTags, fmt.Errorf("wrk: cascade pin save go.mod/go.sum in %s: %w", consumerModDir, err)
 				}
-				if dirty {
-					usePartial = true
-					saved, err = saveGoModSumSnap(consumerModDir)
-					if err != nil {
-						return skippedTags, fmt.Errorf("wrk: cascade pin save go.mod/go.sum in %s: %w", consumerModDir, err)
-					}
-					if err := writeBaseGoModSum(consumerCheckout, consumerModDir); err != nil {
-						_ = restoreGoModSumSnap(consumerModDir, saved)
-						return skippedTags, fmt.Errorf("wrk: cascade pin restore Base go.mod/go.sum in %s: %w", consumerModDir, err)
-					}
+				if err := writeBaseGoModSum(consumerCheckout, consumerModDir); err != nil {
+					_ = restoreGoModSumSnap(consumerModDir, saved)
+					return skippedTags, fmt.Errorf("wrk: cascade pin restore Base go.mod/go.sum in %s: %w", consumerModDir, err)
 				}
 			}
 
@@ -1089,9 +1087,8 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
 
 			// Selective commit of this module's go.mod/go.sum only (D7): never
-			// scoop feature WIP / --add-all extras into the pin auto-commit.
-			// --add-all still gates partial-edit vs pin-on-dirty above; only
-			// staging for the pin commit is forced selective.
+			// scoop feature WIP into the pin auto-commit. Staging for the pin
+			// commit is always selective (addAll=false), independent of --add-all.
 			// Commit while WT still holds Base+pin (no WIP); restore WIP after.
 			// Pass consumerModDir so nested modules stage tools/go.mod, not only root.
 			if err := cascadeCommitPin(consumerCheckout, consumerModDir, step.DepModulePath, step.TagOrVersion, false); err != nil {
@@ -1102,13 +1099,16 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			}
 
 			if usePartial {
-				// Restore original WIP bytes, then surgical require bump only (no tidy).
+				// Restore original WIP bytes, then re-apply pin effects without tidy:
+				// drop droppable external replace + surgical require bump (keep
+				// intra). Require-only bump would reintroduce external replaces
+				// from WIP that the pin commit already dropped (F1 isolation).
 				if err := restoreGoModSumSnap(consumerModDir, saved); err != nil {
 					return skippedTags, fmt.Errorf("wrk: cascade pin restore WIP go.mod/go.sum in %s: %w", consumerModDir, err)
 				}
-				if err := goModEditRequire(consumerModDir, step.DepModulePath, step.TagOrVersion); err != nil {
+				if err := cascadePinKeepLocalReplace(consumerModDir, step.DepModulePath, step.TagOrVersion, depNode, byLabel); err != nil {
 					_ = restoreGoModSumSnap(consumerModDir, saved)
-					return skippedTags, fmt.Errorf("wrk: cascade pin surgical require bump %s@%s in %s: %w",
+					return skippedTags, fmt.Errorf("wrk: cascade pin surgical pin effects %s@%s in %s: %w",
 						step.DepModulePath, step.TagOrVersion, consumerModDir, err)
 				}
 				// go mod edit may emit single-line require; expand to parenthesized
@@ -1464,18 +1464,21 @@ func goModSumRelPaths(checkout, modDir string) (modRel, sumRel string, err error
 	return modRel, sumRel, nil
 }
 
-// writeBaseGoModSum writes Base (index if staged, else HEAD) go.mod/go.sum into WT.
+// writeBaseGoModSum writes committed Base (HEAD) go.mod/go.sum into WT for
+// partial-edit pin isolation. Always HEAD — not the index — so staged WIP
+// (e.g. pin-only external replaces under --add-all) is never treated as Base
+// and scooped into cascade pin commits (F1).
 // go.mod is required at Base. go.sum is optional — missing Base go.sum removes WT go.sum.
 func writeBaseGoModSum(checkout, modDir string) error {
 	modRel, sumRel, err := goModSumRelPaths(checkout, modDir)
 	if err != nil {
 		return err
 	}
-	if err := writeBaseBlobToFile(checkout, modRel, filepath.Join(modDir, "go.mod")); err != nil {
+	if err := writeHeadBlobToFile(checkout, modRel, filepath.Join(modDir, "go.mod")); err != nil {
 		return err
 	}
 	sumDest := filepath.Join(modDir, "go.sum")
-	if err := writeBaseBlobToFile(checkout, sumRel, sumDest); err != nil {
+	if err := writeHeadBlobToFile(checkout, sumRel, sumDest); err != nil {
 		// go.sum often absent on minimal fixtures; drop any WIP go.sum for true Base.
 		_ = os.Remove(sumDest)
 		return nil
@@ -1483,25 +1486,19 @@ func writeBaseGoModSum(checkout, modDir string) error {
 	return nil
 }
 
-// writeBaseBlobToFile writes index-or-HEAD content of rel into dest.
-func writeBaseBlobToFile(checkout, rel, dest string) error {
-	data, err := readBaseBlob(checkout, rel)
+// writeHeadBlobToFile writes HEAD content of rel into dest.
+func writeHeadBlobToFile(checkout, rel, dest string) error {
+	data, err := readHeadBlob(checkout, rel)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(dest, data, 0o644)
 }
 
-// readBaseBlob returns file bytes from the index when rel is staged, else HEAD.
-func readBaseBlob(checkout, rel string) ([]byte, error) {
+// readHeadBlob returns file bytes from HEAD (committed Base for partial-edit).
+func readHeadBlob(checkout, rel string) ([]byte, error) {
 	relSlash := filepath.ToSlash(rel)
-	// Staged?
-	cached, err := gitOutputDir(checkout, "diff", "--cached", "--name-only", "--", rel)
 	src := "HEAD:" + relSlash
-	if err == nil && strings.TrimSpace(cached) != "" {
-		// Index stage 0: :path
-		src = ":" + relSlash
-	}
 	// Use raw Output so trailing newlines on go.mod/go.sum are preserved.
 	cmd := gitCommandDir(checkout, "show", src)
 	out, err := cmd.Output()

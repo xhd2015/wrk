@@ -941,10 +941,11 @@ func applyUnwindPeelOne(
 			// it). Do not unconditional git add -A before gen-commit so
 			// untracked dirt is not forced into the AI commit.
 			if err := runGenCommitMsgStage(m.Path, flags.GenCommitArgs, false); err != nil {
-				// Empty index without --add-all: AI gen-commit has nothing
-				// to work on. Soft-skip and let auto-commit / land handle
-				// remaining dirt (fixtures with only untracked dirt).
-				if genArgsHasFlag(flags.GenCommitArgs, "--add-all") || flags.AddAll || !isNoStagedGenCommitErr(err) {
+				// Empty index after pinReady (or no feature dirt): soft-skip
+				// gen-commit even with --add-all when worktree is clean so land
+				// can proceed. If still dirty, auto-commit remaining porcelain.
+				// Other gen-commit errors remain hard failures.
+				if !isNoStagedGenCommitErr(err) {
 					return err
 				}
 				if err := autoCommitIfDirty(m.Path); err != nil {
@@ -1133,7 +1134,8 @@ func pickPeelMembersByLabel(members []StackMember) map[string]StackMember {
 }
 
 // isNoStagedGenCommitErr reports the library "no staged changes" failure so
-// unwind can soft-skip AI gen-commit when the index is empty without --add-all.
+// unwind can soft-skip AI gen-commit when the index is empty (including after
+// pinReady with --add-all when the worktree is clean).
 func isNoStagedGenCommitErr(err error) bool {
 	if err == nil {
 		return false

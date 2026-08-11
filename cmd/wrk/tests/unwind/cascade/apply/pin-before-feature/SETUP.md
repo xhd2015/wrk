@@ -44,6 +44,9 @@ dirty consumer (+ optional dirty free) + external replace
    - A5: **resume** free already landed clean/untagged + consumer replace dirt
    - D1: **absolute-path** external replace (droppable; pin drops it)
    - C1: **free multi-module** (root + `cmd/`) both tag-next; consumer pins **root only**
+   - P-empty: **mid dirty + leaf clean + root go.mod-only** with `--add-all`
+     (`pin-only-consumer-empty-gen-commit-with-add-all`) — pinReady empties
+     index; must soft-skip gen-commit + land (not hard-fail / diverge)
 
 ## Context
 
@@ -739,6 +742,169 @@ func setupApplyPinBeforeFeatureThreeLevelFreeHostDirty(t *testing.T, req *Reques
 
 	req.RepoDir = wtDir
 	setPeelOrderDisplays(t, req, leafExt, midExt, wtDir)
+}
+
+// setupApplyPinOnlyConsumerEmptyGenCommitWithAddAll is P-empty fixture
+// (production repro: spl go.mod-only + dirty agent-pro + clean dot-pkgs):
+//
+//	leaf (dot-pkgs): clean at release tag v0.0.1 (no peel)
+//	mid (agent-pro): dirty FEATURE_WIP + optional replace→leaf; freeHost peel
+//	  gen-commits feature then lands → next tag v0.0.2
+//	root linked WT: **only uncommitted go.mod** with droppable external replaces
+//	  → mid (+ leaf); **no** FEATURE_WIP — pinReady/cascade consume all dirt
+//	modproxy old+next for mid/leaf; bare origins for --push
+//
+// Desired: exit 0; mid feature lands; root peels after pin (empty gen-commit
+// soft-skip with --add-all); merge-back so root branch not diverged from main;
+// cascade pin commits never scoop external replaces into pin subjects.
+// Classic RED today: --add-all disables partial-edit (pin scoop) + empty
+// gen-commit hard-fails → abort before root merge-back → Master diverged.
+func setupApplyPinOnlyConsumerEmptyGenCommitWithAddAll(t *testing.T, req *Request) {
+	t.Helper()
+
+	// Root pins mid after mid tags next; LeafModulePath = mid module for require asserts.
+	req.LeafModulePath = unwindAgentProModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- leaf free: clean @ v0.0.1 ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	installCascadePermissivePreCommit(t, leafMain)
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	req.OriginBare = leafBare
+
+	// --- mid freeHost: requires leaf; feature WIP peels early ---
+	midMain := filepath.Join(req.WorkRoot, labelAgentPro)
+	initGitRepoOnMain(t, midMain)
+	writeGoModRequire(t, midMain, unwindAgentProModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(midMain, "agent.go"),
+		"package agentpro\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, midMain, "add", "go.mod", "agent.go")
+	runGitIsolated(t, midMain, "commit", "-m", "add agent-pro mid")
+	createLightweightTag(t, midMain, unwindApplyOldTag, "")
+	midMain = resolvePath(t, midMain)
+	req.DepPath = midMain
+	installCascadePermissivePreCommit(t, midMain)
+
+	midBare := setupBareOrigin(t, req.WorkRoot, "mid-origin")
+	attachOriginAndPushMain(t, midMain, midBare)
+	if tagRefExists(t, midMain, unwindApplyOldTag) {
+		runGitIsolated(t, midMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "mid-origin.path"), midBare+"\n")
+
+	// --- root pure pinConsumer main + origin ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	// Require mid + leaf (production-like dual require); baseline without replace.
+	writeGoModRequire(t, rootMain, unwindRootModule,
+		unwindAgentProModule+"@"+unwindApplyOldTag,
+		unwindDotPkgsModule+"@"+unwindApplyOldTag,
+	)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport (\n\t_ \""+unwindAgentProModule+"\"\n\t_ \""+unwindDotPkgsModule+"\"\n)\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "root-origin.path"), rootBare+"\n")
+
+	// Linked root = primary (gen-commit only for linked peels).
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+
+	midExtName := labelAgentPro + "-" + branchNameMainDate()
+	midExt := filepath.Join(extDir, midExtName)
+	runGitIsolated(t, midMain, "worktree", "add", "-b", branchNameMainDate()+"-mid", midExt)
+	midExt = resolvePath(t, midExt)
+	req.ExternalWtDir = midExt
+
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate()+"-leaf", leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+	// Leaf stays clean (no markDirty / no post-tag commits).
+
+	// Mid: committed replace → clean leaf + staged FEATURE_WIP (feature peel).
+	appendLocalReplace(t, midExt, unwindDotPkgsModule, relLocalReplace(t, midExt, leafExt))
+	runGitIsolated(t, midExt, "add", "go.mod")
+	runGitIsolated(t, midExt, "commit", "-m", "mid replace to clean leaf")
+	dirtyCascadeFeatureWIP(t, midExt)
+	// Feature WIP alone is dirty; no extra DIRTY file required.
+	installCascadePermissivePreCommit(t, midExt)
+
+	// Root: ignore external/ committed; then **uncommitted** go.mod replaces only
+	// (staged) — pin-only consumer, no FEATURE_WIP.
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	runGitIsolated(t, wtDir, "add", ".gitignore")
+	runGitIsolated(t, wtDir, "commit", "-m", "ignore external stack members")
+
+	relMid := filepath.ToSlash(filepath.Join("external", midExtName))
+	relLeaf := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, wtDir, unwindAgentProModule, "./"+relMid)
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, "./"+relLeaf)
+	// Stage go.mod only (repro: "Changes to be committed: go.mod").
+	runGitIsolated(t, wtDir, "add", "--", "go.mod")
+	status := gitOutputIsolated(t, wtDir, "status", "--porcelain", "--", "go.mod")
+	if strings.TrimSpace(status) == "" {
+		t.Fatal("expected staged go.mod dirt on pin-only root consumer")
+	}
+	// Ensure no FEATURE_WIP on root (pin-only).
+	if _, err := os.Stat(filepath.Join(wtDir, cascadeFeatureWIPFile)); err == nil {
+		t.Fatal("pin-only root must not have FEATURE_WIP.md")
+	}
+	installCascadePermissivePreCommit(t, wtDir)
+
+	// Offline proxy: leaf @ old only (clean free); mid old+next for root pin after mid tag.
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	oldLeafSeed := filepath.Join(req.WorkRoot, "seed-leaf-"+unwindApplyOldTag)
+	mkdirAll(t, oldLeafSeed)
+	writeGoModRequire(t, oldLeafSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(oldLeafSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyOldTag, oldLeafSeed)
+
+	seedFileModuleProxy(t, proxyRoot, unwindAgentProModule, unwindApplyOldTag, midMain)
+	midNextSeed := filepath.Join(req.WorkRoot, "seed-mid-"+unwindApplyNextTag)
+	mkdirAll(t, midNextSeed)
+	writeGoModRequire(t, midNextSeed, unwindAgentProModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(midNextSeed, "agent.go"),
+		"package agentpro\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	writeFile(t, filepath.Join(midNextSeed, cascadeFeatureWIPFile), cascadeFeatureWIPBody)
+	seedFileModuleProxy(t, proxyRoot, unwindAgentProModule, unwindApplyNextTag, midNextSeed)
+	enableFileModuleProxy(t, req, proxyRoot)
+
+	req.RepoDir = wtDir
+	// Peel dirty only: mid + root (leaf clean).
+	setPeelOrderDisplays(t, req, midExt, wtDir)
 }
 
 // setupApplyPinBeforeFeatureDiamondAllDirtyConsumerTag is A-root-tag fixture:
@@ -1852,6 +2018,91 @@ func historyRepoForConsumer(t *testing.T, req *Request) string {
 	return ""
 }
 
+// assertLinkedBranchNotDivergedFromMain fails when linked branch and main have
+// different tips (post-land --merge-back should leave them identical or
+// fast-forwardable with zero unique commits either side).
+func assertLinkedBranchNotDivergedFromMain(t *testing.T, req *Request) {
+	t.Helper()
+	if req.MainRepo == "" || req.WtBranch == "" {
+		t.Fatal("MainRepo and WtBranch required for diverge assert")
+	}
+	main := req.MainRepo
+	// Count commits only on main vs only on linked branch.
+	// Format: <left>\t<right> for main...branch (left=main-only, right=branch-only).
+	out := strings.TrimSpace(gitOutputIsolated(t, main, "rev-list", "--left-right", "--count",
+		"main..."+req.WtBranch))
+	parts := strings.Fields(out)
+	if len(parts) != 2 {
+		t.Fatalf("rev-list left-right count parse %q", out)
+	}
+	if parts[0] != "0" || parts[1] != "0" {
+		t.Fatalf("P-empty: root branch must not diverge from main after land (want 0 0, got %s %s)\nmain log:\n%s\nbranch log:\n%s",
+			parts[0], parts[1],
+			gitOutputIsolated(t, main, "log", "--oneline", "--decorate", "-12", "main"),
+			gitOutputIsolated(t, main, "log", "--oneline", "--decorate", "-12", req.WtBranch))
+	}
+}
+
+// assertCascadePinCommitsNoExternalReplace fails if any cascade pin commit's
+// go.mod tree still contains an external-style replace (./external/ or ../).
+// Locks --add-all pin isolation: pin subjects must not scoop WIP replaces.
+func assertCascadePinCommitsNoExternalReplace(t *testing.T, repo string) {
+	t.Helper()
+	if repo == "" {
+		t.Fatal("repo required")
+	}
+	// List SHAs of cascade pin commits (newest first).
+	log := gitOutputIsolated(t, repo, "log", "--all", "--format=%H", "--grep", cascadePinCommitPrefix)
+	if strings.TrimSpace(log) == "" {
+		// No pin commits at all is a separate failure (caller may require pins).
+		return
+	}
+	for _, sha := range strings.Split(strings.TrimSpace(log), "\n") {
+		sha = strings.TrimSpace(sha)
+		if sha == "" {
+			continue
+		}
+		goMod, err := git_isolated.CombinedOutput(repo, "show", sha+":go.mod")
+		if err != nil {
+			// Pin may touch nested module only; skip missing root go.mod.
+			continue
+		}
+		body := string(goMod)
+		for _, line := range strings.Split(body, "\n") {
+			trim := strings.TrimSpace(line)
+			if !strings.Contains(trim, "=>") {
+				continue
+			}
+			if strings.Contains(trim, "./external/") || strings.Contains(trim, "=> ../") ||
+				strings.Contains(trim, "=> /") {
+				subj := strings.TrimSpace(gitOutputIsolated(t, repo, "log", "-1", "--format=%s", sha))
+				short := sha
+				if len(short) > 7 {
+					short = short[:7]
+				}
+				t.Fatalf("P-empty: cascade pin commit must not scoop external replace\ncommit %s %s\nline: %s\ngo.mod:\n%s",
+					short, subj, trim, body)
+			}
+		}
+	}
+}
+
+// assertMidFeatureLanded checks mid main (DepPath) has the gen-commit feature subject.
+func assertMidFeatureLanded(t *testing.T, req *Request) {
+	t.Helper()
+	mid := req.DepPath
+	if mid == "" {
+		t.Fatal("DepPath (mid main) required")
+	}
+	log := gitOutputIsolated(t, mid, "log", "--oneline", "-15")
+	if !strings.Contains(log, cascadeFeatureCommitSubject) {
+		t.Fatalf("mid main must land feature gen-commit %q\nlog:\n%s",
+			cascadeFeatureCommitSubject, log)
+	}
+	// FEATURE_WIP present on mid history.
+	assertFeatureWIPLanded(t, mid)
+}
+
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = d
 	_ = t
@@ -1866,6 +2117,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = setupApplyPinBeforeFeatureFreeDirty
 	_ = setupApplyPinBeforeFeatureMonorepoFreeHostExternal
 	_ = setupApplyPinBeforeFeatureThreeLevelFreeHostDirty
+	_ = setupApplyPinOnlyConsumerEmptyGenCommitWithAddAll
 	_ = setupApplyPinBeforeFeatureDiamondAllDirtyConsumerTag
 	_ = setupApplyPinBeforeFeatureFalseFreeHostIntraPins
 	_ = setupApplyPinBeforeFeatureFalseFreeHostIntraPinsWithFeatureWIP
@@ -1888,6 +2140,9 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = assertConsumerRequireAndNoExternalReplace
 	_ = assertCascadePinBeforeFeatureCommit
 	_ = assertFeatureWIPLanded
+	_ = assertLinkedBranchNotDivergedFromMain
+	_ = assertCascadePinCommitsNoExternalReplace
+	_ = assertMidFeatureLanded
 	_ = historyRepoForConsumer
 	_ = featureCommitSHA
 	_ = cascadeFeatureWIPFile
@@ -1896,3 +2151,4 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	return nil
 }
 ```
+
