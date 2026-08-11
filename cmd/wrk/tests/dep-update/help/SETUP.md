@@ -1,10 +1,11 @@
 # Scenario
 
-**Feature**: wrk root help documents --dep-update
+**Feature**: wrk root help documents --dep-update and partner --all
 
 ```
 wrk -h
   -> root usage mentions --dep-update
+  -> root usage mentions --all with --dep-update (inventory pull)
 ```
 
 ## Steps

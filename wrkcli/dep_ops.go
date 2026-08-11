@@ -42,12 +42,12 @@ func runDepReplace(workDir string, paths []string, dryRun bool) error {
 	return nil
 }
 
-// runDepUpdate implements wrk --dep-update <dir>… [--dry-run].
+// runDepUpdate implements wrk --dep-update <dir>… [--dry-run] (dir mode).
 // Drops replace and sets require to the latest matching tag via update.Pin.
-// No tidy. Multi-arg fail-fast.
+// No tidy. Multi-arg fail-fast. Caller ensures paths non-empty (or use --all).
 func runDepUpdate(workDir string, paths []string, dryRun bool) error {
 	if len(paths) == 0 {
-		return fmt.Errorf("wrk: --dep-update requires a directory")
+		return fmt.Errorf("wrk: --dep-update requires a directory or --all")
 	}
 	consumerDir, err := findModuleRootWalking(workDir)
 	if err != nil {

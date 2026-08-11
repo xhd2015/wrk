@@ -1,12 +1,12 @@
 ## Expected
 
 - Non-zero exit.
-- Stderr indicates missing directory argument.
+- Stderr indicates missing directory argument and/or need for `--all`.
 - No `dep-update ` success lines.
 
 ## Errors
 
-- Empty paths → Error requires directory.
+- Empty paths and no `--all` → Error requires directory or `--all`.
 
 ## Exit Code
 
@@ -25,11 +25,13 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertErrIsNil(t, err)
 	assertExitNonZero(t, resp)
 	se := strings.ToLower(resp.Stderr)
+	// Accept pre-migration "requires a directory" and post "directory or --all".
 	if !strings.Contains(se, "director") &&
 		!strings.Contains(se, "path") &&
 		!strings.Contains(se, "requires") &&
-		!strings.Contains(se, "argument") {
-		t.Fatalf("stderr should indicate missing directory arg, got %q", resp.Stderr)
+		!strings.Contains(se, "argument") &&
+		!strings.Contains(se, "--all") {
+		t.Fatalf("stderr should indicate missing directory or --all, got %q", resp.Stderr)
 	}
 	assertNotContains(t, resp.Stdout, "dep-update ")
 }

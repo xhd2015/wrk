@@ -209,7 +209,8 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var verify bool
 	var pinLocals bool
 	var depReplacePaths []string
-	var depUpdatePaths []string
+	var depUpdate bool
+	var allFlag bool
 	var execArgs []string
 	// Manual commit message path: --commit -m/--message (wrk-owned; not AI gen).
 	// When --gen-commit-msg peels --commit/--no-verify/--add-all, those stay in genArgs.
@@ -271,7 +272,8 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--verify", &verify).
 		Bool("--pin-locals", &pinLocals).
 		StringSlice("--dep-replace", &depReplacePaths).
-		StringSlice("--dep-update", &depUpdatePaths).
+		Bool("--dep-update", &depUpdate).
+		Bool("--all", &allFlag).
 		Bool("--reinstall-local", &reinstallLocal).
 		Bool("--tag-next", &tagNext).
 		Bool("--propagate-tags", &propagateTags).
@@ -323,23 +325,38 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		return err
 	}
 
-	// --dep-replace / --dep-update: multi-value sugar (remaining args are extra
-	// dep dirs). Absorb before remaining-count limits so multi-dir works with
-	// StringSlice (one value per flag occurrence). Clear remaining so they are
-	// not treated as sourceDir/workDir overrides.
-	if len(depReplacePaths) > 0 && len(depUpdatePaths) > 0 {
+	// --dep-update is a Bool mode; dep dirs are remaining args (dir mode) or
+	// partner --all (inventory pull). --dep-replace still uses StringSlice +
+	// remaining multi-value sugar. Clear remaining so paths are not treated as
+	// sourceDir/workDir overrides.
+	depReplaceMode := len(depReplacePaths) > 0
+	depUpdateMode := depUpdate
+
+	if allFlag && !depUpdate {
+		return fmt.Errorf("wrk: --all is only valid with --dep-update")
+	}
+	if depUpdate && depReplaceMode {
 		return fmt.Errorf("wrk: --dep-replace and --dep-update are mutually exclusive")
 	}
-	if len(depReplacePaths) > 0 {
+
+	var depUpdatePaths []string
+	if depUpdate {
+		if allFlag {
+			if len(remaining) > 0 {
+				return fmt.Errorf("wrk: --dep-update --all cannot take directory arguments")
+			}
+		} else {
+			depUpdatePaths = append(depUpdatePaths, remaining...)
+			remaining = nil
+			if len(depUpdatePaths) == 0 {
+				return fmt.Errorf("wrk: --dep-update requires a directory or --all")
+			}
+		}
+	}
+	if depReplaceMode {
 		depReplacePaths = append(depReplacePaths, remaining...)
 		remaining = nil
 	}
-	if len(depUpdatePaths) > 0 {
-		depUpdatePaths = append(depUpdatePaths, remaining...)
-		remaining = nil
-	}
-	depReplaceMode := len(depReplacePaths) > 0
-	depUpdateMode := len(depUpdatePaths) > 0
 
 	// --force-cd and --no-cd are mutually exclusive (hard error before any work).
 	if forceCd && noCd {
@@ -1296,8 +1313,11 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if depReplaceMode {
 		return runDepReplace(workDir, depReplacePaths, dryRun)
 	}
-	// --dep-update: drop replace + require latest tag (no tidy).
+	// --dep-update: dir pin (no tidy) or --all inventory pull (+ tidy).
 	if depUpdateMode {
+		if allFlag {
+			return runDepUpdateAll(workDir, wrkHome, dryRun)
+		}
 		return runDepUpdate(workDir, depUpdatePaths, dryRun)
 	}
 	// Bare / --main --reinstall-local before bare --main so compose does not open a nested shell.
@@ -1580,6 +1600,9 @@ Flags:
                                   absolute replace into nearest consumer go.mod (no tidy; fail-fast multi-dir)
   --dep-update <dir>… [--dry-run]
                                   drop replace + require latest git tag in nearest consumer go.mod (no tidy)
+  --dep-update --all [--dry-run]  pin inventory-owned requires under git toplevel of cwd to latest tags;
+                                  go mod tidy once per affected consumer module (no commit/build)
+  --all                           with --dep-update: inventory pull mode (not a standalone mode)
   --projects                      list recorded main repository paths
   --projects-dep-graph            module-level dep graph across registered projects
   --scan-git-repos [ROOT...]      list valid git repos under roots (print-only; never mutates projects.json; default: ~)

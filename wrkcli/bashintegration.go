@@ -128,6 +128,7 @@ var wrkCompletionFlags = []string{
 	"--pin-locals",
 	"--dep-replace",
 	"--dep-update",
+	"--all",
 	"--bring",
 	"--no-dep",
 	"--tag-next",

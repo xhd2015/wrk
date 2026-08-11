@@ -1,48 +1,69 @@
 # Scenario
 
-**Feature**: wrk --dep-update drops replace and pins require to latest git tag
+**Feature**: wrk --dep-update dir pin + inventory pull (`--all`)
 
 ```
-# isolated WRK_HOME; consumer go.mod + git-tagged dep module(s)
-consumer has replace + old require
+# isolated WRK_HOME; consumer go.mod + git-tagged dep / owner modules
+# dir mode: consumer has replace + old require
   -> wrk --dep-update <dir>… [--dry-run]
   -> dry-run: would: dep-update <mod> -> vN.N.N; no write
   -> apply: drop replace; require@latest; dep-update line; no tidy
-  -> no tags / exclusive / empty: Error non-zero
+# --all mode: git toplevel consumers + BuildInventory owners
+  -> wrk --dep-update --all [--dry-run]
+  -> pin inventory-owned outdated requires; tidy affected modules
+  -> skip external / same-toplevel filesystem replace; warn no-tag
+  -> no dirs / exclusive / bare --all: Error non-zero
 ```
 
 ## Preconditions
 
 - Nested root: **no inheritance** from `cmd/wrk/tests` monotree.
-- Go toolchain and **git** on PATH (tag resolution under DepDir).
+- Go toolchain and **git** on PATH (tag resolution; `--all` tidy).
 - Per-leaf `t.TempDir()` WorkRoot; `WRK_HOME={WorkRoot}/.wrk`.
 - L2: `req.InProcess = true` (wrkcli.Capture).
 - Fixtures seed git tags with `git tag` (isolated git).
+- `--all` apply leaves may seed `{WorkRoot}/modproxy` + `GOPROXY=file://…`
+  so offline `go mod tidy` resolves synthetic `example.com/*` versions.
+- Parallel-safe: no process env/cwd mutation; inject Env/Dir via Capture.
 
 ## Steps
 
 1. Root `Setup` creates isolated WorkRoot / WrkHome.
-2. Leaves seed consumer + tagged dep git repos; set Args / paths.
+2. Leaves seed consumer + tagged dep/owner git repos; set Args / paths.
 3. Root `Run` invokes Capture.
 
 ## Context
 
-- **Module paths:**
+- **Dir-mode module paths:**
   - `example.com/consumer` — nearest consumer
   - `example.com/dep` — primary dep (root-module tags `v0.0.1`, `v0.0.2`)
   - `example.com/dep2` — second dep for multi-dir
-- **Nested monorepo dep:** git root without go.mod; module at `packages/dep`
+- **Nested monorepo dep (dir):** git root without go.mod; module at `packages/dep`
   with tags `packages/dep/v0.0.1`, `packages/dep/v0.0.2` → version `v0.0.2`.
-- **Stdout apply:** `dep-update <module> -> v0.0.2` (+ optional tag form)
-- **Dry-run:** `would: dep-update …`
+- **`--all` module paths:**
+  - `example.com/lib` — inventory owner (tags `v1.0.0`, `v1.2.3`)
+  - `example.com/app` — consumer under git toplevel (need not be registered)
+  - `example.com/external` — non-inventory require (silent skip)
+  - `example.com/mono` / `example.com/mono/lib` — same-toplevel local replace skip
+  - Nested owner: monorepo owner with `packages/dep` module path
+    `example.com/lib/dep`, tags `packages/dep/v0.1.0`, `packages/dep/v0.2.0`
+- **Stdout dir apply:** `dep-update <module> -> v0.0.2` (+ optional tag form)
+- **Stdout `--all` apply:** pin lines + `go mod tidy ok  module …` + summary
+- **Dry-run dir:** `would: dep-update …`
+- **Dry-run `--all`:** `would: dep-update …` + `would: go mod tidy  module …` +
+  `dep-update: would update N, already A, skipped S`
 
 ```go
 import (
+	"archive/zip"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xhd2015/doctest/session"
 	"github.com/xhd2015/gitops/git/git_isolated"
@@ -54,6 +75,13 @@ const (
 	modConsumer = "example.com/consumer"
 	modDep      = "example.com/dep"
 	modDep2     = "example.com/dep2"
+
+	modApp      = "example.com/app"
+	modLib      = "example.com/lib"
+	modLibDep   = "example.com/lib/dep"
+	modExternal = "example.com/external"
+	modMono     = "example.com/mono"
+	modMonoLib  = "example.com/mono/lib"
 )
 
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
@@ -269,6 +297,429 @@ func setupDepOnlyTagged(t *testing.T, req *Request) {
 	req.WantVersion = "v0.0.2"
 }
 
+// --- projects.json + --all fixtures ---
+
+type projectsJSONEntry struct {
+	Path    string `json:"path"`
+	AddedAt string `json:"added_at"`
+	Source  string `json:"source"`
+}
+
+type projectsJSONFile struct {
+	Version  int                 `json:"version"`
+	Projects []projectsJSONEntry `json:"projects"`
+}
+
+// writeProjectsJSON seeds WRK_HOME/projects.json with the given absolute paths.
+func writeProjectsJSON(t *testing.T, wrkHome string, paths ...string) {
+	t.Helper()
+	var projects []projectsJSONEntry
+	for _, p := range paths {
+		projects = append(projects, projectsJSONEntry{
+			Path:    p,
+			AddedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339),
+			Source:  "manual",
+		})
+	}
+	pf := projectsJSONFile{Version: 1, Projects: projects}
+	data, err := json.MarshalIndent(pf, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal projects.json: %v", err)
+	}
+	if err := os.MkdirAll(wrkHome, 0o755); err != nil {
+		t.Fatalf("mkdir WRK_HOME: %v", err)
+	}
+	path := filepath.Join(wrkHome, "projects.json")
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		t.Fatalf("write projects.json: %v", err)
+	}
+}
+
+// writeConsumerMainWithImports writes main.go that blank-imports each module path
+// so go mod tidy keeps those requires.
+func writeConsumerMainWithImports(t *testing.T, dir string, importPaths ...string) {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("package main\n\n")
+	if len(importPaths) > 0 {
+		b.WriteString("import (\n")
+		for _, p := range importPaths {
+			fmt.Fprintf(&b, "\t_ %q\n", p)
+		}
+		b.WriteString(")\n\n")
+	}
+	b.WriteString("func main() {}\n")
+	writeFile(t, filepath.Join(dir, "main.go"), b.String())
+}
+
+// seedOwnerLibRoot creates owner git repo example.com/lib with tags and a lib package.
+func seedOwnerLibRoot(t *testing.T, workRoot string, tags ...string) string {
+	t.Helper()
+	lib := filepath.Join(workRoot, "repos", "lib")
+	initGitRepoOnMain(t, lib)
+	writeGoMod(t, lib, modLib, "")
+	writeFile(t, filepath.Join(lib, "lib.go"), "package lib\n\nfunc Version() string { return \"ok\" }\n")
+	gitCommitAll(t, lib, "init lib")
+	for _, tag := range tags {
+		gitTag(t, lib, tag)
+	}
+	return resolvePath(t, lib)
+}
+
+// seedAppConsumer creates a git consumer app requiring lib at oldVersion (no replace).
+// Consumer is a real git repo so ShowToplevel works for --all.
+func seedAppConsumer(t *testing.T, workRoot, oldVersion string, extraRequires ...string) string {
+	t.Helper()
+	app := filepath.Join(workRoot, "repos", "app")
+	initGitRepoOnMain(t, app)
+	var b strings.Builder
+	b.WriteString("require (\n")
+	fmt.Fprintf(&b, "\t%s %s\n", modLib, oldVersion)
+	for _, r := range extraRequires {
+		parts := strings.SplitN(r, "@", 2)
+		if len(parts) != 2 {
+			t.Fatalf("extra require %q must be path@version", r)
+		}
+		fmt.Fprintf(&b, "\t%s %s\n", parts[0], parts[1])
+	}
+	b.WriteString(")\n")
+	writeGoMod(t, app, modApp, b.String())
+	writeConsumerMainWithImports(t, app, modLib)
+	gitCommitAll(t, app, "init app")
+	return resolvePath(t, app)
+}
+
+// seedFileModuleProxy publishes srcDir as modulePath@version under a file://
+// module proxy root so offline go mod tidy can resolve the version.
+func seedFileModuleProxy(t *testing.T, proxyRoot, modulePath, version, srcDir string) {
+	t.Helper()
+	vDir := filepath.Join(append([]string{proxyRoot}, strings.Split(modulePath, "/")...)...)
+	vDir = filepath.Join(vDir, "@v")
+	mkdirAll(t, vDir)
+
+	modContent := readFile(t, filepath.Join(srcDir, "go.mod"))
+	writeFile(t, filepath.Join(vDir, version+".mod"), modContent)
+	writeFile(t, filepath.Join(vDir, version+".info"),
+		fmt.Sprintf(`{"Version":%q,"Time":"2026-07-01T00:00:00Z"}`+"\n", version))
+	listPath := filepath.Join(vDir, "list")
+	existing := ""
+	if data, err := os.ReadFile(listPath); err == nil {
+		existing = string(data)
+	}
+	if !strings.Contains(existing, version) {
+		writeFile(t, listPath, existing+version+"\n")
+	}
+
+	zipPath := filepath.Join(vDir, version+".zip")
+	if err := writeModuleZip(zipPath, modulePath, version, srcDir); err != nil {
+		t.Fatalf("write module zip %s: %v", zipPath, err)
+	}
+}
+
+func writeModuleZip(zipPath, modulePath, version, srcDir string) error {
+	f, err := os.Create(zipPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	zw := zip.NewWriter(f)
+	prefix := modulePath + "@" + version + "/"
+	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			base := filepath.Base(path)
+			if path != srcDir && (base == ".git" || base == "sub" || base == "packages") {
+				// packages/ skipped only when walking nested multi-module owners
+				// that publish a single root module zip; nested-module leaf
+				// publishes packages/dep via a dedicated srcDir.
+				if base == ".git" {
+					return filepath.SkipDir
+				}
+				if base == "sub" {
+					return filepath.SkipDir
+				}
+			}
+			if path != srcDir && base == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(rel, ".git"+string(filepath.Separator)) || rel == ".git" {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		w, err := zw.Create(prefix + rel)
+		if err != nil {
+			return err
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(w, in)
+		_ = in.Close()
+		return copyErr
+	})
+	if err != nil {
+		_ = zw.Close()
+		return err
+	}
+	return zw.Close()
+}
+
+// enableFileModuleProxy sets ExtraEnv so wrk's child `go` commands resolve
+// modules via the local file proxy (offline-friendly tidy).
+func enableFileModuleProxy(t *testing.T, req *Request, proxyRoot string) {
+	t.Helper()
+	abs, err := filepath.Abs(proxyRoot)
+	if err != nil {
+		t.Fatalf("abs proxy: %v", err)
+	}
+	proxyURL := "file://" + abs
+	req.ExtraEnv = append(req.ExtraEnv,
+		"GOPROXY="+proxyURL,
+		"GOSUMDB=off",
+		"GONOSUMDB=*",
+	)
+	req.ProxyRoot = abs
+}
+
+// setupAllCrossProjectOutdated: owner lib tagged v1.0.0+v1.2.3; app requires v1.0.0.
+// Registers owner only (consumer need not be registered). RepoDir = app.
+func setupAllCrossProjectOutdated(t *testing.T, req *Request) {
+	t.Helper()
+	lib := seedOwnerLibRoot(t, req.WorkRoot, "v1.0.0", "v1.2.3")
+	app := seedAppConsumer(t, req.WorkRoot, "v1.0.0")
+	req.OwnerPath = lib
+	req.OwnerGoMod = filepath.Join(lib, "go.mod")
+	req.BaselineOwnerGoMod = readFile(t, req.OwnerGoMod)
+	req.ConsumerModDir = app
+	req.ConsumerGoMod = filepath.Join(app, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.RepoDir = app
+	req.WantVersion = "v1.2.3"
+	req.WantConsumerModule = modApp
+	req.WantUpdated = 1
+	req.WantAlready = 0
+	req.WantSkipped = 0
+	writeProjectsJSON(t, req.WrkHome, lib)
+}
+
+// setupAllAlreadyCurrent: same topology; app already at latest tag.
+func setupAllAlreadyCurrent(t *testing.T, req *Request) {
+	t.Helper()
+	lib := seedOwnerLibRoot(t, req.WorkRoot, "v1.0.0", "v1.2.3")
+	app := seedAppConsumer(t, req.WorkRoot, "v1.2.3")
+	req.OwnerPath = lib
+	req.OwnerGoMod = filepath.Join(lib, "go.mod")
+	req.BaselineOwnerGoMod = readFile(t, req.OwnerGoMod)
+	req.ConsumerModDir = app
+	req.ConsumerGoMod = filepath.Join(app, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.RepoDir = app
+	req.WantVersion = "v1.2.3"
+	req.WantConsumerModule = modApp
+	req.WantUpdated = 0
+	req.WantAlready = 1
+	req.WantSkipped = 0
+	writeProjectsJSON(t, req.WrkHome, lib)
+}
+
+// setupAllWithProxy seeds cross-project outdated + file proxy for tidy apply leaves.
+func setupAllWithProxy(t *testing.T, req *Request) {
+	t.Helper()
+	setupAllCrossProjectOutdated(t, req)
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	seedFileModuleProxy(t, proxyRoot, modLib, req.WantVersion, req.OwnerPath)
+	// Also publish the old version so any residual resolution succeeds offline.
+	seedFileModuleProxy(t, proxyRoot, modLib, "v1.0.0", req.OwnerPath)
+	enableFileModuleProxy(t, req, proxyRoot)
+}
+
+// setupAllWorktreeOutdated: consumer main + linked worktree; run from worktree.
+// Main and worktree start with same outdated require; only worktree must change.
+func setupAllWorktreeOutdated(t *testing.T, req *Request) {
+	t.Helper()
+	lib := seedOwnerLibRoot(t, req.WorkRoot, "v1.0.0", "v1.2.3")
+	main := seedAppConsumer(t, req.WorkRoot, "v1.0.0")
+	linked := filepath.Join(req.WorkRoot, "repos", "app-wt")
+	runGitIsolated(t, main, "worktree", "add", "-b", "feature-dep-update", linked)
+	linked = resolvePath(t, linked)
+	main = resolvePath(t, main)
+
+	req.OwnerPath = lib
+	req.OwnerGoMod = filepath.Join(lib, "go.mod")
+	req.BaselineOwnerGoMod = readFile(t, req.OwnerGoMod)
+	req.MainRepo = main
+	req.LinkedWT = linked
+	req.ConsumerModDir = linked
+	req.ConsumerGoMod = filepath.Join(linked, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	// Snapshot main go.mod separately (must stay unchanged).
+	req.RepoDir = linked
+	req.WantVersion = "v1.2.3"
+	req.WantConsumerModule = modApp
+	req.WantUpdated = 1
+	req.WantAlready = 0
+	req.WantSkipped = 0
+	writeProjectsJSON(t, req.WrkHome, lib)
+
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	seedFileModuleProxy(t, proxyRoot, modLib, "v1.2.3", lib)
+	seedFileModuleProxy(t, proxyRoot, modLib, "v1.0.0", lib)
+	enableFileModuleProxy(t, req, proxyRoot)
+}
+
+// setupAllSkipIntraLocalReplace: monorepo with root requiring nested lib via
+// filesystem replace (skip) and inventory owner require (bump).
+func setupAllSkipIntraLocalReplace(t *testing.T, req *Request) {
+	t.Helper()
+	lib := seedOwnerLibRoot(t, req.WorkRoot, "v1.0.0", "v1.2.3")
+
+	mono := filepath.Join(req.WorkRoot, "repos", "mono")
+	initGitRepoOnMain(t, mono)
+	// Nested local module under same toplevel.
+	localLib := filepath.Join(mono, "lib")
+	writeGoMod(t, localLib, modMonoLib, "")
+	writeFile(t, filepath.Join(localLib, "lib.go"), "package lib\n\nfunc Local() string { return \"local\" }\n")
+
+	body := fmt.Sprintf(
+		"require (\n\t%s v0.0.1\n\t%s v1.0.0\n)\n\nreplace %s => ./lib\n",
+		modMonoLib, modLib, modMonoLib,
+	)
+	writeGoMod(t, mono, modMono, body)
+	writeConsumerMainWithImports(t, mono, modMonoLib, modLib)
+	gitCommitAll(t, mono, "init mono")
+	mono = resolvePath(t, mono)
+
+	req.OwnerPath = lib
+	req.OwnerGoMod = filepath.Join(lib, "go.mod")
+	req.BaselineOwnerGoMod = readFile(t, req.OwnerGoMod)
+	req.ConsumerModDir = mono
+	req.ConsumerGoMod = filepath.Join(mono, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.RepoDir = mono
+	req.WantVersion = "v1.2.3"
+	req.WantConsumerModule = modMono
+	// inventory bump for lib; local replace skipped
+	req.WantUpdated = 1
+	req.WantAlready = 0
+	req.WantSkipped = 1
+	writeProjectsJSON(t, req.WrkHome, lib)
+
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	seedFileModuleProxy(t, proxyRoot, modLib, "v1.2.3", lib)
+	seedFileModuleProxy(t, proxyRoot, modLib, "v1.0.0", lib)
+	enableFileModuleProxy(t, req, proxyRoot)
+}
+
+// setupAllSkipExternal: app requires external (not inventory) + outdated lib.
+func setupAllSkipExternal(t *testing.T, req *Request) {
+	t.Helper()
+	lib := seedOwnerLibRoot(t, req.WorkRoot, "v1.0.0", "v1.2.3")
+	// Use a low major version so go.mod stays path/major valid for tidy.
+	app := seedAppConsumer(t, req.WorkRoot, "v1.0.0", modExternal+"@v0.1.0")
+	// Blank-import only lib so tidy does not need external published.
+	// seedAppConsumer already imports modLib only; external stays as require text.
+	req.OwnerPath = lib
+	req.OwnerGoMod = filepath.Join(lib, "go.mod")
+	req.BaselineOwnerGoMod = readFile(t, req.OwnerGoMod)
+	req.ConsumerModDir = app
+	req.ConsumerGoMod = filepath.Join(app, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.RepoDir = app
+	req.WantVersion = "v1.2.3"
+	req.WantConsumerModule = modApp
+	req.WantUpdated = 1
+	req.WantAlready = 0
+	req.WantSkipped = 0 // external is silent, not counted as skipped
+	writeProjectsJSON(t, req.WrkHome, lib)
+
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	seedFileModuleProxy(t, proxyRoot, modLib, "v1.2.3", lib)
+	seedFileModuleProxy(t, proxyRoot, modLib, "v1.0.0", lib)
+	enableFileModuleProxy(t, req, proxyRoot)
+}
+
+// setupAllNestedOwnerModuleTag: owner monorepo packages/dep with prefixed tags;
+// app requires example.com/lib/dep at older version.
+func setupAllNestedOwnerModuleTag(t *testing.T, req *Request) {
+	t.Helper()
+	owner := filepath.Join(req.WorkRoot, "repos", "lib-mono")
+	initGitRepoOnMain(t, owner)
+	writeFile(t, filepath.Join(owner, "README.md"), "owner monorepo\n")
+	gitCommitAll(t, owner, "root")
+
+	dep := filepath.Join(owner, "packages", "dep")
+	writeGoMod(t, dep, modLibDep, "")
+	writeFile(t, filepath.Join(dep, "dep.go"), "package dep\n\nfunc V() string { return \"v0.2.0\" }\n")
+	gitCommitAll(t, owner, "add packages/dep")
+	gitTag(t, owner, "packages/dep/v0.1.0")
+	gitTag(t, owner, "packages/dep/v0.2.0")
+	owner = resolvePath(t, owner)
+	dep = resolvePath(t, dep)
+
+	app := filepath.Join(req.WorkRoot, "repos", "app")
+	initGitRepoOnMain(t, app)
+	body := fmt.Sprintf("require %s v0.1.0\n", modLibDep)
+	writeGoMod(t, app, modApp, body)
+	writeConsumerMainWithImports(t, app, modLibDep)
+	gitCommitAll(t, app, "init app")
+	app = resolvePath(t, app)
+
+	req.OwnerPath = owner
+	req.OwnerNestedDir = dep
+	req.OwnerGoMod = filepath.Join(dep, "go.mod")
+	req.BaselineOwnerGoMod = readFile(t, req.OwnerGoMod)
+	req.ConsumerModDir = app
+	req.ConsumerGoMod = filepath.Join(app, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.RepoDir = app
+	req.WantVersion = "v0.2.0"
+	req.WantTagHint = "packages/dep/v0.2.0"
+	req.WantConsumerModule = modApp
+	req.WantUpdated = 1
+	req.WantAlready = 0
+	req.WantSkipped = 0
+	writeProjectsJSON(t, req.WrkHome, owner)
+
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	seedFileModuleProxy(t, proxyRoot, modLibDep, "v0.2.0", dep)
+	seedFileModuleProxy(t, proxyRoot, modLibDep, "v0.1.0", dep)
+	enableFileModuleProxy(t, req, proxyRoot)
+}
+
+// setupAllNoTagOwner: registered owner with no tags; app requires it.
+func setupAllNoTagOwner(t *testing.T, req *Request) {
+	t.Helper()
+	lib := filepath.Join(req.WorkRoot, "repos", "lib")
+	initGitRepoOnMain(t, lib)
+	writeGoMod(t, lib, modLib, "")
+	writeFile(t, filepath.Join(lib, "lib.go"), "package lib\n\nfunc Version() string { return \"dev\" }\n")
+	gitCommitAll(t, lib, "init lib no tags")
+	lib = resolvePath(t, lib)
+
+	app := seedAppConsumer(t, req.WorkRoot, "v0.0.1")
+	req.OwnerPath = lib
+	req.OwnerGoMod = filepath.Join(lib, "go.mod")
+	req.BaselineOwnerGoMod = readFile(t, req.OwnerGoMod)
+	req.ConsumerModDir = app
+	req.ConsumerGoMod = filepath.Join(app, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.RepoDir = app
+	req.WantConsumerModule = modApp
+	req.WantUpdated = 0
+	req.WantAlready = 0
+	req.WantSkipped = 1
+	writeProjectsJSON(t, req.WrkHome, lib)
+}
+
 // --- asserts ---
 
 func assertErrIsNil(t *testing.T, err error) {
@@ -329,6 +780,17 @@ func assertGoModUnchanged(t *testing.T, req *Request) {
 	}
 }
 
+func assertOwnerGoModUnchanged(t *testing.T, req *Request) {
+	t.Helper()
+	if req.OwnerGoMod == "" || req.BaselineOwnerGoMod == "" {
+		return
+	}
+	got := readFile(t, req.OwnerGoMod)
+	if got != req.BaselineOwnerGoMod {
+		t.Fatalf("owner go.mod mutated\n got:\n%s\nwant:\n%s", got, req.BaselineOwnerGoMod)
+	}
+}
+
 func assertNoReplaceFor(t *testing.T, goModPath, oldPath string) {
 	t.Helper()
 	body := readFile(t, goModPath)
@@ -340,14 +802,28 @@ func assertNoReplaceFor(t *testing.T, goModPath, oldPath string) {
 	}
 }
 
+func assertReplacePresentFor(t *testing.T, goModPath, modulePath string) {
+	t.Helper()
+	body := readFile(t, goModPath)
+	found := false
+	for _, line := range strings.Split(body, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "replace ") && strings.Contains(trim, modulePath) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected replace for %s still present:\n%s", modulePath, body)
+	}
+}
+
 func assertRequireVersion(t *testing.T, goModPath, modulePath, version string) {
 	t.Helper()
 	body := readFile(t, goModPath)
-	// Loose: require line or block entry contains module and version.
 	if !strings.Contains(body, modulePath) {
 		t.Fatalf("go.mod missing module %s:\n%s", modulePath, body)
 	}
-	// Prefer same-line or nearby version token.
 	found := false
 	for _, line := range strings.Split(body, "\n") {
 		trim := strings.TrimSpace(line)
@@ -360,11 +836,9 @@ func assertRequireVersion(t *testing.T, goModPath, modulePath, version string) {
 		}
 	}
 	if !found {
-		// go mod edit -require may place version on same require line.
 		if !strings.Contains(body, modulePath) || !strings.Contains(body, version) {
 			t.Fatalf("expected require %s %s in:\n%s", modulePath, version, body)
 		}
-		// Module and version both present somewhere — accept for block form.
 		found = true
 	}
 	if !found {
@@ -374,15 +848,12 @@ func assertRequireVersion(t *testing.T, goModPath, modulePath, version string) {
 
 func assertDepUpdateLine(t *testing.T, stdout, modulePath, version string) {
 	t.Helper()
-	// dep-update <module> -> <version>
 	needle := "dep-update " + modulePath + " -> " + version
 	if !strings.Contains(stdout, needle) {
-		// Allow flexible spacing around ->
 		alt := "dep-update " + modulePath
 		if !strings.Contains(stdout, alt) || !strings.Contains(stdout, version) {
 			t.Fatalf("stdout missing dep-update line for %s -> %s; got:\n%s", modulePath, version, stdout)
 		}
-		// Still require arrow token somewhere with module context.
 		found := false
 		for _, line := range strings.Split(stdout, "\n") {
 			trim := strings.TrimSpace(line)
@@ -398,7 +869,6 @@ func assertDepUpdateLine(t *testing.T, stdout, modulePath, version string) {
 			t.Fatalf("stdout missing dep-update %s -> %s; got:\n%s", modulePath, version, stdout)
 		}
 	}
-	// No would: on apply success lines mixed without prefix check done by leaf.
 }
 
 func assertWouldDepUpdateLine(t *testing.T, stdout, modulePath, version string) {
@@ -436,6 +906,86 @@ func assertNoTidyArtifacts(t *testing.T, req *Request) {
 	}
 }
 
+func assertGoSumExists(t *testing.T, consumerModDir string) {
+	t.Helper()
+	sum := filepath.Join(consumerModDir, "go.sum")
+	if _, err := os.Stat(sum); err != nil {
+		t.Fatalf("expected go.sum after tidy at %s: %v", sum, err)
+	}
+}
+
+func assertTidyOkLine(t *testing.T, stdout, consumerModule string) {
+	t.Helper()
+	// go mod tidy ok  module <consumer-module-path>
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.Contains(trim, "go mod tidy ok") && strings.Contains(trim, consumerModule) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing go mod tidy ok for %s; got:\n%s", consumerModule, stdout)
+	}
+}
+
+func assertWouldTidyLine(t *testing.T, stdout, consumerModule string) {
+	t.Helper()
+	// would: go mod tidy  module <consumer-module-path>
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "would:") &&
+			strings.Contains(trim, "go mod tidy") &&
+			strings.Contains(trim, consumerModule) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing would: go mod tidy for %s; got:\n%s", consumerModule, stdout)
+	}
+}
+
+func assertAllSummary(t *testing.T, stdout string, updated, already, skipped int, dryRun bool) {
+	t.Helper()
+	var needle string
+	if dryRun {
+		needle = fmt.Sprintf("dep-update: would update %d, already %d, skipped %d", updated, already, skipped)
+	} else {
+		needle = fmt.Sprintf("dep-update: updated %d, already %d, skipped %d", updated, already, skipped)
+	}
+	if !strings.Contains(stdout, needle) {
+		t.Fatalf("stdout missing summary %q; got:\n%s", needle, stdout)
+	}
+}
+
+func assertAlreadyUpToDateBanner(t *testing.T, stdout string) {
+	t.Helper()
+	if !strings.Contains(stdout, "dep-update: already up to date") {
+		t.Fatalf("stdout missing already-up-to-date banner; got:\n%s", stdout)
+	}
+}
+
+func assertStdoutTrailingNewline(t *testing.T, stdout string) {
+	t.Helper()
+	if stdout == "" {
+		t.Fatal("stdout empty; expected trailing newline content")
+	}
+	if !strings.HasSuffix(stdout, "\n") {
+		t.Fatalf("stdout must end with trailing \\n; got %q", stdout)
+	}
+}
+
+func assertWarningStderr(t *testing.T, stderr string) {
+	t.Helper()
+	lower := strings.ToLower(stderr)
+	if !strings.Contains(lower, "warning:") && !strings.Contains(lower, "warning") {
+		t.Fatalf("stderr should contain warning: prefix, got %q", stderr)
+	}
+}
+
 func ensureDepUpdateHelpersUsed() {
 	_ = setupDropReplaceLatest
 	_ = setupNestedTagPrefix
@@ -445,13 +995,36 @@ func ensureDepUpdateHelpersUsed() {
 	_ = seedRootTaggedDep
 	_ = seedNestedPrefixedDep
 	_ = writeConsumerWithReplace
+	_ = writeProjectsJSON
+	_ = seedOwnerLibRoot
+	_ = seedAppConsumer
+	_ = seedFileModuleProxy
+	_ = enableFileModuleProxy
+	_ = setupAllCrossProjectOutdated
+	_ = setupAllAlreadyCurrent
+	_ = setupAllWithProxy
+	_ = setupAllWorktreeOutdated
+	_ = setupAllSkipIntraLocalReplace
+	_ = setupAllSkipExternal
+	_ = setupAllNestedOwnerModuleTag
+	_ = setupAllNoTagOwner
+	_ = writeConsumerMainWithImports
 	_ = assertNoReplaceFor
+	_ = assertReplacePresentFor
 	_ = assertRequireVersion
 	_ = assertDepUpdateLine
 	_ = assertWouldDepUpdateLine
 	_ = assertGoModUnchanged
+	_ = assertOwnerGoModUnchanged
 	_ = assertMutualExclusion
 	_ = assertNoTidyArtifacts
+	_ = assertGoSumExists
+	_ = assertTidyOkLine
+	_ = assertWouldTidyLine
+	_ = assertAllSummary
+	_ = assertAlreadyUpToDateBanner
+	_ = assertStdoutTrailingNewline
+	_ = assertWarningStderr
 	_ = writeGoMod
 	_ = writeLibPkg
 	_ = initGitRepoOnMain

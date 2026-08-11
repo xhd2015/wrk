@@ -1,9 +1,12 @@
 # Scenario
 
-**Feature**: wrk --dep-update rejects empty args and exclusive mode conflicts
+**Feature**: wrk --dep-update rejects empty args, exclusive conflicts, and invalid --all forms
 
 ```
-wrk --dep-update (no dirs) | + --dep-replace | + --pin-locals
+wrk --dep-update (no dirs, no --all)
+  | + --dep-replace | + --pin-locals
+  | --all without --dep-update
+  | --dep-update --all + path args
   -> non-zero
 ```
 
