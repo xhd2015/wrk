@@ -926,6 +926,16 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		if err := applyDeferredCascadeTags(cascadeMembers, skippedTags, flags, addReinstallMainPath, &stats, deferred); err != nil {
 			return err
 		}
+		// Epoch 4b: re-pin consumers after deferred tags advanced free LatestTag.
+		// Cascade may have pinned @ pre-feature Latest while free was deferred
+		// (pinConsumer without freeHost when NextTag empty at plan); deferred
+		// tags then create next without a second pin wave (crime-scene go-pkgs
+		// @120 / CS-repin). Fresh tagscope plan + pin-only apply closes the hole.
+		repinMembers := refreshStackMembersAfterLand(members)
+		repinMembers = remapPeeledLabelsToMain(repinMembers, append(append([]string{}, early...), deferred...))
+		if err := applyDeferredCascadeRepins(repinMembers, flags, addReinstallMainPath, &stats); err != nil {
+			return err
+		}
 	}
 
 	// Ship tail: once per touched main, after all mutations (push then sync).

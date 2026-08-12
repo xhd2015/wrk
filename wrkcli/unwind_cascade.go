@@ -1273,6 +1273,232 @@ func applyDeferredCascadeTags(members []StackMember, steps []UnwindCascadeStep, 
 	return nil
 }
 
+// applyDeferredCascadeRepins re-plans free-module cascade after deferred tags
+// and applies only pin steps. Closes the hole where cascade pinned consumers to
+// pre-feature LatestTag while free was deferred (empty NextTag at plan), then
+// applyDeferredCascadeTags created free next without re-pinning consumers.
+//
+// Fresh tagscope (nil cache): deferred peels advanced free HEAD and tags.
+// Idempotent when require already matches planned pin version (skip pin).
+// Pin path mirrors applyUnwindCascade CascadePin (partial-edit, C-PUSH1, commit).
+func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addReinstallMainPath func(string), stats *UnwindApplyStats) error {
+	if len(members) == 0 {
+		return nil
+	}
+	// Fresh plan after deferred tags (no shared tagCache from pre-peel cascade).
+	plan, err := PlanUnwindCascadeCached(members, nil)
+	if err != nil {
+		return err
+	}
+	if plan == nil || len(plan.Steps) == 0 {
+		return nil
+	}
+
+	byLabel := pickPeelMembersByLabel(members)
+	nodes, _, err := buildUnwindModuleGraph(members, byLabel)
+	if err != nil {
+		return err
+	}
+	nodeByPath := make(map[string]UnwindGraphModuleNode, len(nodes))
+	for _, n := range nodes {
+		if n.Path != "" {
+			nodeByPath[n.Path] = n
+		}
+	}
+
+	mainForModule := func(modPath string) (mainRepo string, label string, ok bool) {
+		n, ok := nodeByPath[modPath]
+		if !ok || n.RepoLabel == "" {
+			return "", "", false
+		}
+		m, ok := byLabel[n.RepoLabel]
+		if !ok {
+			return "", n.RepoLabel, false
+		}
+		main := m.MainRepo
+		if main == "" {
+			main = m.Path
+		}
+		return storage.NormalizePath(main), n.RepoLabel, main != ""
+	}
+
+	checkoutForPin := func(label string) string {
+		m, ok := byLabel[label]
+		if !ok {
+			return ""
+		}
+		return cascadePinCheckout(m)
+	}
+
+	moduleDirOn := func(checkout string, n UnwindGraphModuleNode) string {
+		return moduleDirOnCheckout(checkout, n)
+	}
+
+	// Ensure free dep tags published before network pin (tags may have been
+	// created in applyDeferredCascadeTags; push again is cheap / no-op when done).
+	ensureDepPublished := func(consumerModDir, depModule string) error {
+		if !flags.Push || consumerModDir == "" || depModule == "" {
+			return nil
+		}
+		keep, _ := localReplacePolicy(consumerModDir, depModule)
+		if keep {
+			return nil
+		}
+		depMain, _, ok := mainForModule(depModule)
+		if !ok || depMain == "" {
+			return nil
+		}
+		// Best-effort: push branch so tag refs created on free main are visible.
+		// Soft-skip missing remote (fixtures); hard-fail other push errors.
+		if err := runPushMain(depMain, false, flags.Force, nil); err != nil {
+			if isNoPushRemoteErr(err) {
+				return nil
+			}
+			return err
+		}
+		return nil
+	}
+
+	for _, step := range plan.Steps {
+		if step.Kind != CascadePin {
+			continue
+		}
+		if step.ModulePath == "" || step.DepModulePath == "" || step.TagOrVersion == "" {
+			continue
+		}
+		consumerNode, ok := nodeByPath[step.ModulePath]
+		if !ok {
+			return fmt.Errorf("wrk: deferred repin: unknown consumer module %s", step.ModulePath)
+		}
+		depNode, ok := nodeByPath[step.DepModulePath]
+		if !ok {
+			return fmt.Errorf("wrk: deferred repin: unknown dep module %s", step.DepModulePath)
+		}
+		consumerMain, consumerLabel, ok := mainForModule(step.ModulePath)
+		if !ok {
+			return fmt.Errorf("wrk: deferred repin %s: no stack main", step.ModulePath)
+		}
+		_, depLabel, _ := mainForModule(step.DepModulePath)
+
+		consumerCheckout := checkoutForPin(consumerLabel)
+		if consumerCheckout == "" {
+			consumerCheckout = consumerMain
+		}
+		consumerModDir := moduleDirOn(consumerCheckout, consumerNode)
+		if consumerModDir == "" {
+			return fmt.Errorf("wrk: deferred repin: empty consumer module dir for %s", step.ModulePath)
+		}
+
+		// Idempotent: skip when require already at pin version (and no droppable
+		// external replace left that still needs clearing).
+		if current, ok := goModRequireVersion(consumerModDir, step.DepModulePath); ok && versionsMatch(current, step.TagOrVersion) {
+			keep, _ := localReplacePolicy(consumerModDir, step.DepModulePath)
+			if keep || !goModHasLocalReplace(consumerModDir, step.DepModulePath) {
+				continue
+			}
+			// Require matches but droppable external replace remains — still pin.
+		}
+
+		if err := ensureDepPublished(consumerModDir, step.DepModulePath); err != nil {
+			return err
+		}
+
+		usePartial := false
+		var saved goModSumSnap
+		dirty, err := goModSumUncommittedAt(consumerCheckout, consumerModDir)
+		if err != nil {
+			return err
+		}
+		if dirty {
+			usePartial = true
+			saved, err = saveGoModSumSnap(consumerModDir)
+			if err != nil {
+				return fmt.Errorf("wrk: deferred repin save go.mod/go.sum in %s: %w", consumerModDir, err)
+			}
+			if err := writeBaseGoModSum(consumerCheckout, consumerModDir); err != nil {
+				_ = restoreGoModSumSnap(consumerModDir, saved)
+				return fmt.Errorf("wrk: deferred repin restore Base go.mod/go.sum in %s: %w", consumerModDir, err)
+			}
+		}
+
+		logConsumer := consumerLabel
+		if logConsumer == "" {
+			logConsumer = filepath.Base(consumerCheckout)
+		}
+		logDep := depLabel
+		if logDep == "" {
+			logDep = filepath.Base(step.DepModulePath)
+		}
+		fmt.Printf("pin %s <- %s @ %s\n", logConsumer, logDep, step.TagOrVersion)
+
+		pinFail := func(err error) error {
+			if usePartial {
+				_ = restoreGoModSumSnap(consumerModDir, saved)
+			}
+			return err
+		}
+
+		if err := cascadePinKeepLocalReplace(consumerModDir, step.DepModulePath, step.TagOrVersion, depNode, byLabel); err != nil {
+			return pinFail(fmt.Errorf("wrk: deferred repin %s <- %s: %w", step.ModulePath, step.DepModulePath, err))
+		}
+		if err := goModTidy(consumerModDir); err != nil {
+			return pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
+		}
+		_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
+
+		if err := cascadeCommitPin(consumerCheckout, consumerModDir, step.DepModulePath, step.TagOrVersion, false); err != nil {
+			return pinFail(err)
+		}
+		if stats != nil {
+			stats.Pinned++
+		}
+
+		if usePartial {
+			if err := restoreGoModSumSnap(consumerModDir, saved); err != nil {
+				return fmt.Errorf("wrk: deferred repin restore WIP go.mod/go.sum in %s: %w", consumerModDir, err)
+			}
+			if err := cascadePinKeepLocalReplace(consumerModDir, step.DepModulePath, step.TagOrVersion, depNode, byLabel); err != nil {
+				_ = restoreGoModSumSnap(consumerModDir, saved)
+				return fmt.Errorf("wrk: deferred repin surgical pin effects %s@%s in %s: %w",
+					step.DepModulePath, step.TagOrVersion, consumerModDir, err)
+			}
+			_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
+		}
+
+		if addReinstallMainPath != nil {
+			addReinstallMainPath(consumerMain)
+		}
+		if flags.Push && consumerMain != "" {
+			if err := runPushMain(consumerMain, false, flags.Force, nil); err != nil {
+				if !isNoPushRemoteErr(err) {
+					return err
+				}
+			} else if stats != nil {
+				stats.Pushed++
+			}
+		}
+	}
+	return nil
+}
+
+// goModRequireVersion returns the require version for path in consumerModDir's
+// go.mod when present.
+func goModRequireVersion(consumerModDir, path string) (version string, ok bool) {
+	if consumerModDir == "" || path == "" {
+		return "", false
+	}
+	reqs, err := parseRequiresTolerant(filepath.Join(consumerModDir, "go.mod"))
+	if err != nil {
+		return "", false
+	}
+	for _, r := range reqs {
+		if r.Path == path && r.Version != "" {
+			return r.Version, true
+		}
+	}
+	return "", false
+}
+
 // planPostDeferredConsumerTags re-runs tagscope on deferred pure pin-consumer
 // mains after their peels advanced HEAD past LatestTag. Returns CascadeTagNext
 // steps for modules with non-empty NextTag (skips forever/testdata scopes).

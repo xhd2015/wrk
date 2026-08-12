@@ -47,6 +47,8 @@ dirty consumer (+ optional dirty free) + external replace
    - A5: **resume** free already landed clean/untagged + consumer replace dirt
    - D1: **absolute-path** external replace (droppable; pin drops it)
    - C1: **free multi-module** (root + `cmd/`) both tag-next; consumer pins **root only**
+   - CS-repin: **free multi-module + uncommitted free feature** → deferred tag must re-pin consumer
+     (`deferred-tag-repin-after-free-uncommitted-feature`; crime-scene go-pkgs@120 miss)
    - C1-sync: **free multi-module + `--merge-back --sync`** — free linked WT tracks
      free main after cascade pin (`free-multimodule-merge-back-sync-wt-tracks-main`)
    - P-empty: **mid dirty + leaf clean + root go.mod-only** with `--add-all`
@@ -1211,6 +1213,141 @@ func setupApplyPinBeforeFeatureFreeMultiModuleCmdRootOnly(t *testing.T, req *Req
 	setPeelOrderDisplays(t, req, leafExt)
 }
 
+
+// setupApplyDeferredTagRepinAfterFreeUncommittedFeature is the crime-scene
+// formalization of remote-agent bash / wrk cascade miss (2026-08-12):
+//
+//	free monorepo (go-pkgs shape) under external linked WT:
+//	  example.com/dot-pkgs + example.com/dot-pkgs/cmd (cmd requires free @ v0.0.1
+//	    + keep-local replace => ../)
+//	  baseline tags v0.0.1 + cmd/v0.0.1
+//	  **uncommitted** free root owned change on WT (not committed → tagscope
+//	    NextTag empty at cascade plan time; gen-commit lands it during peel)
+//	consumer primary (clean Base + committed droppable replace to free WT):
+//	  require free root @ v0.0.1 only
+//
+// Hole: free/cmd requires free @ v0.0.0 (drift vs LatestTag v0.0.1) so cascade
+// pins free/cmd without free TagNext (uncommitted free WIP ⇒ empty NextTag).
+// That marks free monorepo pinConsumer without freeHost → free peel DEFERRED →
+// auto-commit + applyDeferredCascadeTags create free @ v0.0.2 → **no consumer
+// re-pin** to v0.0.2 (applyDeferredCascadeTags is tag-only).
+// Desired: after full apply, consumer require free @ v0.0.2 (and free tagged).
+func setupApplyDeferredTagRepinAfterFreeUncommittedFeature(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.NestedModulePath = freeMultiCmdModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- free monorepo main: root + cmd at baseline tags ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+
+	cmdDir := filepath.Join(leafMain, freeMultiCmdDir)
+	mkdirAll(t, cmdDir)
+	writeGoModRequire(t, cmdDir, freeMultiCmdModule, unwindDotPkgsModule+"@v0.0.0") // stale require → drift pin free/cmd without free TagNext
+	appendLocalReplace(t, cmdDir, unwindDotPkgsModule, "../")
+	writeFile(t, filepath.Join(cmdDir, "cmd.go"),
+		"package freecmd\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go",
+		filepath.Join(freeMultiCmdDir, "go.mod"),
+		filepath.Join(freeMultiCmdDir, "cmd.go"))
+	runGitIsolated(t, leafMain, "commit", "-m", "add free monorepo root + cmd modules")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	createLightweightTag(t, leafMain, freeMultiCmdOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	// Free gen-commit must not inherit developer hooks; permissive only.
+	installCascadePermissivePreCommit(t, leafMain)
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	if tagRefExists(t, leafMain, freeMultiCmdOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", freeMultiCmdOldTag)
+	}
+	req.OriginBare = leafBare
+
+	// --- consumer main: require free root only @ latest baseline ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer require free root only")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "root-origin.path"), rootBare+"\n")
+
+	// Nest free multi-module WT under consumer/external (stack member).
+	extDir := filepath.Join(rootMain, "external")
+	mkdirAll(t, extDir)
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate(), leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+	req.WtBranch = branchNameMainDate()
+
+	// Crime-scene key: free root owned change is **uncommitted** on the WT.
+	// tagscope.Plan(HEAD) still sees LatestTag only → empty NextTag at cascade plan.
+	// --add-all gen-commit during free peel must land this content then tag next.
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	// Leave unstaged/uncommitted; markDirty so peel inventory includes free.
+	markDirty(t, leafExt)
+
+	// Droppable external replace free root only (consumer never requires free/cmd).
+	relReplace := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, rootMain, unwindDotPkgsModule, "./"+relReplace)
+	writeFile(t, filepath.Join(rootMain, ".gitignore"), "/external\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", ".gitignore")
+	runGitIsolated(t, rootMain, "commit", "-m", "external free replace + ignore")
+	// Consumer clean Base after replace commit — pin alone owns require bump.
+
+	// Offline proxy: free root old+next (next needed when pin correctly repins).
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	oldSeed := filepath.Join(req.WorkRoot, "seed-free-root-"+unwindApplyOldTag)
+	mkdirAll(t, oldSeed)
+	writeGoModRequire(t, oldSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(oldSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyOldTag, oldSeed)
+
+	nextSeed := filepath.Join(req.WorkRoot, "seed-free-root-"+unwindApplyNextTag)
+	mkdirAll(t, nextSeed)
+	writeGoModRequire(t, nextSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(nextSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyNextTag, nextSeed)
+
+	cmdOldSeed := filepath.Join(req.WorkRoot, "seed-free-cmd-"+unwindApplyOldTag)
+	mkdirAll(t, cmdOldSeed)
+	writeGoModRequire(t, cmdOldSeed, freeMultiCmdModule)
+	writeFile(t, filepath.Join(cmdOldSeed, "cmd.go"),
+		"package freecmd\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, freeMultiCmdModule, unwindApplyOldTag, cmdOldSeed)
+	enableFileModuleProxy(t, req, proxyRoot)
+
+	req.RepoDir = rootMain
+	setPeelOrderDisplays(t, req, leafExt)
+}
+
 // setupApplyPinBeforeFeatureFalseFreeHostIntraPins is T-spl / A1 fixture:
 //
 //	external free (dot-pkgs): dirty owned-changed → next tag v0.0.2; bare origin + --push
@@ -2258,6 +2395,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = setupApplyPinBeforeFeatureResumeFreeLandedUntagged
 	_ = setupApplyPinBeforeFeatureAbsolutePathReplace
 	_ = setupApplyPinBeforeFeatureFreeMultiModuleCmdRootOnly
+	_ = setupApplyDeferredTagRepinAfterFreeUncommittedFeature
 	_ = freeMultiCmdModule
 	_ = freeMultiCmdNextTag
 	_ = assertFreeTagNextBeforeConsumerPinOfFree
