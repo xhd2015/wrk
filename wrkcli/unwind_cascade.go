@@ -1273,37 +1273,74 @@ func applyDeferredCascadeTags(members []StackMember, steps []UnwindCascadeStep, 
 	return nil
 }
 
-// applyDeferredCascadeRepins re-plans free-module cascade after deferred tags
-// and applies only pin steps. Closes the hole where cascade pinned consumers to
-// pre-feature LatestTag while free was deferred (empty NextTag at plan), then
-// applyDeferredCascadeTags created free next without re-pinning consumers.
+// applyDeferredCascadeRepins pins stack consumers to each dep's **LatestTag**
+// after deferred tags. Closes the hole where cascade pinned to pre-feature
+// Latest while free was deferred, then applyDeferredCascadeTags created free
+// next without re-pinning consumers.
 //
-// Fresh tagscope (nil cache): deferred peels advanced free HEAD and tags.
-// Idempotent when require already matches planned pin version (skip pin).
-// Pin path mirrors applyUnwindCascade CascadePin (partial-edit, C-PUSH1, commit).
+// Pin target is LatestTag only (not NextTag). After cascade pin commits on a
+// monorepo, HEAD can sit past LatestTag so tagscope invents a further NextTag;
+// re-planning with PlanUnwindCascade would wrongly pin consumers to that
+// unpublished next (root-only-nested-tool-pin → require v0.0.3). Post-deferred
+// tags, free next is already LatestTag.
+//
+// Idempotent when require already matches LatestTag (skip unless droppable
+// external replace remains). Pin path mirrors CascadePin (partial-edit, tidy).
 func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addReinstallMainPath func(string), stats *UnwindApplyStats) error {
 	if len(members) == 0 {
 		return nil
 	}
-	// Fresh plan after deferred tags (no shared tagCache from pre-peel cascade).
-	plan, err := PlanUnwindCascadeCached(members, nil)
-	if err != nil {
-		return err
-	}
-	if plan == nil || len(plan.Steps) == 0 {
-		return nil
-	}
-
 	byLabel := pickPeelMembersByLabel(members)
-	nodes, _, err := buildUnwindModuleGraph(members, byLabel)
+	nodes, edges, err := buildUnwindModuleGraph(members, byLabel)
 	if err != nil {
 		return err
 	}
+	// Fresh tagscope after deferred peels/tags (no pre-peel cache).
+	attachTagScopeToModules(nodes, members, nil)
+
 	nodeByPath := make(map[string]UnwindGraphModuleNode, len(nodes))
 	for _, n := range nodes {
 		if n.Path != "" {
 			nodeByPath[n.Path] = n
 		}
+	}
+
+	// Stable pin list: consumer <- dep @ LatestTag require version.
+	type pinJob struct {
+		consumer, dep, ver string
+	}
+	var jobs []pinJob
+	seen := make(map[string]struct{})
+	for _, e := range edges {
+		if e.Kind != "require" || e.From == "" || e.To == "" {
+			continue
+		}
+		if _, ok := nodeByPath[e.From]; !ok {
+			continue
+		}
+		dep, ok := nodeByPath[e.To]
+		if !ok || dep.LatestTag == "" {
+			continue
+		}
+		ver := goRequireVersionFromTag(dep.LatestTag)
+		if ver == "" {
+			continue
+		}
+		key := e.From + "\x00" + e.To + "\x00" + ver
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		jobs = append(jobs, pinJob{consumer: e.From, dep: e.To, ver: ver})
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		if jobs[i].consumer != jobs[j].consumer {
+			return jobs[i].consumer < jobs[j].consumer
+		}
+		return jobs[i].dep < jobs[j].dep
+	})
+	if len(jobs) == 0 {
+		return nil
 	}
 
 	mainForModule := func(modPath string) (mainRepo string, label string, ok bool) {
@@ -1330,12 +1367,6 @@ func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addRei
 		return cascadePinCheckout(m)
 	}
 
-	moduleDirOn := func(checkout string, n UnwindGraphModuleNode) string {
-		return moduleDirOnCheckout(checkout, n)
-	}
-
-	// Ensure free dep tags published before network pin (tags may have been
-	// created in applyDeferredCascadeTags; push again is cheap / no-op when done).
 	ensureDepPublished := func(consumerModDir, depModule string) error {
 		if !flags.Push || consumerModDir == "" || depModule == "" {
 			return nil
@@ -1348,8 +1379,6 @@ func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addRei
 		if !ok || depMain == "" {
 			return nil
 		}
-		// Best-effort: push branch so tag refs created on free main are visible.
-		// Soft-skip missing remote (fixtures); hard-fail other push errors.
 		if err := runPushMain(depMain, false, flags.Force, nil); err != nil {
 			if isNoPushRemoteErr(err) {
 				return nil
@@ -1359,47 +1388,39 @@ func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addRei
 		return nil
 	}
 
-	for _, step := range plan.Steps {
-		if step.Kind != CascadePin {
-			continue
-		}
-		if step.ModulePath == "" || step.DepModulePath == "" || step.TagOrVersion == "" {
-			continue
-		}
-		consumerNode, ok := nodeByPath[step.ModulePath]
+	for _, job := range jobs {
+		consumerNode, ok := nodeByPath[job.consumer]
 		if !ok {
-			return fmt.Errorf("wrk: deferred repin: unknown consumer module %s", step.ModulePath)
+			return fmt.Errorf("wrk: deferred repin: unknown consumer module %s", job.consumer)
 		}
-		depNode, ok := nodeByPath[step.DepModulePath]
+		depNode, ok := nodeByPath[job.dep]
 		if !ok {
-			return fmt.Errorf("wrk: deferred repin: unknown dep module %s", step.DepModulePath)
+			return fmt.Errorf("wrk: deferred repin: unknown dep module %s", job.dep)
 		}
-		consumerMain, consumerLabel, ok := mainForModule(step.ModulePath)
+		consumerMain, consumerLabel, ok := mainForModule(job.consumer)
 		if !ok {
-			return fmt.Errorf("wrk: deferred repin %s: no stack main", step.ModulePath)
+			return fmt.Errorf("wrk: deferred repin %s: no stack main", job.consumer)
 		}
-		_, depLabel, _ := mainForModule(step.DepModulePath)
+		_, depLabel, _ := mainForModule(job.dep)
 
 		consumerCheckout := checkoutForPin(consumerLabel)
 		if consumerCheckout == "" {
 			consumerCheckout = consumerMain
 		}
-		consumerModDir := moduleDirOn(consumerCheckout, consumerNode)
+		consumerModDir := moduleDirOnCheckout(consumerCheckout, consumerNode)
 		if consumerModDir == "" {
-			return fmt.Errorf("wrk: deferred repin: empty consumer module dir for %s", step.ModulePath)
+			return fmt.Errorf("wrk: deferred repin: empty consumer module dir for %s", job.consumer)
 		}
 
-		// Idempotent: skip when require already at pin version (and no droppable
-		// external replace left that still needs clearing).
-		if current, ok := goModRequireVersion(consumerModDir, step.DepModulePath); ok && versionsMatch(current, step.TagOrVersion) {
-			keep, _ := localReplacePolicy(consumerModDir, step.DepModulePath)
-			if keep || !goModHasLocalReplace(consumerModDir, step.DepModulePath) {
+		// Skip when already at LatestTag and no droppable external replace left.
+		if current, ok := goModRequireVersion(consumerModDir, job.dep); ok && versionsMatch(current, job.ver) {
+			keep, _ := localReplacePolicy(consumerModDir, job.dep)
+			if keep || !goModHasLocalReplace(consumerModDir, job.dep) {
 				continue
 			}
-			// Require matches but droppable external replace remains — still pin.
 		}
 
-		if err := ensureDepPublished(consumerModDir, step.DepModulePath); err != nil {
+		if err := ensureDepPublished(consumerModDir, job.dep); err != nil {
 			return err
 		}
 
@@ -1427,9 +1448,9 @@ func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addRei
 		}
 		logDep := depLabel
 		if logDep == "" {
-			logDep = filepath.Base(step.DepModulePath)
+			logDep = filepath.Base(job.dep)
 		}
-		fmt.Printf("pin %s <- %s @ %s\n", logConsumer, logDep, step.TagOrVersion)
+		fmt.Printf("pin %s <- %s @ %s\n", logConsumer, logDep, job.ver)
 
 		pinFail := func(err error) error {
 			if usePartial {
@@ -1438,15 +1459,15 @@ func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addRei
 			return err
 		}
 
-		if err := cascadePinKeepLocalReplace(consumerModDir, step.DepModulePath, step.TagOrVersion, depNode, byLabel); err != nil {
-			return pinFail(fmt.Errorf("wrk: deferred repin %s <- %s: %w", step.ModulePath, step.DepModulePath, err))
+		if err := cascadePinKeepLocalReplace(consumerModDir, job.dep, job.ver, depNode, byLabel); err != nil {
+			return pinFail(fmt.Errorf("wrk: deferred repin %s <- %s: %w", job.consumer, job.dep, err))
 		}
 		if err := goModTidy(consumerModDir); err != nil {
 			return pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
 		}
 		_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
 
-		if err := cascadeCommitPin(consumerCheckout, consumerModDir, step.DepModulePath, step.TagOrVersion, false); err != nil {
+		if err := cascadeCommitPin(consumerCheckout, consumerModDir, job.dep, job.ver, false); err != nil {
 			return pinFail(err)
 		}
 		if stats != nil {
@@ -1457,10 +1478,10 @@ func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addRei
 			if err := restoreGoModSumSnap(consumerModDir, saved); err != nil {
 				return fmt.Errorf("wrk: deferred repin restore WIP go.mod/go.sum in %s: %w", consumerModDir, err)
 			}
-			if err := cascadePinKeepLocalReplace(consumerModDir, step.DepModulePath, step.TagOrVersion, depNode, byLabel); err != nil {
+			if err := cascadePinKeepLocalReplace(consumerModDir, job.dep, job.ver, depNode, byLabel); err != nil {
 				_ = restoreGoModSumSnap(consumerModDir, saved)
 				return fmt.Errorf("wrk: deferred repin surgical pin effects %s@%s in %s: %w",
-					step.DepModulePath, step.TagOrVersion, consumerModDir, err)
+					job.dep, job.ver, consumerModDir, err)
 			}
 			_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
 		}
