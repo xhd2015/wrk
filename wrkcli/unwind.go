@@ -624,6 +624,9 @@ func ValidateUnwindFlags(plan *UnwindPlan, flags UnwindFlags) error {
 // With --tag-next, peel/cascade order matches B1 apply (splitPeelOrderB1):
 // early free peels → global cascade tag/pin → deferred pure pin-consumer peels.
 // Without --tag-next, peels print free-first only (no cascade).
+//
+// Ship tail (--push / --sync): planned once after peels/cascade (not under each
+// peel), matching applyUnwindShipTail — push then sync per touched main.
 func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string, flags ...UnwindFlags) string {
 	var b strings.Builder
 	var f UnwindFlags
@@ -634,6 +637,20 @@ func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string,
 	addAll := genArgsHasFlag(f.GenCommitArgs, "--add-all")
 	b.WriteString("==== unwind (dry-run) ====\n")
 
+	// Touched mains for ship-tail plan (peel order; cascade may add more on apply).
+	var shipMainLabels []string
+	seenShipLabel := make(map[string]struct{})
+	noteShipLabel := func(label string) {
+		if label == "" {
+			return
+		}
+		if _, ok := seenShipLabel[label]; ok {
+			return
+		}
+		seenShipLabel[label] = struct{}{}
+		shipMainLabels = append(shipMainLabels, label)
+	}
+
 	writePeels := func(labels []string) {
 		for _, label := range labels {
 			display := label
@@ -642,6 +659,7 @@ func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string,
 				display = peelDisplayPath(workDir, m.Path)
 				peelPath = m.Path
 			}
+			noteShipLabel(label)
 			fmt.Fprintf(&b, "would: peel %s\n", display)
 			if f.GenCommitMsg {
 				if addAll {
@@ -656,15 +674,14 @@ func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string,
 			if f.Done || f.MergeBack {
 				b.WriteString("  would: merge-back linked worktree into main\n")
 			}
-			if f.Sync {
-				b.WriteString("  would: sync linked worktrees\n")
-			}
+			// Under-peel tag/pin vocabulary remains soft for --tag-next (cascade
+			// body is the authoritative free-first tag/pin plan when non-empty).
+			// Push/sync are ship-tail only (not under peel).
 			if f.TagNext {
 				b.WriteString("  would: create release tag\n")
 			}
-			if f.Push {
-				b.WriteString("  would: push branch and created tag\n")
-			}
+			// Pin still listed under peel (legacy apply pins per peel; B1 apply
+			// pins via cascade — soft plan line either way).
 			b.WriteString("  would: pin stack consumers\n")
 		}
 	}
@@ -688,6 +705,33 @@ func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string,
 			b.WriteString(formatUnwindCascadeDryRun(cascade))
 		}
 	}
+
+	// Ship tail: once per planned peel main (push then sync), before reinstall.
+	if f.Push || f.Sync {
+		if len(shipMainLabels) == 0 && plan != nil {
+			for _, label := range plan.PeelOrder {
+				noteShipLabel(label)
+			}
+		}
+		for range shipMainLabels {
+			if f.Push {
+				b.WriteString("would: push branch and created tag\n")
+			}
+			if f.Sync {
+				b.WriteString("would: sync linked worktrees\n")
+			}
+		}
+		// No peels but push/sync requested (cascade-only edge): still plan one ship.
+		if len(shipMainLabels) == 0 {
+			if f.Push {
+				b.WriteString("would: push branch and created tag\n")
+			}
+			if f.Sync {
+				b.WriteString("would: sync linked worktrees\n")
+			}
+		}
+	}
+
 	if f.ReinstallLocal {
 		b.WriteString("would: reinstall local binaries\n")
 	}
@@ -798,6 +842,11 @@ func runUnwind(workDir string, flags UnwindFlags) error {
 // gen-commit sees pinned go.mod). Without --tag-next: land peels and legacy
 // pinConsumersOfPeeled (latest tags). Preflight (cycle + flags) must already
 // have passed; this mutates.
+//
+// Ship tail (--push / --sync): after all peels, cascade, and deferred tags — when
+// each touched main is final (no further commits in this session) — run once per
+// main: optional final branch push, then optional linked-worktree sync. Peel-time
+// sync/push are not used (mid-cascade C-PUSH1 tag publish for network pin stays).
 func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdge, plan *UnwindPlan, flags UnwindFlags) error {
 	if plan == nil {
 		return nil
@@ -807,9 +856,9 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 	var stats UnwindApplyStats
 	stats.HadPeels = len(plan.PeelOrder) > 0
 
-	// Reinstall is a tail stage: collect each peeled/cascade main repository in
-	// deterministic free-first order, then run only after every peel and cascade
-	// succeeds. This avoids rebuilding from intermediate stack states.
+	// Reinstall + ship tail: collect each peeled/cascade main repository in
+	// deterministic free-first order. Ship (push/sync) and reinstall run only
+	// after every peel and cascade succeeds so mains are final.
 	reinstallMainPaths := make([]string, 0, len(plan.PeelOrder))
 	seenReinstallMainPath := make(map[string]struct{}, len(plan.PeelOrder))
 	addReinstallMainPath := func(path string) {
@@ -873,6 +922,11 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		}
 	}
 
+	// Ship tail: once per touched main, after all mutations (push then sync).
+	if err := applyUnwindShipTail(reinstallMainPaths, flags, &stats); err != nil {
+		return err
+	}
+
 	if flags.ReinstallLocal {
 		for _, mainPath := range reinstallMainPaths {
 			n, err := runUnwindReinstallLocal(mainPath, flags.Color, flags.NoColor)
@@ -890,9 +944,49 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 	return nil
 }
 
-// applyUnwindPeelOne peels one dirty stack label: optional gen-commit, land,
-// sync, and (without --tag-next) legacy push/pin. blankBefore prints a blank
-// line before the peel banner when prior peels already ran.
+// applyUnwindShipTail runs post-mutation --push and/or --sync once per touched
+// main (order preserved from free-first peel/cascade collection). Push first so
+// origin and local WTs agree when both flags are set; sync last so linked
+// worktrees FF to the final main tip (including cascade pin commits).
+//
+// With --tag-next, mid-cascade may already have published tags (C-PUSH1) and
+// counted Pushed; the tail still re-pushes the branch at final HEAD but does not
+// double-count stats.Pushed. Without --tag-next, peel no longer pushes — the
+// tail is the sole push and increments Pushed per main.
+func applyUnwindShipTail(mainPaths []string, flags UnwindFlags, stats *UnwindApplyStats) error {
+	if !flags.Push && !flags.Sync {
+		return nil
+	}
+	for _, mainPath := range mainPaths {
+		mainPath = storage.NormalizePath(mainPath)
+		if mainPath == "" {
+			continue
+		}
+		if flags.Push {
+			fmt.Println()
+			if err := runPushMain(mainPath, false, flags.Force, nil); err != nil {
+				return err
+			}
+			// Legacy path: sole session push. TagNext path: mid-cascade already
+			// counted; skip double-count on defensive final branch push.
+			if !flags.TagNext && stats != nil {
+				stats.Pushed++
+			}
+		}
+		if flags.Sync {
+			fmt.Println("---- sync linked worktrees ----")
+			if _, err := runSyncWithColor(mainPath, false, flags.Color, flags.NoColor); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// applyUnwindPeelOne peels one dirty stack label: optional gen-commit, land, and
+// (without --tag-next) legacy pin consumers. Ship flags --push / --sync run in
+// applyUnwindShipTail after all peels/cascade (once per main). blankBefore prints
+// a blank line before the peel banner when prior peels already ran.
 // tagCache shares tagscope.Plan across peels/cascade (may be nil).
 func applyUnwindPeelOne(
 	workDir, wrkHome, label string,
@@ -984,25 +1078,10 @@ func applyUnwindPeelOne(
 		}
 	}
 
-	if flags.Sync {
-		fmt.Println("---- sync linked worktrees ----")
-		if _, err := runSyncWithColor(mainPath, false, flags.Color, flags.NoColor); err != nil {
-			return err
-		}
-	}
-
-	// With --tag-next: land prelude only; tag/pin/push are global cascade.
+	// With --tag-next: land prelude only; tag/pin/push are global cascade + ship tail.
+	// Without --tag-next: pin consumers to latest; push/sync deferred to ship tail
+	// so consumer pin commits are included before final push/sync.
 	if !flags.TagNext {
-		// Legacy: optional push without tag-next, pin consumers to latest.
-		if flags.Push {
-			fmt.Println()
-			if err := runPushMain(mainPath, false, flags.Force, nil); err != nil {
-				return err
-			}
-			if stats != nil {
-				stats.Pushed++
-			}
-		}
 		if err := pinConsumersOfPeeled(label, mainPath, nil, members, edges); err != nil {
 			return err
 		}

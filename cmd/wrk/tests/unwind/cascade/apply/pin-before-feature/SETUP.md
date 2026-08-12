@@ -44,6 +44,8 @@ dirty consumer (+ optional dirty free) + external replace
    - A5: **resume** free already landed clean/untagged + consumer replace dirt
    - D1: **absolute-path** external replace (droppable; pin drops it)
    - C1: **free multi-module** (root + `cmd/`) both tag-next; consumer pins **root only**
+   - C1-sync: **free multi-module + `--merge-back --sync`** — free linked WT tracks
+     free main after cascade pin (`free-multimodule-merge-back-sync-wt-tracks-main`)
    - P-empty: **mid dirty + leaf clean + root go.mod-only** with `--add-all`
      (`pin-only-consumer-empty-gen-commit-with-add-all`) — pinReady empties
      index; must soft-skip gen-commit + land (not hard-fail / diverge)
