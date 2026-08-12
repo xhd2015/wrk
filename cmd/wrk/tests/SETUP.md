@@ -228,14 +228,50 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	adoptDoctestContext(d)
 	// Resolve symlinks so derived paths match git's resolved output (macOS
 	// serves /var from /private/var; t.TempDir returns the symlinked form).
+	// Register after TempDir so this cleanup runs first (LIFO) and drains bare
+	// origin.git/objects before testing.T's RemoveAll (CI flake: ENOTEMPTY).
 	workRoot, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		return fmt.Errorf("resolve work root: %w", err)
 	}
+	registerRetryWorkRootCleanup(t, workRoot)
 	req.WorkRoot = workRoot
 	req.WrkHome = filepath.Join(req.WorkRoot, ".wrk")
 	ensureHelpersUsed()
 	return os.MkdirAll(req.WrkHome, 0755)
+}
+
+// registerRetryWorkRootCleanup is fix D for TempDir cleanup races when leaves
+// push into a bare origin under WorkRoot (e.g. pr/push-existing/*). Experiment:
+// single RemoveAll failed ~50–70% under concurrent bare git gc; retry on
+// "directory not empty" reached 0/150. Registered after t.TempDir so it runs
+// before testing's cleanup and empties the tree first.
+func registerRetryWorkRootCleanup(t *testing.T, root string) {
+	t.Helper()
+	if root == "" {
+		return
+	}
+	t.Cleanup(func() {
+		const attempts = 12
+		const delay = 15 * time.Millisecond
+		var err error
+		for i := 0; i < attempts; i++ {
+			err = os.RemoveAll(root)
+			if err == nil {
+				return
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "directory not empty") && !strings.Contains(msg, "not empty") {
+				t.Logf("workroot cleanup: %v", err)
+				return
+			}
+			time.Sleep(delay)
+		}
+		if err != nil {
+			// Last resort log; testing.T TempDir cleanup may still run.
+			t.Logf("workroot cleanup after %d attempts: %v", attempts, err)
+		}
+	})
 }
 
 func mkdirAll(t *testing.T, path string) {
@@ -1181,6 +1217,7 @@ func ensureHelpersUsed() {
 	_ = assertBranchNotExists
 	_ = assertWorktreeListNotContains
 	_ = setupWrkWorktreeFromMain
+	_ = registerRetryWorkRootCleanup
 	_ = commitAheadOnWorktree
 	_ = revParseHEAD
 	_ = assertHEAD
