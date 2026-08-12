@@ -38,6 +38,9 @@ dirty consumer (+ optional dirty free) + external replace
    - T-tag1: **3-level freeHost** mid + dirty free (pin before free tag-next)
    - A-root-tag: **diamond A←B, A←C, C←B all dirty** → consumer root **must** tag-next
      (`diamond-all-dirty-consumer-must-tag`; hard assert A @ next at main HEAD)
+   - A-wip-tag: **free dirty + consumer HEAD==LatestTag + uncommitted WIP only** →
+     consumer **must** next tag at main HEAD
+     (`consumer-at-latest-wip-must-tag`; crime-scene agent-pro hole)
    - T-spl / A1: **false freeHost** via noise intra pins + dirty free + replace-only
    - A2: false freeHost monorepo + **FEATURE_WIP** (pin then deferred feature)
    - A4: **clean** consumer porcelain + committed replace + dirty free
@@ -1537,6 +1540,133 @@ func setupApplyPinBeforeFeatureResumeFreeLandedUntagged(t *testing.T, req *Reque
 	setPeelOrderDisplays(t, req, wtDir)
 }
 
+// setupApplyPinBeforeFeatureFreeDirtyConsumerAtLatestWIP is A-wip-tag fixture:
+//
+//	leaf external: dirty / owned-changed → next tag v0.0.2; bare origin for --push
+//	root main + linked WT: baseline tag v0.0.1 at HEAD (no commits past tag)
+//	  + uncommitted droppable replace => ./external/…
+//	  + uncommitted FEATURE_WIP.md for gen-commit
+//	  + no-local-replace hook + modproxy old+next
+//
+// Distinct from T2: T2 commits replace past LatestTag so cascade tagscope sees
+// owned-changed; this seed keeps consumer HEAD == LatestTag with porcelain only
+// so cascade NextTag is empty today and deferred applyDeferredCascadeTags is a
+// no-op after feature land (crime scene: agent-pro missing next tag).
+// Expected: free @ v0.0.2; consumer root @ v0.0.2 at main HEAD after full B1.
+func setupApplyPinBeforeFeatureFreeDirtyConsumerAtLatestWIP(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- leaf free main + origin ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	installCascadePermissivePreCommit(t, leafMain)
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	req.OriginBare = leafBare
+
+	// --- root consumer main + origin (tagged at baseline; no post-tag commits) ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root consumer main")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "root-origin.path"), rootBare+"\n")
+
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	// Dirty free under external (owned-changed for next tag after early peel).
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate()+"-leaf", leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	runGitIsolated(t, leafExt, "add", "pkg.go")
+	runGitIsolated(t, leafExt, "commit", "-m", "leaf feature for next tag")
+	markDirty(t, leafExt)
+
+	// Consumer: uncommitted replace + FEATURE_WIP only — HEAD stays at LatestTag.
+	// (T2 commits replace past tag; that lets cascade plan consumer NextTag.)
+	relReplace := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, "./"+relReplace)
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	// Do NOT git add/commit go.mod or .gitignore — keep HEAD == unwindApplyOldTag.
+	dirtyCascadeFeatureWIP(t, wtDir)
+	markDirty(t, wtDir)
+
+	// Seed invariant: linked consumer HEAD must equal LatestTag (crime scene).
+	head := revParseHEAD(t, wtDir)
+	tagSHA := revParseRef(t, wtDir, "refs/tags/"+unwindApplyOldTag)
+	if head != tagSHA {
+		t.Fatalf("A-wip-tag seed: consumer HEAD %s must equal LatestTag %s %s",
+			head, unwindApplyOldTag, tagSHA)
+	}
+	// Porcelain must show uncommitted replace/WIP (otherwise fixture is wrong).
+	st := gitOutputIsolated(t, wtDir, "status", "--porcelain")
+	if strings.TrimSpace(st) == "" {
+		t.Fatal("A-wip-tag seed: expected dirty consumer porcelain")
+	}
+
+	installCascadeNoLocalReplacePreCommit(t, wtDir)
+
+	seedDotPkgsProxyVersions(t, req, map[string]string{
+		unwindApplyNextTag: leafExt,
+		unwindApplyOldTag:  "",
+	})
+	// Consumer next zip for post-fix tag consumers / tidy if product self-pins.
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	seedConsNext := filepath.Join(req.WorkRoot, "seed-root-"+unwindApplyNextTag)
+	mkdirAll(t, seedConsNext)
+	writeGoModRequire(t, seedConsNext, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyNextTag)
+	writeFile(t, filepath.Join(seedConsNext, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	seedFileModuleProxy(t, proxyRoot, unwindRootModule, unwindApplyNextTag, seedConsNext)
+	seedConsOld := filepath.Join(req.WorkRoot, "seed-root-"+unwindApplyOldTag)
+	mkdirAll(t, seedConsOld)
+	writeGoModRequire(t, seedConsOld, unwindRootModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(seedConsOld, "root.go"),
+		"package root\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	seedFileModuleProxy(t, proxyRoot, unwindRootModule, unwindApplyOldTag, seedConsOld)
+
+	req.RepoDir = wtDir
+	setPeelOrderDisplays(t, req, leafExt, wtDir)
+}
+
 // setupApplyPinBeforeFeatureAbsolutePathReplace is D1:
 //
 //	Same free-dirty + consumer FEATURE_WIP shape as T2, but replace NewPath is
@@ -2121,6 +2251,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = setupApplyPinBeforeFeatureThreeLevelFreeHostDirty
 	_ = setupApplyPinOnlyConsumerEmptyGenCommitWithAddAll
 	_ = setupApplyPinBeforeFeatureDiamondAllDirtyConsumerTag
+	_ = setupApplyPinBeforeFeatureFreeDirtyConsumerAtLatestWIP
 	_ = setupApplyPinBeforeFeatureFalseFreeHostIntraPins
 	_ = setupApplyPinBeforeFeatureFalseFreeHostIntraPinsWithFeatureWIP
 	_ = setupApplyPinBeforeFeatureCleanConsumerCommittedReplace

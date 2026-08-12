@@ -893,10 +893,16 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 			return err
 		}
 	} else {
-		// B1 interleaved free-first: free peels → cascade pin → consumer peels.
+		// B1 epochs (tag-next path):
+		//   1. early peels  — free / freeHost land prelude
+		//   2. cascade      — free-first tag + pin (defer pure-consumer TagNext)
+		//   3. deferred peels — pure pin-consumer feature gen-commit (replace already pinned)
+		//   4. re-tagscope + tag deferred — NextTags at final main HEAD
+		//   5. ship tail / reinstall (after this block)
+		//
 		// Consumers that only need pin of a free dep must not gen-commit while a
 		// droppable external replace remains (D7 separate pin then feature commit).
-		// Pure pin-consumer TagNext is deferred until after those peels so the
+		// Pure pin-consumer TagNext waits until after those peels so the
 		// consumer self-tag lands at main HEAD (not pre-feature cascade tip).
 		early, deferred := splitPeelOrderB1(plan.PeelOrder, members)
 		if err := peelLabels(early); err != nil {
@@ -915,9 +921,9 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		if err := peelLabels(deferred); err != nil {
 			return err
 		}
-		// Deferred pure pin-consumer peels advanced main past cascade pin tip;
-		// create planned NextTags at current main HEAD (reuse cascade plan names).
-		if err := applyDeferredCascadeTags(cascadeMembers, skippedTags, flags, addReinstallMainPath, &stats); err != nil {
+		// Epoch 4: planned deferred tags (A-root-tag) + re-tagscope when cascade
+		// saw HEAD==LatestTag WIP-only (A-wip-tag) → create missing NextTags.
+		if err := applyDeferredCascadeTags(cascadeMembers, skippedTags, flags, addReinstallMainPath, &stats, deferred); err != nil {
 			return err
 		}
 	}
@@ -953,6 +959,10 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 // counted Pushed; the tail still re-pushes the branch at final HEAD but does not
 // double-count stats.Pushed. Without --tag-next, peel no longer pushes — the
 // tail is the sole push and increments Pushed per main.
+//
+// Pin-only / consumer mains often lack origin (fixtures attach origin on free
+// leaf only). Soft-skip those so --push still ships free tags without failing
+// the whole unwind (apply/pin-on-linked, leaf-then-pin, …).
 func applyUnwindShipTail(mainPaths []string, flags UnwindFlags, stats *UnwindApplyStats) error {
 	if !flags.Push && !flags.Sync {
 		return nil
@@ -965,11 +975,15 @@ func applyUnwindShipTail(mainPaths []string, flags UnwindFlags, stats *UnwindApp
 		if flags.Push {
 			fmt.Println()
 			if err := runPushMain(mainPath, false, flags.Force, nil); err != nil {
-				return err
-			}
-			// Legacy path: sole session push. TagNext path: mid-cascade already
-			// counted; skip double-count on defensive final branch push.
-			if !flags.TagNext && stats != nil {
+				if isNoPushRemoteErr(err) {
+					fmt.Fprintf(os.Stderr, "warning: skip push %s: %v\n", mainPath, err)
+					// Still run sync for this main when requested.
+				} else {
+					return err
+				}
+			} else if !flags.TagNext && stats != nil {
+				// Legacy path: sole session push. TagNext path: mid-cascade already
+				// counted; skip double-count on defensive final branch push.
 				stats.Pushed++
 			}
 		}

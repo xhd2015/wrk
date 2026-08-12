@@ -331,7 +331,8 @@ unwind/
 │           ├── external-clean-dep-gen-commit/       # T1: clean free + hook; pin @ v0.0.1 then feature
 │           ├── external-clean-already-tagged-no-tag/ # A-clean-tag: free @ LatestTag → no free next tag/commit
 │           ├── free-dirty-then-consumer-gen-commit/ # T2: free peel/tag → pin → consumer gen-commit
-│           └── diamond-all-dirty-consumer-must-tag/  # A-root-tag: diamond A/B/C all dirty → A tag @ HEAD
+│           ├── diamond-all-dirty-consumer-must-tag/  # A-root-tag: diamond A/B/C all dirty → A tag @ HEAD
+│           └── consumer-at-latest-wip-must-tag/      # A-wip-tag: HEAD@LatestTag + WIP only → consumer tag @ HEAD
 ├── show-graph/                           # read-only repo+module graph
 │   ├── reject/                           # mutual exclusion with dry-run / apply partners
 │   │   ├── with-dry-run/
@@ -502,6 +503,7 @@ Split factor (MECE, significance-first):
 | C-AP1 | cascade/apply/clean/single-repo-two-modules | clean Base; tag shared; pin root keep-replace; pin commit; root tag after pin; push | **GREEN** (P2 sealed) |
 | C-AP2 | cascade/apply/clean/multi-repo-free-first | multi-repo free-first land + cascade; leaf tagged/pushed; root pin commit | **GREEN** (P2 sealed) |
 | A-root-tag | cascade/apply/pin-before-feature/diamond-all-dirty-consumer-must-tag | diamond A←B,A←C,C←B all dirty; B1 full gen-commit; **A next tag at main HEAD** | **GREEN** (deferred pure pin-consumer TagNext after feature peels) |
+| A-wip-tag | cascade/apply/pin-before-feature/consumer-at-latest-wip-must-tag | free dirty + consumer HEAD==LatestTag + uncommitted WIP only; **consumer next tag at main HEAD** | **GREEN** (re-tagscope deferred pure pin-consumers after feature peels) |
 | C-AP5 | cascade/apply/dirty-gomod/without-add-all | **P3-1:** dirty go.mod WIP, no `--add-all` → partial-edit success; WIP preserve + pin commit Base-only | **RED** until partial edit (justified flip from P2 Error) |
 | C-AP6 | cascade/apply/dirty-gomod/with-add-all | **P3-5:** dirty go.mod + `--add-all` → cascade success (no partial restore) | **GREEN** (P2 sealed / regression) |
 | P3-2 | cascade/apply/partial-edit/unrelated-wip-file | dirty go.mod + unrelated WIP file; pin commit only go.mod/go.sum; file stays untracked | **RED** / may GREEN after P3 |

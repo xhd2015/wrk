@@ -713,10 +713,12 @@ func memberCheckoutPath(m StackMember) string {
 
 // cascadePinCheckout chooses where cascade pin+tidy+selective commit runs.
 //
-// Linked free/consumer Path that is still present and clean pins on MainRepo so
-// --reinstall-local (useMain) sees the tidied nested go.mod/go.sum. Dirty Path
-// keeps Path for partial-edit WIP (P3). Matches remapPeeledLabelsToMain intent
-// for peels: ship pin work onto main when there is no linked-only dirt.
+//	- Dirty Path → Path (partial-edit WIP, P3)
+//	- Clean linked Path with same HEAD as MainRepo → MainRepo so --reinstall-local
+//	  useMain sees pin+tidy (C-RI3 nested cmd←parent; free clean pin-only)
+//	- Clean linked Path ahead/diverged from Main (branch-local committed replace)
+//	  → Path so pin edits the inventory checkout (A4 / pin-on-linked-consumer)
+//	- Early peels remap Path→MainRepo → path==main → pin main
 func cascadePinCheckout(m StackMember) string {
 	path := ""
 	if m.Path != "" {
@@ -734,11 +736,32 @@ func cascadePinCheckout(m StackMember) string {
 	if main == "" || path == main {
 		return path
 	}
-	// Linked worktree distinct from main: clean → pin main (reinstall scan root).
-	if err := worktree.IsClean(path); err == nil {
+	// Dirty linked worktree: pin in place (partial-edit).
+	if err := worktree.IsClean(path); err != nil {
+		return path
+	}
+	// Clean linked: only ship to main when Path tip is already main's tip.
+	// Branch-local commits (replace committed only on feature branch) keep Path.
+	if cascadeSameHEAD(path, main) {
 		return main
 	}
 	return path
+}
+
+// cascadeSameHEAD reports whether two checkouts resolve to the same commit.
+func cascadeSameHEAD(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	ha, err1 := gitOutputDir(a, "rev-parse", "HEAD")
+	if err1 != nil {
+		return false
+	}
+	hb, err2 := gitOutputDir(b, "rev-parse", "HEAD")
+	if err2 != nil {
+		return false
+	}
+	return strings.TrimSpace(ha) == strings.TrimSpace(hb)
 }
 
 // moduleDirOnCheckout joins module Dir under checkout (root module → checkout).
@@ -820,8 +843,8 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 		return storage.NormalizePath(main), n.RepoLabel, main != ""
 	}
 
-	// checkoutForPin: clean linked Path → MainRepo so --reinstall-local (useMain)
-	// sees pin+tidy on nested modules; dirty Path keeps Path (partial-edit P3).
+	// checkoutForPin: inventory Path (linked primary) preferred; early peels remap
+	// free Path→MainRepo so reinstall useMain sees free pin+tidy.
 	checkoutForPin := func(label string) string {
 		m, ok := byLabel[label]
 		if !ok {
@@ -1018,9 +1041,7 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			}
 			_, depLabel, _ := mainForModule(step.DepModulePath)
 
-			// Pin on MainRepo when linked Path is clean so reinstall (useMain)
-			// sees tidied nested modules (agent-pro cmd ← parent). Dirty Path
-			// keeps Path for partial-edit.
+			// Pin on inventory Path (linked primary or remapped Main after peel).
 			consumerCheckout := checkoutForPin(consumerLabel)
 			if consumerCheckout == "" {
 				consumerCheckout = consumerMain
@@ -1138,15 +1159,31 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 	return skippedTags, nil
 }
 
-// applyDeferredCascadeTags creates planned NextTags at main HEAD after deferred
-// pure pin-consumer peels. Reuses tag names from the cascade plan (no re-tagscope).
-// With --push, publishes those tags and branch after local create.
-func applyDeferredCascadeTags(members []StackMember, steps []UnwindCascadeStep, flags UnwindFlags, addReinstallMainPath func(string), stats *UnwindApplyStats) error {
+// applyDeferredCascadeTags creates NextTags at main HEAD after deferred pure
+// pin-consumer peels:
+//  1. Cascade-planned skipped TagNext steps (A-root-tag: NextTag known before peel).
+//  2. Re-tagscope of deferred pure pin-consumer mains at post-peel HEAD (A-wip-tag:
+//     cascade saw HEAD==LatestTag WIP-only → empty NextTag; tip advanced untagged).
+//
+// Steps from (1) and (2) are merged and deduped by module path. With --push,
+// publishes newly created tags (soft-skips mains with no origin/upstream).
+func applyDeferredCascadeTags(members []StackMember, steps []UnwindCascadeStep, flags UnwindFlags, addReinstallMainPath func(string), stats *UnwindApplyStats, deferTagLabels []string) error {
+	// After deferred peels (--done may remove WTs), resolve mains from refreshed
+	// inventory and force deferred labels onto MainRepo so tagscope + tag create
+	// see final main HEAD (not residual feature-branch Path after --merge-back).
+	members = refreshStackMembersAfterLand(members)
+	members = remapPeeledLabelsToMain(members, deferTagLabels)
+
+	// Re-tagscope deferred pure pin-consumers (fresh plan; no shared tagCache).
+	extra, err := planPostDeferredConsumerTags(members, deferTagLabels)
+	if err != nil {
+		return err
+	}
+	steps = mergeCascadeTagNextSteps(steps, extra)
 	if len(steps) == 0 {
 		return nil
 	}
-	// After deferred peels (--done may remove WTs), resolve mains from refreshed inventory.
-	members = refreshStackMembersAfterLand(members)
+
 	byLabel := pickPeelMembersByLabel(members)
 	nodes, _, err := buildUnwindModuleGraph(members, byLabel)
 	if err != nil {
@@ -1220,6 +1257,12 @@ func applyDeferredCascadeTags(members []StackMember, steps []UnwindCascadeStep, 
 			}
 			fmt.Println()
 			if err := runPushMain(main, false, flags.Force, tags); err != nil {
+				if isNoPushRemoteErr(err) {
+					// Pin-only / consumer mains often lack origin in fixtures and
+					// multi-repo stacks; do not fail the whole unwind (ship free OK).
+					fmt.Fprintf(os.Stderr, "warning: skip push %s: %v\n", main, err)
+					continue
+				}
 				return err
 			}
 			if stats != nil {
@@ -1228,6 +1271,93 @@ func applyDeferredCascadeTags(members []StackMember, steps []UnwindCascadeStep, 
 		}
 	}
 	return nil
+}
+
+// planPostDeferredConsumerTags re-runs tagscope on deferred pure pin-consumer
+// mains after their peels advanced HEAD past LatestTag. Returns CascadeTagNext
+// steps for modules with non-empty NextTag (skips forever/testdata scopes).
+// Uses a fresh tagscope cache so pre-peel same-commit results are not reused.
+func planPostDeferredConsumerTags(members []StackMember, deferTagLabels []string) ([]UnwindCascadeStep, error) {
+	if len(deferTagLabels) == 0 || len(members) == 0 {
+		return nil, nil
+	}
+	deferSet := make(map[string]struct{}, len(deferTagLabels))
+	for _, lab := range deferTagLabels {
+		if lab != "" {
+			deferSet[lab] = struct{}{}
+		}
+	}
+	if len(deferSet) == 0 {
+		return nil, nil
+	}
+	byLabel := pickPeelMembersByLabel(members)
+	nodes, _, err := buildUnwindModuleGraph(members, byLabel)
+	if err != nil {
+		return nil, err
+	}
+	// Fresh tagscope (nil cache): HEAD may have advanced since cascade planning.
+	attachTagScopeToModules(nodes, members, nil)
+
+	var steps []UnwindCascadeStep
+	seen := make(map[string]struct{})
+	for _, n := range nodes {
+		if n.Path == "" || n.RepoLabel == "" {
+			continue
+		}
+		if _, ok := deferSet[n.RepoLabel]; !ok {
+			continue
+		}
+		if !cascadeModuleShouldTag(n) {
+			continue
+		}
+		if _, ok := seen[n.Path]; ok {
+			continue
+		}
+		seen[n.Path] = struct{}{}
+		steps = append(steps, UnwindCascadeStep{
+			Kind:         CascadeTagNext,
+			ModulePath:   n.Path,
+			TagOrVersion: n.NextTag,
+		})
+	}
+	sort.Slice(steps, func(i, j int) bool {
+		if steps[i].ModulePath != steps[j].ModulePath {
+			return steps[i].ModulePath < steps[j].ModulePath
+		}
+		return steps[i].TagOrVersion < steps[j].TagOrVersion
+	})
+	return steps, nil
+}
+
+// mergeCascadeTagNextSteps appends extra TagNext steps not already present for
+// the same ModulePath (planned cascade names win over re-tagscope duplicates).
+func mergeCascadeTagNextSteps(planned, extra []UnwindCascadeStep) []UnwindCascadeStep {
+	if len(extra) == 0 {
+		return planned
+	}
+	seen := make(map[string]struct{}, len(planned)+len(extra))
+	out := make([]UnwindCascadeStep, 0, len(planned)+len(extra))
+	for _, s := range planned {
+		if s.Kind != CascadeTagNext || s.ModulePath == "" || s.TagOrVersion == "" {
+			continue
+		}
+		if _, ok := seen[s.ModulePath]; ok {
+			continue
+		}
+		seen[s.ModulePath] = struct{}{}
+		out = append(out, s)
+	}
+	for _, s := range extra {
+		if s.Kind != CascadeTagNext || s.ModulePath == "" || s.TagOrVersion == "" {
+			continue
+		}
+		if _, ok := seen[s.ModulePath]; ok {
+			continue
+		}
+		seen[s.ModulePath] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 // cascadeCreateOneTag creates a single lightweight tag at HEAD (one scope only).

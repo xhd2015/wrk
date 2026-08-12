@@ -117,6 +117,17 @@ func printWouldPushLines(remote, branch string, tags []string, force bool) {
 	}
 }
 
+// isNoPushRemoteErr reports whether err is the hard "no upstream and no origin"
+// failure from resolvePushRemote / runPushMain. Unwind multi-main --push soft-
+// skips these so pin-only consumers without origin do not fail the whole recipe.
+func isNoPushRemoteErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "no upstream configured") && strings.Contains(msg, "no origin remote")
+}
+
 // resolvePushRemote returns remote and remote branch for pushing mainRepo's
 // current branch. Prefer configured upstream of branch; else origin + branch.
 func resolvePushRemote(mainRepo, branch string) (remote, remoteBranch string, err error) {
