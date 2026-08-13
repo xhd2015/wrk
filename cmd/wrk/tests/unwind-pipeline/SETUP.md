@@ -112,23 +112,25 @@ func installFakeOpencode(t *testing.T, req *Request) {
 	if modRoot == "" { t.Fatal("cannot find wrk module root from doctest root") }
 	req.FakeOpencode = filepath.Join(req.WorkRoot, "bin", "fake-opencode")
 	if err := os.MkdirAll(filepath.Dir(req.FakeOpencode), 0o755); err != nil { t.Fatal(err) }
+	gotBin := false
 	if p, err := exec.LookPath("fake-opencode"); err == nil && p != "" {
 		if data, rerr := os.ReadFile(p); rerr == nil {
 			if werr := os.WriteFile(req.FakeOpencode, data, 0o755); werr == nil {
-				goto mock
+				gotBin = true
 			}
 		}
 	}
-	matches, err := filepath.Glob(filepath.Join(filepath.Dir(modRoot), "agent-pro-*", "cmd", "fake-opencode"))
-	if err != nil || len(matches) == 0 {
-		matches, err = filepath.Glob(filepath.Join(modRoot, "external", "agent-pro-*", "cmd", "fake-opencode"))
+	if !gotBin {
+		matches, err := filepath.Glob(filepath.Join(filepath.Dir(modRoot), "agent-pro-*", "cmd", "fake-opencode"))
+		if err != nil || len(matches) == 0 {
+			matches, err = filepath.Glob(filepath.Join(modRoot, "external", "agent-pro-*", "cmd", "fake-opencode"))
+		}
+		if err != nil || len(matches) == 0 { t.Skip("agent-pro cmd/fake-opencode fixture is unavailable") }
+		fakeRoot := matches[len(matches)-1]
+		cmd := exec.Command("go", "build", "-mod=mod", "-o", req.FakeOpencode, ".")
+		cmd.Dir = fakeRoot
+		if out, err := cmd.CombinedOutput(); err != nil { t.Fatalf("build fake-opencode: %v\\n%s", err, out) }
 	}
-	if err != nil || len(matches) == 0 { t.Skip("agent-pro cmd/fake-opencode fixture is unavailable") }
-	fakeRoot := matches[len(matches)-1]
-	cmd := exec.Command("go", "build", "-mod=mod", "-o", req.FakeOpencode, ".")
-	cmd.Dir = fakeRoot
-	if out, err := cmd.CombinedOutput(); err != nil { t.Fatalf("build fake-opencode: %v\\n%s", err, out) }
-mock:
 	mock := filepath.Join(req.WorkRoot, "fake-opencode.json")
 	body := `{"version":"agent-pro.fake-runner.v1","runner":"fake-opencode","session_id":"unwind","llm_events":[{"type":"message","text":"{\"title\": \"feat: unwind\", \"description\": \"offline test commit\"}"}]}`
 	if err := os.WriteFile(mock, []byte(body), 0o644); err != nil { t.Fatal(err) }
