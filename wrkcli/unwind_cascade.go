@@ -608,7 +608,7 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 		if err := cascadePinKeepLocalReplace(consumerModDir, step.DepModulePath, step.TagOrVersion, depNode, byLabel); err != nil {
 			return pinFail(fmt.Errorf("wrk: ready-external pin %s <- %s: %w", step.ModulePath, step.DepModulePath, err))
 		}
-		if err := goModTidy(consumerModDir); err != nil {
+		if err := goModTidyForCascadePin(consumerModDir, saved, usePartial, step.DepModulePath); err != nil {
 			return pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
 		}
 		_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
@@ -1108,7 +1108,7 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			if err := cascadePinKeepLocalReplace(consumerModDir, step.DepModulePath, step.TagOrVersion, depNode, byLabel); err != nil {
 				return skippedTags, pinFail(fmt.Errorf("wrk: cascade pin %s <- %s: %w", step.ModulePath, step.DepModulePath, err))
 			}
-			if err := goModTidy(consumerModDir); err != nil {
+			if err := goModTidyForCascadePin(consumerModDir, saved, usePartial, step.DepModulePath); err != nil {
 				return skippedTags, pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
 			}
 			_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
@@ -1476,7 +1476,7 @@ func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addRei
 		if err := cascadePinKeepLocalReplace(consumerModDir, job.dep, job.ver, depNode, byLabel); err != nil {
 			return pinFail(fmt.Errorf("wrk: deferred repin %s <- %s: %w", job.consumer, job.dep, err))
 		}
-		if err := goModTidy(consumerModDir); err != nil {
+		if err := goModTidyForCascadePin(consumerModDir, saved, usePartial, job.dep); err != nil {
 			return pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
 		}
 		_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
@@ -1833,6 +1833,122 @@ func saveGoModSumSnap(modDir string) (goModSumSnap, error) {
 		s.hasSum = true
 	}
 	return s, nil
+}
+
+// goModTidyForCascadePin runs go mod tidy for a cascade/pinReady/repin step.
+//
+// When usePartial, Base go.mod has stripped WIP-only droppable replaces
+// (writeBaseGoModSum). Tidy of the working-tree source would then fail to
+// resolve packages that exist only behind those replaces (CS-openterm2
+// openterm2). Temporarily re-apply WIP filesystem replaces except skipModule
+// (the dep this step is publishing), tidy, then drop the overlay so the pin
+// commit does not scoop them (D7).
+func goModTidyForCascadePin(modDir string, saved goModSumSnap, usePartial bool, skipModule string) error {
+	var overlayed []string
+	if usePartial {
+		var err error
+		overlayed, err = overlayWIPReplacesExcept(modDir, saved, skipModule)
+		if err != nil {
+			return err
+		}
+	}
+	tidyErr := goModTidy(modDir)
+	if len(overlayed) > 0 {
+		dropOverlayReplaces(modDir, overlayed)
+	}
+	return tidyErr
+}
+
+// overlayWIPReplacesExcept copies local filesystem replaces from saved WIP
+// go.mod onto the current module go.mod, skipping skipModule. Returns old
+// module paths that were added (for later drop).
+func overlayWIPReplacesExcept(modDir string, saved goModSumSnap, skipModule string) ([]string, error) {
+	if modDir == "" || len(saved.mod) == 0 {
+		return nil, nil
+	}
+	f, err := modfile.Parse("go.mod", saved.mod, nil)
+	if err != nil || f == nil {
+		return scrapeWIPFilesystemReplaces(modDir, string(saved.mod), skipModule)
+	}
+	opts := &commands.GoModEditOptions{Dir: modDir, Stderr: false, Stdout: false}
+	var added []string
+	for _, r := range f.Replace {
+		if r == nil || r.Old.Path == "" || r.New.Path == "" {
+			continue
+		}
+		if skipModule != "" && r.Old.Path == skipModule {
+			continue
+		}
+		newPath := r.New.Path
+		if !strings.HasPrefix(newPath, ".") && !filepath.IsAbs(newPath) {
+			continue
+		}
+		if goModHasLocalReplace(modDir, r.Old.Path) {
+			continue
+		}
+		if err := commands.GoModEditReplace(r.Old.Path, newPath, opts); err != nil {
+			return added, fmt.Errorf("overlay WIP replace %s => %s: %w", r.Old.Path, newPath, err)
+		}
+		added = append(added, r.Old.Path)
+	}
+	return added, nil
+}
+
+func scrapeWIPFilesystemReplaces(modDir, content, skipModule string) ([]string, error) {
+	opts := &commands.GoModEditOptions{Dir: modDir, Stderr: false, Stdout: false}
+	var added []string
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(raw)
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = strings.TrimSpace(line[:i])
+		}
+		if !strings.Contains(line, "=>") {
+			continue
+		}
+		parts := strings.SplitN(line, "=>", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		left := strings.TrimSpace(parts[0])
+		left = strings.TrimPrefix(left, "replace ")
+		fields := strings.Fields(left)
+		if len(fields) == 0 {
+			continue
+		}
+		oldPath := fields[0]
+		if skipModule != "" && oldPath == skipModule {
+			continue
+		}
+		right := strings.Fields(strings.TrimSpace(parts[1]))
+		if len(right) == 0 {
+			continue
+		}
+		newPath := right[0]
+		if !strings.HasPrefix(newPath, ".") && !filepath.IsAbs(newPath) {
+			continue
+		}
+		if goModHasLocalReplace(modDir, oldPath) {
+			continue
+		}
+		if err := commands.GoModEditReplace(oldPath, newPath, opts); err != nil {
+			return added, fmt.Errorf("overlay WIP replace %s => %s: %w", oldPath, newPath, err)
+		}
+		added = append(added, oldPath)
+	}
+	return added, nil
+}
+
+func dropOverlayReplaces(modDir string, modules []string) {
+	if modDir == "" || len(modules) == 0 {
+		return
+	}
+	opts := &commands.GoModEditOptions{Dir: modDir, Stderr: false, Stdout: false}
+	for _, m := range modules {
+		if m == "" {
+			continue
+		}
+		_ = commands.GoModDropReplace(m, opts)
+	}
 }
 
 // restoreGoModSumSnap writes saved go.mod/go.sum bytes back to modDir.

@@ -894,7 +894,7 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		}
 	} else {
 		// B1 epochs (tag-next path):
-		//   1. early peels  — free / freeHost land prelude
+		//   1. early peels  — free / freeHost / dirty replace-target land prelude
 		//   2. cascade      — free-first tag + pin (defer pure-consumer TagNext)
 		//   3. deferred peels — pure pin-consumer feature gen-commit (replace already pinned)
 		//   4. re-tagscope + tag deferred — NextTags at final main HEAD
@@ -907,6 +907,14 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		early, deferred := splitPeelOrderB1(plan.PeelOrder, members)
 		if err := peelLabels(early); err != nil {
 			return err
+		}
+		// Early peels landed unpublished WIP onto main: drop stale tagscope
+		// (NextTag was empty at HEAD==Latest). Cascade must re-plan @ next.
+		for _, lab := range early {
+			if m, ok := byLabel[lab]; ok {
+				delete(tagCache, storage.NormalizePath(m.Path))
+				delete(tagCache, storage.NormalizePath(m.MainRepo))
+			}
 		}
 		// Linked free paths may be removed by --done; remap for cascade graph.
 		// Early peels already land into main: also force Path→MainRepo for those
@@ -1128,6 +1136,8 @@ func applyUnwindPeelOne(
 // consumer) stays early so land/DIRTY prelude still runs before cascade tags.
 // freeHost is pin deps with planned CascadeTagNext only — not every pin dep
 // (noise LatestTag intra pins) and not self-TagNext on the consumer alone.
+// Dirty droppable-replace targets are also early (CS-openterm2): unpublished
+// WIP on a replace target must land before any consumer network pin/tidy.
 // Plan/cascade failures fall back to all-early (legacy peel-then-cascade).
 func splitPeelOrderB1(peelOrder []string, members []StackMember) (early, deferred []string) {
 	if len(peelOrder) == 0 {
@@ -1141,7 +1151,7 @@ func splitPeelOrderB1(peelOrder []string, members []StackMember) (early, deferre
 		return append([]string(nil), peelOrder...), nil
 	}
 	byLabel := pickPeelMembersByLabel(members)
-	nodes, _, err := buildUnwindModuleGraph(members, byLabel)
+	nodes, graphEdges, err := buildUnwindModuleGraph(members, byLabel)
 	if err != nil {
 		return append([]string(nil), peelOrder...), nil
 	}
@@ -1151,6 +1161,7 @@ func splitPeelOrderB1(peelOrder []string, members []StackMember) (early, deferre
 			labelOfMod[n.Path] = n.RepoLabel
 		}
 	}
+	dirtyReplaceTarget := dirtyDroppableReplaceTargetLabels(members, nodes, graphEdges)
 	// freeHost: labels that host a free dep with planned CascadeTagNext (true
 	// free / tag hosts that consumers pin after tag). Built only from pin
 	// DepModulePath entries that also have a TagNext step — NOT from every
@@ -1188,15 +1199,58 @@ func splitPeelOrderB1(peelOrder []string, members []StackMember) (early, deferre
 	for _, label := range peelOrder {
 		_, isPinConsumer := pinConsumer[label]
 		_, isFreeHost := freeHost[label]
+		_, isDirtyReplaceTarget := dirtyReplaceTarget[label]
 		// Defer pure pin-consumer peels so cascade pin/commit runs first (B1/D7).
 		// Same-label free+consumer hosts stay early (single-repo two modules).
-		if isPinConsumer && !isFreeHost {
+		// Dirty replace-targets stay early even when cmd-drift marks them
+		// pinConsumer without TagNext (HEAD==Latest + unpublished WIP).
+		if isPinConsumer && !isFreeHost && !isDirtyReplaceTarget {
 			deferred = append(deferred, label)
 			continue
 		}
 		early = append(early, label)
 	}
 	return early, deferred
+}
+
+// dirtyDroppableReplaceTargetLabels returns peel labels that are dirty and
+// targeted by a droppable external stack replace. Those checkouts hold
+// unpublished source (CS-openterm2) and must peel before consumer network tidy.
+func dirtyDroppableReplaceTargetLabels(members []StackMember, nodes []UnwindGraphModuleNode, edges []UnwindGraphModuleEdge) map[string]struct{} {
+	out := make(map[string]struct{})
+	if len(members) == 0 || len(edges) == 0 {
+		return out
+	}
+	byLabel := pickPeelMembersByLabel(members)
+	nodeByPath := make(map[string]UnwindGraphModuleNode, len(nodes))
+	for _, n := range nodes {
+		if n.Path != "" {
+			nodeByPath[n.Path] = n
+		}
+	}
+	for _, e := range edges {
+		if e.Kind != "replace" || e.From == "" || e.To == "" {
+			continue
+		}
+		from, ok1 := nodeByPath[e.From]
+		to, ok2 := nodeByPath[e.To]
+		if !ok1 || !ok2 {
+			continue
+		}
+		if !isDroppableExternalStackReplace(from, to, e) {
+			continue
+		}
+		lab := to.RepoLabel
+		if lab == "" {
+			continue
+		}
+		m, ok := byLabel[lab]
+		if !ok || !m.Dirty {
+			continue
+		}
+		out[lab] = struct{}{}
+	}
+	return out
 }
 
 // runUnwindReinstallLocal executes one unwind tail entry. A repository without

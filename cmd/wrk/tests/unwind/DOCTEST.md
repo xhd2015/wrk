@@ -504,6 +504,7 @@ Split factor (MECE, significance-first):
 | C-AP2 | cascade/apply/clean/multi-repo-free-first | multi-repo free-first land + cascade; leaf tagged/pushed; root pin commit | **GREEN** (P2 sealed) |
 | A-root-tag | cascade/apply/pin-before-feature/diamond-all-dirty-consumer-must-tag | diamond A←B,A←C,C←B all dirty; B1 full gen-commit; **A next tag at main HEAD** | **GREEN** (deferred pure pin-consumer TagNext after feature peels) |
 | A-wip-tag | cascade/apply/pin-before-feature/consumer-at-latest-wip-must-tag | free dirty + consumer HEAD==LatestTag + uncommitted WIP only; **consumer next tag at main HEAD** | **GREEN** (re-tagscope deferred pure pin-consumers after feature peels) |
+| CS-openterm2 | cascade/apply/pin-before-feature/intra-pin-tidy-unpublished-wip-import | uncommitted free unpublished package + WIP-only replace + intra drift pin tidy; exit 0; require free @ next; no missing-package | **GREEN** (dirty replace-target early peel + WIP-replace overlay tidy) |
 | C-AP5 | cascade/apply/dirty-gomod/without-add-all | **P3-1:** dirty go.mod WIP, no `--add-all` → partial-edit success; WIP preserve + pin commit Base-only | **RED** until partial edit (justified flip from P2 Error) |
 | C-AP6 | cascade/apply/dirty-gomod/with-add-all | **P3-5:** dirty go.mod + `--add-all` → cascade success (no partial restore) | **GREEN** (P2 sealed / regression) |
 | P3-2 | cascade/apply/partial-edit/unrelated-wip-file | dirty go.mod + unrelated WIP file; pin commit only go.mod/go.sum; file stays untracked | **RED** / may GREEN after P3 |

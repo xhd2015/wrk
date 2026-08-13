@@ -57,6 +57,10 @@ dirty consumer (+ optional dirty free) + external replace
    - GS1: **T1 + replace-tidy hashless go.sum + FEATURE_WIP + `--add-all`**
      (`add-all-feature-must-keep-pin-gosum`) — feature gen-commit must not
      drop pin `go.sum` hashes (crime-scene `cbea1ecf` scoop)
+   - CS-openterm2: **uncommitted free unpublished package + WIP-only replace +
+     intra require-drift pin tidy** (`intra-pin-tidy-unpublished-wip-import`)
+     — cascade intra pin must not `go mod tidy` against Base (no replace)
+     while WT source imports a package that exists only on dirty free
 
 ## Context
 
@@ -77,6 +81,13 @@ dirty consumer (+ optional dirty free) + external replace
   label, including noise intra pins @ LatestTag with **no** tag-next. Monorepo
   consumer peels early with unready external free replace → hook fail. freeHost
   must be true tag hosts only so pure pin-consumers defer.
+- **CS-openterm2 (fixed):** uncommitted free package (HEAD==LatestTag → empty
+  NextTag) + `cmd` require-drift used to mark free `pinConsumer` without
+  freeHost → both peels deferred → cascade first. Intra pin tidied Base
+  `go.mod` (WIP replace stripped) while WT source imported the unpublished
+  package. Product now early-peels dirty droppable-replace targets and
+  overlays unrelated WIP replaces during partial-edit tidy. Distinct from
+  CS-repin (no new import) and T-spl (hook fail, not missing-package tidy).
 - Do not rewrite sealed ASSERT contracts under `clean/`, `dirty-gomod/`,
   `partial-edit/`, `reinstall-local/`, or sealed T1/T2/T-M1/T-tag1/T-spl leaves.
 - **P3 C1:** free monorepo multi-module tags (go-pkgs root + nested `cmd/`) +
@@ -102,6 +113,17 @@ const (
 	freeMultiCmdDir     = "cmd" // rel under free monorepo main
 	freeMultiCmdOldTag  = "cmd/v0.0.1"
 	freeMultiCmdNextTag = "cmd/v0.0.2"
+
+	// CS-openterm2: consumer module path sorts before example.com/dot-pkgs/cmd
+	// so Kahn emits the consumer intra pin before cmd←free (live spl order).
+	csOpenterm2RootModule  = "example.com/aaa-spl"
+	csOpenterm2ToolModule  = "example.com/aaa-spl/tools/trace/trace_tool"
+	csOpenterm2ToolDir     = "tools/trace/trace_tool" // rel under consumer
+	csOpenterm2ToolOldTag  = "tools/trace/trace_tool/v0.0.15"
+	csOpenterm2ToolNextTag = "tools/trace/trace_tool/v0.0.16"
+	csOpenterm2ToolOldVer  = "v0.0.15"
+	csOpenterm2ToolNextVer = "v0.0.16"
+	csOpenterm2ServerRel   = "marcus-macos-app/go-pkgs/server"
 
 	// Uncommitted feature WIP path for consumer gen-commit (not go.mod).
 	cascadeFeatureWIPFile = "FEATURE_WIP.md"
@@ -2506,6 +2528,228 @@ func assertHEADGoSumHasDep(t *testing.T, repo, modulePath, ver string) {
 	}
 }
 
+// seedFileModuleProxyHiddenFromLatest writes proxy artifacts for version but
+// removes it from @v/list so go @latest cannot see it (CS-openterm2: published
+// latest lacks the unpublished package; post-fix pin @ next still fetches .info/.zip).
+func seedFileModuleProxyHiddenFromLatest(t *testing.T, proxyRoot, modulePath, version, srcDir string) {
+	t.Helper()
+	seedFileModuleProxy(t, proxyRoot, modulePath, version, srcDir)
+	vDir := filepath.Join(append([]string{proxyRoot}, strings.Split(modulePath, "/")...)...)
+	vDir = filepath.Join(vDir, "@v")
+	listPath := filepath.Join(vDir, "list")
+	data, err := os.ReadFile(listPath)
+	if err != nil {
+		t.Fatalf("read proxy list %s: %v", listPath, err)
+	}
+	var keep []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line == version {
+			continue
+		}
+		keep = append(keep, line)
+	}
+	out := ""
+	if len(keep) > 0 {
+		out = strings.Join(keep, "\n") + "\n"
+	}
+	writeFile(t, listPath, out)
+}
+
+// setupApplyIntraPinTidyUnpublishedWIPImport is CS-openterm2:
+//
+//	free monorepo (go-pkgs + cmd) HEAD == LatestTag v0.0.1; cmd requires free @
+//	  v0.0.0 (drift → pinConsumer without freeHost); **uncommitted**
+//	  shell/openterm2 (not in published latest)
+//	consumer linked WT (example.com/aaa-spl):
+//	  HEAD go.mod: require free @ v0.0.1 + intra tool @ v0.0.15 (latest tag
+//	    v0.0.16); **no** free replace
+//	  owned-changed after v0.0.1 so cascade plans consumer tag-next
+//	  WIP: droppable replace + workspace.go imports unpublished openterm2
+//	modproxy: free @ v0.0.1 only in @latest list (no openterm2); v0.0.2 zip
+//	  hidden from list (has openterm2) so post-fix pin @ next can fetch
+//
+// Today: both peels deferred → cascade first → intra pin tidy on Base (no
+// replace) → "does not contain package …/shell/openterm2".
+// Desired: exit 0; free tagged next with openterm2 landed; consumer require
+// free @ next; replace dropped; no missing-package / unknown revision.
+func setupApplyIntraPinTidyUnpublishedWIPImport(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.NestedModulePath = freeMultiCmdModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- free monorepo main: root + cmd at baseline tags (HEAD == LatestTag) ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+
+	cmdDir := filepath.Join(leafMain, freeMultiCmdDir)
+	mkdirAll(t, cmdDir)
+	// Stale cmd require → cascade pinConsumer on free label without TagNext.
+	writeGoModRequire(t, cmdDir, freeMultiCmdModule, unwindDotPkgsModule+"@v0.0.0")
+	appendLocalReplace(t, cmdDir, unwindDotPkgsModule, "../")
+	writeFile(t, filepath.Join(cmdDir, "cmd.go"),
+		"package freecmd\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go",
+		filepath.Join(freeMultiCmdDir, "go.mod"),
+		filepath.Join(freeMultiCmdDir, "cmd.go"))
+	runGitIsolated(t, leafMain, "commit", "-m", "add free monorepo root + cmd at latest tag")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	createLightweightTag(t, leafMain, freeMultiCmdOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	installCascadePermissivePreCommit(t, leafMain)
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	if tagRefExists(t, leafMain, freeMultiCmdOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", freeMultiCmdOldTag)
+	}
+	req.OriginBare = leafBare
+
+	// --- consumer monorepo main ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+
+	toolDir := filepath.Join(rootMain, filepath.FromSlash(csOpenterm2ToolDir))
+	mkdirAll(t, toolDir)
+	writeGoModRequire(t, toolDir, csOpenterm2ToolModule)
+	writeFile(t, filepath.Join(toolDir, "tool.go"),
+		"package tracetool\n\nfunc Version() string { return \""+csOpenterm2ToolOldVer+"\" }\n")
+
+	writeGoModRequire(t, rootMain, csOpenterm2RootModule,
+		csOpenterm2ToolModule+"@"+csOpenterm2ToolOldVer,
+		unwindDotPkgsModule+"@"+unwindApplyOldTag,
+	)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package spl\n\nimport (\n\t_ \""+csOpenterm2ToolModule+"\"\n\t_ \""+unwindDotPkgsModule+"\"\n)\n")
+	serverDir := filepath.Join(rootMain, filepath.FromSlash(csOpenterm2ServerRel))
+	mkdirAll(t, serverDir)
+	writeFile(t, filepath.Join(serverDir, "workspace.go"),
+		"package server\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc OpenWorkspace() {}\n")
+
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go",
+		filepath.Join(csOpenterm2ToolDir, "go.mod"),
+		filepath.Join(csOpenterm2ToolDir, "tool.go"),
+		filepath.Join(csOpenterm2ServerRel, "workspace.go"))
+	runGitIsolated(t, rootMain, "commit", "-m", "baseline spl analog + workspace without openterm2")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	createLightweightTag(t, rootMain, csOpenterm2ToolOldTag, "")
+
+	// Advance intra tool to v0.0.16; root require stays v0.0.15 (drift).
+	writeFile(t, filepath.Join(toolDir, "tool.go"),
+		"package tracetool\n\nfunc Version() string { return \""+csOpenterm2ToolNextVer+"\" }\n")
+	runGitIsolated(t, rootMain, "add", filepath.Join(csOpenterm2ToolDir, "tool.go"))
+	runGitIsolated(t, rootMain, "commit", "-m", "trace_tool v0.0.16")
+	createLightweightTag(t, rootMain, csOpenterm2ToolNextTag, "")
+
+	// Root owned-changed so cascade plans consumer tag-next (live spl next=v0.0.315).
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package spl\n\nimport (\n\t_ \""+csOpenterm2ToolModule+"\"\n\t_ \""+unwindDotPkgsModule+"\"\n)\n\nfunc Root() {}\n")
+	runGitIsolated(t, rootMain, "add", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "spl owned change")
+
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+	writeFile(t, filepath.Join(req.WorkRoot, "root-origin.path"), rootBare+"\n")
+
+	// Linked consumer = stack primary (gen-commit only for linked peels).
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	// Nest free WT under consumer/external (stack member).
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate()+"-leaf", leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+
+	// Uncommitted unpublished package (HEAD still == LatestTag → empty NextTag).
+	openDir := filepath.Join(leafExt, "shell", "openterm2")
+	mkdirAll(t, openDir)
+	writeFile(t, filepath.Join(openDir, "openterm2.go"),
+		"package openterm2\n\nfunc Open(dir string) error { return nil }\n")
+	runGitIsolated(t, leafExt, "add", filepath.Join("shell", "openterm2", "openterm2.go"))
+	markDirty(t, leafExt)
+
+	// Crime-scene key: replace is WIP only (HEAD go.mod has none).
+	relReplace := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, "./"+relReplace)
+	writeFile(t, filepath.Join(wtDir, filepath.FromSlash(csOpenterm2ServerRel), "workspace.go"),
+		"package server\n\nimport (\n\t_ \""+unwindDotPkgsModule+"\"\n\t_ \""+unwindDotPkgsModule+"/shell/openterm2\"\n)\n\nfunc OpenWorkspace() {}\n")
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	// .gitignore uncommitted is fine; hook only cares about go.mod replace.
+	markDirty(t, wtDir)
+	installCascadeNoLocalReplacePreCommit(t, wtDir)
+
+	// Offline proxy: published latest = v0.0.1 without openterm2.
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	oldSeed := filepath.Join(req.WorkRoot, "seed-free-root-"+unwindApplyOldTag)
+	mkdirAll(t, oldSeed)
+	writeGoModRequire(t, oldSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(oldSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyOldTag, oldSeed)
+
+	// Next zip has openterm2 but is hidden from @latest (today's tidy must not
+	// accidentally resolve the unpublished import via a pre-seeded latest).
+	nextSeed := filepath.Join(req.WorkRoot, "seed-free-root-"+unwindApplyNextTag)
+	mkdirAll(t, nextSeed)
+	writeGoModRequire(t, nextSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(nextSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	mkdirAll(t, filepath.Join(nextSeed, "shell", "openterm2"))
+	writeFile(t, filepath.Join(nextSeed, "shell", "openterm2", "openterm2.go"),
+		"package openterm2\n\nfunc Open(dir string) error { return nil }\n")
+	seedFileModuleProxyHiddenFromLatest(t, proxyRoot, unwindDotPkgsModule, unwindApplyNextTag, nextSeed)
+
+	cmdOldSeed := filepath.Join(req.WorkRoot, "seed-free-cmd-"+unwindApplyOldTag)
+	mkdirAll(t, cmdOldSeed)
+	writeGoModRequire(t, cmdOldSeed, freeMultiCmdModule)
+	writeFile(t, filepath.Join(cmdOldSeed, "cmd.go"),
+		"package freecmd\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, freeMultiCmdModule, unwindApplyOldTag, cmdOldSeed)
+
+	toolOldSeed := filepath.Join(req.WorkRoot, "seed-trace-tool-"+csOpenterm2ToolOldVer)
+	mkdirAll(t, toolOldSeed)
+	writeGoModRequire(t, toolOldSeed, csOpenterm2ToolModule)
+	writeFile(t, filepath.Join(toolOldSeed, "tool.go"),
+		"package tracetool\n\nfunc Version() string { return \""+csOpenterm2ToolOldVer+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, csOpenterm2ToolModule, csOpenterm2ToolOldVer, toolOldSeed)
+
+	toolNextSeed := filepath.Join(req.WorkRoot, "seed-trace-tool-"+csOpenterm2ToolNextVer)
+	mkdirAll(t, toolNextSeed)
+	writeGoModRequire(t, toolNextSeed, csOpenterm2ToolModule)
+	writeFile(t, filepath.Join(toolNextSeed, "tool.go"),
+		"package tracetool\n\nfunc Version() string { return \""+csOpenterm2ToolNextVer+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, csOpenterm2ToolModule, csOpenterm2ToolNextVer, toolNextSeed)
+
+	enableFileModuleProxy(t, req, proxyRoot)
+
+	req.RepoDir = wtDir
+	setPeelOrderDisplays(t, req, leafExt, wtDir)
+}
+
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = d
 	_ = t
@@ -2530,6 +2774,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = setupApplyPinBeforeFeatureAbsolutePathReplace
 	_ = setupApplyPinBeforeFeatureFreeMultiModuleCmdRootOnly
 	_ = setupApplyDeferredTagRepinAfterFreeUncommittedFeature
+	_ = setupApplyIntraPinTidyUnpublishedWIPImport
 	_ = setupApplyPinBeforeFeatureAddAllKeepPinGoSum
 	_ = freeMultiCmdModule
 	_ = freeMultiCmdNextTag
