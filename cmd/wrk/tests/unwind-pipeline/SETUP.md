@@ -64,6 +64,8 @@ func seedMain(t *testing.T, req *Request) {
 	if err := os.MkdirAll(req.MainRepo, 0o755); err != nil { t.Fatal(err) }
 	git(t, req.MainRepo, "init", "-b", "main")
 	git(t, req.MainRepo, "config", "core.hooksPath", "/dev/null")
+	git(t, req.MainRepo, "config", "user.name", "doctest")
+	git(t, req.MainRepo, "config", "user.email", "doctest@example.invalid")
 	os.WriteFile(filepath.Join(req.MainRepo, "go.mod"), []byte("module example.com/app\\n\\ngo 1.22\\n"), 0o644)
 	os.WriteFile(filepath.Join(req.MainRepo, ".gitignore"), []byte("/external/\\n"), 0o644)
 	git(t, req.MainRepo, "add", ".")
@@ -81,6 +83,8 @@ func seedLinkedDep(t *testing.T, req *Request) {
 	os.MkdirAll(req.DepMain, 0o755)
 	git(t, req.DepMain, "init", "-b", "main")
 	git(t, req.DepMain, "config", "core.hooksPath", "/dev/null")
+	git(t, req.DepMain, "config", "user.name", "doctest")
+	git(t, req.DepMain, "config", "user.email", "doctest@example.invalid")
 	os.WriteFile(filepath.Join(req.DepMain, "go.mod"), []byte("module example.com/dep\\n\\ngo 1.22\\n"), 0o644)
 	git(t, req.DepMain, "add", ".")
 	git(t, req.DepMain, "commit", "-m", "initial")
