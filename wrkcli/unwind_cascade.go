@@ -440,9 +440,49 @@ func remapPeeledLabelsToMain(members []StackMember, peeledLabels []string) []Sta
 	return out
 }
 
+// earlyWaveTaggableModules returns module paths on label whose cascade TagNext
+// has no earlier same-label pin (planner: pins first, then that module's tag).
+func earlyWaveTaggableModules(nodes []UnwindGraphModuleNode, edges []UnwindGraphModuleEdge, label string) map[string]struct{} {
+	out := make(map[string]struct{})
+	if label == "" || len(nodes) == 0 {
+		return out
+	}
+	plan, err := planUnwindCascadeFromGraph(nodes, edges)
+	if err != nil || plan == nil {
+		return out
+	}
+	onLabel := make(map[string]struct{}, len(nodes))
+	for _, n := range nodes {
+		if n.Path != "" && n.RepoLabel == label {
+			onLabel[n.Path] = struct{}{}
+		}
+	}
+	sawSameMainPin := false
+	for _, step := range plan.Steps {
+		switch step.Kind {
+		case CascadePin:
+			if _, ok := onLabel[step.ModulePath]; ok {
+				sawSameMainPin = true
+			}
+		case CascadeTagNext:
+			if step.ModulePath == "" {
+				continue
+			}
+			if _, ok := onLabel[step.ModulePath]; !ok {
+				continue
+			}
+			if !sawSameMainPin {
+				out[step.ModulePath] = struct{}{}
+			}
+		}
+	}
+	return out
+}
+
 // applyEarlyPeelTagWave tags owned-changed modules on a just-peeled label at
 // main HEAD and optionally pushes those tags. The next early peel's pinReady
 // can then pin a published next version instead of stale LatestTag (CS-pin-old-tag).
+// Same-main consumer self-tags wait for cascade (commit-before-tag).
 func applyEarlyPeelTagWave(label string, members []StackMember, flags UnwindFlags, tagCache tagScopePlanCache, addReinstallMainPath func(string), stats *UnwindApplyStats) error {
 	if label == "" || len(members) == 0 {
 		return nil
@@ -468,7 +508,7 @@ func applyEarlyPeelTagWave(label string, members []StackMember, flags UnwindFlag
 	waveMembers := refreshStackMembersAfterLand(members)
 	waveMembers = remapPeeledLabelsToMain(waveMembers, []string{label})
 	byWave := pickPeelMembersByLabel(waveMembers)
-	nodes, _, err := buildUnwindModuleGraph(waveMembers, byWave)
+	nodes, edges, err := buildUnwindModuleGraph(waveMembers, byWave)
 	if err != nil {
 		return err
 	}
@@ -479,10 +519,18 @@ func applyEarlyPeelTagWave(label string, members []StackMember, flags UnwindFlag
 		delete(tagCache, storage.NormalizePath(m.Path))
 	}
 
+	// Same-main pin-before-tag (C-AP1): do not wave-tag a consumer whose
+	// cascade plan still has a pin commit on this main first. Cross-repo
+	// frees (CS-pin-old-tag) have no such pin and still tag now.
+	waveOK := earlyWaveTaggableModules(nodes, edges, label)
+
 	var created []string
 	seen := make(map[string]struct{})
 	for _, n := range nodes {
 		if n.RepoLabel != label || !cascadeModuleShouldTag(n) {
+			continue
+		}
+		if _, ok := waveOK[n.Path]; !ok {
 			continue
 		}
 		if _, dup := seen[n.NextTag]; dup {
