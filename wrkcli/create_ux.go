@@ -9,7 +9,9 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/xhd2015/agent-pro/pkgs/agentrunapi"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/computer-use/macos/space"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/shell/applescript"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/shell/iterm2"
 	"golang.org/x/term"
 )
@@ -222,7 +224,11 @@ func runCreateUX(worktreePath, task string, plan createUXPlan) error {
 	if plan.terminalMode != "" {
 		var followUps []string
 		if plan.agent {
-			followUps = []string{buildAgentShellCommand(worktreePath, plan, task)}
+			cmd, err := buildAgentShellCommand(worktreePath, plan, task)
+			if err != nil {
+				return fmt.Errorf("wrk: agent follow-up: %w", err)
+			}
+			followUps = []string{cmd}
 		}
 		mode, err := itermOpenMode(plan.terminalMode)
 		if err != nil {
@@ -325,7 +331,10 @@ func expandAgentPrompt(tmpl, task string) string {
 // --dir is the workspace source of truth (process cwd need not equal the worktree).
 // Always ensures --color so agent-run forces TTY child color even when create.agent.args
 // omits it or the parent shell has NO_COLOR/TERM=dumb.
-func buildAgentArgv(worktreePath string, plan createUXPlan, task string) []string {
+// Long prompts (agentrunapi.PromptFileSpillMinRunes) and follow-ups that would
+// exceed iTerm write-text SafeMax are delivered via --prompt-file instead of a
+// positional prompt, using agentrunapi.MaybeSpillPrompt.
+func buildAgentArgv(worktreePath string, plan createUXPlan, task string) ([]string, error) {
 	runner := plan.runner
 	if runner == "" {
 		runner = defaultAgentRunner
@@ -340,12 +349,32 @@ func buildAgentArgv(worktreePath string, plan createUXPlan, task string) []strin
 		absDir = worktreePath
 	}
 	prompt := expandAgentPrompt(plan.promptTmpl, task)
-	argv := make([]string, 0, 4+len(args)+2)
+	argv := make([]string, 0, 4+len(args)+3)
 	argv = append(argv, "agent-run", "run", "--dir", absDir)
 	argv = append(argv, args...)
 	argv = append(argv, "--agent-runner="+runner)
-	argv = append(argv, prompt)
-	return argv
+
+	path, spilled, err := agentrunapi.MaybeSpillPrompt(prompt, agentrunapi.PromptSpillOpts{})
+	if err != nil {
+		return nil, err
+	}
+	if !spilled {
+		// Prompt may be under the rune threshold while the full iTerm write-text
+		// line (flags + long --dir + quoted prompt) still exceeds SafeMax.
+		probe := append(append([]string{}, argv...), prompt)
+		if !applescript.CheckWriteText(shellJoinArgv(probe)).OK {
+			path, spilled, err = agentrunapi.MaybeSpillPrompt(prompt, agentrunapi.PromptSpillOpts{Force: true})
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if spilled {
+		argv = append(argv, "--prompt-file="+path)
+	} else {
+		argv = append(argv, prompt)
+	}
+	return argv, nil
 }
 
 // ensureAgentColorArg appends --color if missing (no duplicate).
@@ -361,8 +390,12 @@ func ensureAgentColorArg(args []string) []string {
 	return out
 }
 
-func buildAgentShellCommand(worktreePath string, plan createUXPlan, task string) string {
-	return shellJoinArgv(buildAgentArgv(worktreePath, plan, task))
+func buildAgentShellCommand(worktreePath string, plan createUXPlan, task string) (string, error) {
+	argv, err := buildAgentArgv(worktreePath, plan, task)
+	if err != nil {
+		return "", err
+	}
+	return shellJoinArgv(argv), nil
 }
 
 func shellJoinArgv(argv []string) string {
@@ -394,7 +427,10 @@ func isSimpleShellWord(s string) bool {
 
 func runAgentInProcess(worktreePath string, plan createUXPlan, task string) error {
 	// --dir on argv is the workspace source of truth; process cwd may differ from worktree.
-	argv := buildAgentArgv(worktreePath, plan, task)
+	argv, err := buildAgentArgv(worktreePath, plan, task)
+	if err != nil {
+		return fmt.Errorf("wrk: agent-run: %w", err)
+	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin = os.Stdin
 	// Keep create's worktree path as the sole stdout contract; agent diagnostics

@@ -38,6 +38,7 @@ window on implies terminal new (after flag apply); legacy create.interceptor ign
 
 - Agent default argv: `agent-run run --dir <abs-worktree> --session-id-from-prompt --no-submit --open --color --agent-runner=grok-tty <prompt>`
   (`--dir` may appear immediately after `run`; space form preferred). Always injects `--color` even if config `create.agent.args` omits it.
+  Long prompts (`agentrunapi.PromptFileSpillMinRunes`, 600 runes) and follow-ups that would exceed iTerm write-text SafeMax replace the positional prompt with `--prompt-file=<abs>` (file body is the full prompt).
 - Default prompt template: `/brainstorm ${task}` (empty task → empty substitution).
 - Terminal+agent: agent only as iTerm follow-up command string; outer wrk must **not** exec agent-run.
 - In-process agent: `--dir` is the workspace source of truth; process cwd of agent-run **need not** equal worktree.
@@ -457,6 +458,101 @@ func assertAgentArgvHasDir(t *testing.T, args []string, wtPath string) {
 	}
 }
 
+func itermFollowUpPromptFilePath(script string) (string, bool) {
+	const flag = "--prompt-file="
+	for _, line := range strings.Split(script, "\n") {
+		if !strings.Contains(line, "write text") {
+			continue
+		}
+		idx := strings.Index(line, flag)
+		if idx < 0 {
+			continue
+		}
+		rest := line[idx+len(flag):]
+		end := len(rest)
+		for i, r := range rest {
+			if r == '"' || r == '\'' || r == ' ' {
+				end = i
+				break
+			}
+		}
+		path := rest[:end]
+		if path != "" {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+func assertItermFollowUpUsesPromptFile(t *testing.T, script, wantPrompt string) string {
+	t.Helper()
+	path, ok := itermFollowUpPromptFilePath(script)
+	if !ok {
+		t.Fatalf("iterm follow-up should use --prompt-file; script:\n%s", script)
+	}
+	if !filepath.IsAbs(path) {
+		t.Fatalf("--prompt-file path must be absolute; got %q", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read spill %q: %v", path, err)
+	}
+	got := strings.TrimSpace(string(data))
+	want := strings.TrimSpace(wantPrompt)
+	if got != want {
+		t.Fatalf("spill body: want %q got %q (path=%s)", want, got, path)
+	}
+	if strings.Contains(script, want) {
+		t.Fatalf("iterm script must not embed long prompt body; script:\n%s", script)
+	}
+	return path
+}
+
+func agentArgvPromptFile(args []string) (string, bool) {
+	for i, a := range args {
+		if a == "--prompt-file" {
+			if i+1 < len(args) {
+				return args[i+1], true
+			}
+			return "", false
+		}
+		if strings.HasPrefix(a, "--prompt-file=") {
+			return strings.TrimPrefix(a, "--prompt-file="), true
+		}
+	}
+	return "", false
+}
+
+func assertAgentRunInvokedWithPromptFile(t *testing.T, req *Request, wtPath, wantPrompt string) []string {
+	t.Helper()
+	args := readAgentRunArgs(t, req)
+	if len(args) == 0 {
+		t.Fatal("expected outer agent-run invocation")
+	}
+	assertAgentArgvHasDir(t, args, wtPath)
+	path, ok := agentArgvPromptFile(args)
+	if !ok {
+		t.Fatalf("agent-run argv missing --prompt-file; argv=%v", args)
+	}
+	if !filepath.IsAbs(path) {
+		t.Fatalf("--prompt-file path must be absolute; got %q argv=%v", path, args)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read spill %q: %v", path, err)
+	}
+	got := strings.TrimSpace(string(data))
+	want := strings.TrimSpace(wantPrompt)
+	if got != want {
+		t.Fatalf("spill body: want %q got %q (path=%s argv=%v)", want, got, path, args)
+	}
+	last := args[len(args)-1]
+	if last == want {
+		t.Fatalf("positional prompt must be omitted when using --prompt-file; argv=%v", args)
+	}
+	return args
+}
+
 func assertItermFollowUpHasAgentRun(t *testing.T, script, wtPath, task string) {
 	t.Helper()
 	if !strings.Contains(script, "agent-run") {
@@ -601,6 +697,10 @@ func ensureCreateUXHelpersUsed() {
 	_ = uxPathsEqual
 	_ = assertAgentArgvHasDir
 	_ = assertItermFollowUpHasAgentRun
+	_ = itermFollowUpPromptFilePath
+	_ = assertItermFollowUpUsesPromptFile
+	_ = agentArgvPromptFile
+	_ = assertAgentRunInvokedWithPromptFile
 	_ = shellSafeQuoteUX
 	_ = assertNativeCreateOK
 	_ = envSpaceInvokeLog
