@@ -54,6 +54,9 @@ dirty consumer (+ optional dirty free) + external replace
    - P-empty: **mid dirty + leaf clean + root go.mod-only** with `--add-all`
      (`pin-only-consumer-empty-gen-commit-with-add-all`) — pinReady empties
      index; must soft-skip gen-commit + land (not hard-fail / diverge)
+   - GS1: **T1 + replace-tidy hashless go.sum + FEATURE_WIP + `--add-all`**
+     (`add-all-feature-must-keep-pin-gosum`) — feature gen-commit must not
+     drop pin `go.sum` hashes (crime-scene `cbea1ecf` scoop)
 
 ## Context
 
@@ -391,6 +394,19 @@ func setupApplyPinBeforeFeatureExternalCleanDep(t *testing.T, req *Request) {
 
 	req.RepoDir = wtDir
 	req.PeelOrder = []string{"."}
+}
+
+// setupApplyPinBeforeFeatureAddAllKeepPinGoSum is GS1: T1 plus a replace-tidy
+// go.sum that has already dropped network hashes for the free module (crime
+// scene: ai-critic WIP tidy against external/agent-pro replace).
+//
+// Pin+tidy on Base writes the hashes; partial-edit restores this hashless
+// go.sum; --add-all feature gen-commit must not put that blob back over the
+// pin commit (cbea1ecf deleted agent-pro v0.0.123 go.sum lines).
+func setupApplyPinBeforeFeatureAddAllKeepPinGoSum(t *testing.T, req *Request) {
+	t.Helper()
+	setupApplyPinBeforeFeatureExternalCleanDep(t, req)
+	tidyConsumerReplaceStripGoSumHashes(t, req)
 }
 
 // setupApplyPinBeforeFeatureFreeDirty is T2 fixture:
@@ -2372,6 +2388,124 @@ func assertMidFeatureLanded(t *testing.T, req *Request) {
 	assertFeatureWIPLanded(t, mid)
 }
 
+// tidyConsumerReplaceStripGoSumHashes runs go mod tidy on the linked consumer
+// while the droppable external replace is present, so go.sum drops network
+// hashes for LeafModulePath@ExpectedPinVersion. Leaves go.sum uncommitted.
+func tidyConsumerReplaceStripGoSumHashes(t *testing.T, req *Request) {
+	t.Helper()
+	wt := req.WtDir
+	if wt == "" {
+		t.Fatal("WtDir required to strip go.sum hashes via replace tidy")
+	}
+	if req.LeafModulePath == "" || req.ExpectedPinVersion == "" {
+		t.Fatal("LeafModulePath and ExpectedPinVersion required")
+	}
+	cmd := exec.Command("go", "mod", "tidy")
+	cmd.Dir = wt
+	env := append([]string{}, os.Environ()...)
+	env = append(env, req.ExtraEnv...)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go mod tidy (strip hashes with replace): %v\n%s", err, out)
+	}
+	sumPath := filepath.Join(wt, "go.sum")
+	sum := ""
+	if data, err := os.ReadFile(sumPath); err == nil {
+		sum = string(data)
+	}
+	if goSumHasModuleVersion(sum, req.LeafModulePath, req.ExpectedPinVersion) {
+		t.Fatalf("precondition: tidy-with-replace must DROP %s %s from go.sum; got:\n%s",
+			req.LeafModulePath, req.ExpectedPinVersion, sum)
+	}
+	// Must stay uncommitted so partial-edit save captures the hashless blob.
+	st := gitOutputIsolated(t, wt, "status", "--porcelain", "--", "go.sum")
+	if strings.TrimSpace(st) == "" {
+		// No go.sum file is also hashless; create an empty-of-dep go.sum so
+		// restore has a file to write back over the pin commit's hashed go.sum.
+		if _, err := os.Stat(sumPath); err != nil {
+			writeFile(t, sumPath, "")
+			st = gitOutputIsolated(t, wt, "status", "--porcelain", "--", "go.sum")
+		}
+	}
+	if strings.TrimSpace(st) == "" {
+		t.Fatal("expected uncommitted go.sum after replace-tidy hash strip")
+	}
+}
+
+// goSumHasModuleVersion reports whether content has a go.sum line for path@ver
+// (module zip hash and/or /go.mod hash).
+func goSumHasModuleVersion(content, modulePath, ver string) bool {
+	if content == "" || modulePath == "" || ver == "" {
+		return false
+	}
+	needle := modulePath + " " + ver
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, needle+" ") || strings.HasPrefix(line, needle+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// assertPinCommitGoSumHasDep fails if the cascade pin commit's go.sum lacks
+// modulePath@ver hashes (pin+tidy on Base must record them).
+func assertPinCommitGoSumHasDep(t *testing.T, repo, modulePath, ver string) {
+	t.Helper()
+	sha := pinCommitSHAForDep(t, repo, modulePath)
+	if sha == "" {
+		t.Fatalf("GS1: missing cascade pin commit for %s\nlog:\n%s",
+			modulePath, gitOutputIsolated(t, repo, "log", "--oneline", "-20"))
+	}
+	sum, err := git_isolated.CombinedOutput(repo, "show", sha+":go.sum")
+	if err != nil {
+		t.Fatalf("GS1: pin commit %s has no go.sum (pin+tidy must write hashes for %s %s): %v",
+			sha, modulePath, ver, err)
+	}
+	if !goSumHasModuleVersion(string(sum), modulePath, ver) {
+		t.Fatalf("GS1: pin commit %s go.sum must contain %s %s hashes\ngo.sum:\n%s",
+			sha, modulePath, ver, sum)
+	}
+}
+
+// assertFeatureTreeGoSumHasDep fails if the feature gen-commit tree's go.sum
+// lacks modulePath@ver. Locks cbea1ecf: --add-all must not restore the
+// hashless pre-pin go.sum over the pin commit.
+func assertFeatureTreeGoSumHasDep(t *testing.T, repo, modulePath, ver, featureSubject string) {
+	t.Helper()
+	featSHA := featureCommitSHA(t, repo, featureSubject)
+	if featSHA == "" {
+		t.Fatalf("GS1: missing feature gen-commit (subject containing %q)\nlog:\n%s",
+			featureSubject, gitOutputIsolated(t, repo, "log", "--oneline", "-20"))
+	}
+	sum, err := git_isolated.CombinedOutput(repo, "show", featSHA+":go.sum")
+	if err != nil {
+		t.Fatalf("GS1: feature commit %s deleted go.sum (lost %s %s pin hashes): %v\n%s",
+			featSHA, modulePath, ver, err,
+			gitOutputIsolated(t, repo, "show", "--stat", featSHA))
+	}
+	if !goSumHasModuleVersion(string(sum), modulePath, ver) {
+		t.Fatalf("GS1: feature commit %s go.sum must KEEP %s %s hashes (not scoop hashless restore)\nstat:\n%s\ngo.sum:\n%s",
+			featSHA, modulePath, ver,
+			gitOutputIsolated(t, repo, "show", "--stat", featSHA),
+			sum)
+	}
+}
+
+// assertHEADGoSumHasDep fails if HEAD go.sum lacks modulePath@ver hashes.
+func assertHEADGoSumHasDep(t *testing.T, repo, modulePath, ver string) {
+	t.Helper()
+	sum, err := git_isolated.CombinedOutput(repo, "show", "HEAD:go.sum")
+	if err != nil {
+		t.Fatalf("GS1: HEAD has no go.sum (need %s %s hashes): %v", modulePath, ver, err)
+	}
+	if !goSumHasModuleVersion(string(sum), modulePath, ver) {
+		t.Fatalf("GS1: HEAD go.sum must contain %s %s hashes\ngo.sum:\n%s",
+			modulePath, ver, sum)
+	}
+}
+
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = d
 	_ = t
@@ -2396,6 +2530,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = setupApplyPinBeforeFeatureAbsolutePathReplace
 	_ = setupApplyPinBeforeFeatureFreeMultiModuleCmdRootOnly
 	_ = setupApplyDeferredTagRepinAfterFreeUncommittedFeature
+	_ = setupApplyPinBeforeFeatureAddAllKeepPinGoSum
 	_ = freeMultiCmdModule
 	_ = freeMultiCmdNextTag
 	_ = assertFreeTagNextBeforeConsumerPinOfFree
@@ -2419,6 +2554,11 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = cascadeFeatureWIPFile
 	_ = cascadeFeatureCommitSubject
 	_ = cascadePinCommitPrefix
+	_ = tidyConsumerReplaceStripGoSumHashes
+	_ = goSumHasModuleVersion
+	_ = assertPinCommitGoSumHasDep
+	_ = assertFeatureTreeGoSumHasDep
+	_ = assertHEADGoSumHasDep
 	return nil
 }
 ```

@@ -612,6 +612,7 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 			return pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
 		}
 		_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
+		pinSum := readGoSumFile(consumerModDir)
 
 		// Selective pin commit only (D7); never scoop feature WIP into pin.
 		if err := cascadeCommitPin(checkout, consumerModDir, step.DepModulePath, step.TagOrVersion, false); err != nil {
@@ -635,6 +636,11 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 					step.DepModulePath, step.TagOrVersion, consumerModDir, err)
 			}
 			_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
+			if err := mergePinGoSumHashes(consumerModDir, pinSum, step.DepModulePath, step.TagOrVersion); err != nil {
+				_ = restoreGoModSumSnap(consumerModDir, saved)
+				return fmt.Errorf("wrk: ready-external pin surgical go.sum %s@%s in %s: %w",
+					step.DepModulePath, step.TagOrVersion, consumerModDir, err)
+			}
 		}
 	}
 	return nil
@@ -1106,6 +1112,7 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 				return skippedTags, pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
 			}
 			_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
+			pinSum := readGoSumFile(consumerModDir)
 
 			// Selective commit of this module's go.mod/go.sum only (D7): never
 			// scoop feature WIP into the pin auto-commit. Staging for the pin
@@ -1135,6 +1142,13 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 				// go mod edit may emit single-line require; expand to parenthesized
 				// block for stable go.mod shape (matches pin path + consumers).
 				_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
+				// Surgical go.sum: put pin+tidy hashes back so --add-all gen-commit
+				// cannot scoop the hashless replace-tidy restore (GS1).
+				if err := mergePinGoSumHashes(consumerModDir, pinSum, step.DepModulePath, step.TagOrVersion); err != nil {
+					_ = restoreGoModSumSnap(consumerModDir, saved)
+					return skippedTags, fmt.Errorf("wrk: cascade pin surgical go.sum %s@%s in %s: %w",
+						step.DepModulePath, step.TagOrVersion, consumerModDir, err)
+				}
 			}
 
 			if addReinstallMainPath != nil {
@@ -1466,6 +1480,7 @@ func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addRei
 			return pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
 		}
 		_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
+		pinSum := readGoSumFile(consumerModDir)
 
 		if err := cascadeCommitPin(consumerCheckout, consumerModDir, job.dep, job.ver, false); err != nil {
 			return pinFail(err)
@@ -1484,6 +1499,11 @@ func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addRei
 					job.dep, job.ver, consumerModDir, err)
 			}
 			_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
+			if err := mergePinGoSumHashes(consumerModDir, pinSum, job.dep, job.ver); err != nil {
+				_ = restoreGoModSumSnap(consumerModDir, saved)
+				return fmt.Errorf("wrk: deferred repin surgical go.sum %s@%s in %s: %w",
+					job.dep, job.ver, consumerModDir, err)
+			}
 		}
 
 		if addReinstallMainPath != nil {
@@ -1827,6 +1847,103 @@ func restoreGoModSumSnap(modDir string, s goModSumSnap) error {
 	}
 	_ = os.Remove(sumPath)
 	return nil
+}
+
+// readGoSumFile returns go.sum bytes or nil when the file is absent.
+func readGoSumFile(modDir string) []byte {
+	b, err := os.ReadFile(filepath.Join(modDir, "go.sum"))
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// mergePinGoSumHashes copies pin+tidy hash lines for modulePath@ver into the
+// current go.sum after a partial-edit WIP restore. Restore would otherwise put
+// back a replace-tidy go.sum that omitted those hashes; --add-all gen-commit
+// then scooped that blob over the pin commit (GS1 / cbea1ecf).
+//
+// Does not run go mod tidy (P3: surgical WT only). Other WIP go.sum lines stay.
+// No-op when pinSum has no lines for this module@version (keep-local tidy).
+func mergePinGoSumHashes(modDir string, pinSum []byte, modulePath, ver string) error {
+	pinLines := extractGoSumLines(pinSum, modulePath, ver)
+	if len(pinLines) == 0 || modDir == "" {
+		return nil
+	}
+	sumPath := filepath.Join(modDir, "go.sum")
+	cur, err := os.ReadFile(sumPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	var out []string
+	inserted := false
+	for _, line := range splitGoSumLines(cur) {
+		m, _, ok := parseGoSumLine(line)
+		if ok && m == modulePath {
+			if !inserted {
+				out = append(out, pinLines...)
+				inserted = true
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+	if !inserted {
+		out = append(out, pinLines...)
+	}
+	var b strings.Builder
+	for i, line := range out {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(line)
+	}
+	if len(out) > 0 {
+		b.WriteByte('\n')
+	}
+	return os.WriteFile(sumPath, []byte(b.String()), 0o644)
+}
+
+func splitGoSumLines(sum []byte) []string {
+	if len(sum) == 0 {
+		return nil
+	}
+	s := strings.TrimSuffix(string(sum), "\n")
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
+}
+
+// parseGoSumLine returns module path and version for a go.sum line
+// (`path vX.Y.Z h1:…` or `path vX.Y.Z/go.mod h1:…`).
+func parseGoSumLine(line string) (modulePath, ver string, ok bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return "", "", false
+	}
+	ver = fields[1]
+	if i := strings.IndexByte(ver, '/'); i >= 0 {
+		ver = ver[:i]
+	}
+	if fields[0] == "" || ver == "" {
+		return "", "", false
+	}
+	return fields[0], ver, true
+}
+
+func extractGoSumLines(sum []byte, modulePath, ver string) []string {
+	if len(sum) == 0 || modulePath == "" || ver == "" {
+		return nil
+	}
+	var out []string
+	for _, line := range splitGoSumLines(sum) {
+		m, v, ok := parseGoSumLine(line)
+		if ok && m == modulePath && v == ver {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 // goModSumRelPaths returns checkout-relative paths for go.mod and go.sum under modDir.
