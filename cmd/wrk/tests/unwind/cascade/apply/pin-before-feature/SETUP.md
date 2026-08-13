@@ -216,9 +216,9 @@ func installCascadeNoLocalReplacePreCommit(t *testing.T, repo string) {
 	runGitIsolated(t, repo, "config", "core.hooksPath", hooksDir)
 }
 
-// findAgentProFakeOpencodeDir locates cmd/fake-opencode for offline gen-commit.
-// Prefers sibling agent-pro-* worktrees (unwind-pipeline style); falls back to
-// external/agent-pro-master-2026-07-16 under the wrk module.
+// findAgentProFakeOpencodeDir locates cmd/fake-opencode source for a local
+// go build. Prefers sibling agent-pro-* worktrees; falls back to
+// external/agent-pro-master-2026-07-16 under the wrk module. Empty if none.
 func findAgentProFakeOpencodeDir(t *testing.T) string {
 	t.Helper()
 	modRoot := findModuleRoot(doctestRootPath(t))
@@ -236,13 +236,24 @@ func findAgentProFakeOpencodeDir(t *testing.T) string {
 			}
 		}
 	}
-	// Vendored external checkout (gen-commit-msg tree).
-	ext := filepath.Join(modRoot, "external", "agent-pro-master-2026-07-16", "cmd", "fake-opencode")
-	if _, err := os.Stat(filepath.Join(ext, "main.go")); err == nil {
-		return ext
+	// Vendored / CI checkout: external/agent-pro-* /cmd/fake-opencode
+	extMatches, err := filepath.Glob(filepath.Join(modRoot, "external", "agent-pro-*", "cmd", "fake-opencode"))
+	if err == nil {
+		for i := len(extMatches) - 1; i >= 0; i-- {
+			if _, err := os.Stat(filepath.Join(extMatches[i], "main.go")); err == nil {
+				return extMatches[i]
+			}
+		}
 	}
-	t.Skip("agent-pro cmd/fake-opencode fixture unavailable (sibling agent-pro-* or external/)")
 	return ""
+}
+
+func copyRegularFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o755)
 }
 
 // sessionCascadeFakeOpencodeBin is the session-cached fake-opencode path.
@@ -263,9 +274,18 @@ func getCascadeFakeOpencodeBin(t *testing.T) string {
 		if _, err := os.Stat(bin); err == nil {
 			return
 		}
-		srcDir := findAgentProFakeOpencodeDir(t)
 		if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
 			t.Fatalf("mkdir fake-opencode bin: %v", err)
+		}
+		// CI / host: binary already on PATH (workflow go install).
+		if p, err := exec.LookPath("fake-opencode"); err == nil && p != "" {
+			if cpErr := copyRegularFile(p, bin); cpErr == nil {
+				return
+			}
+		}
+		srcDir := findAgentProFakeOpencodeDir(t)
+		if srcDir == "" {
+			t.Skip("agent-pro cmd/fake-opencode fixture unavailable (PATH, go install, sibling agent-pro-*, or external/)")
 		}
 		cmd := exec.Command("go", "build", "-mod=mod", "-o", bin, ".")
 		cmd.Dir = srcDir

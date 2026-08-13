@@ -28,5 +28,18 @@ jobs:
           if ! command -v doctest >/dev/null 2>&1; then
             go install github.com/xhd2015/doctest/cmd/doctest@latest
           fi
+      # cmd/fake-opencode is not in module github.com/xhd2015/agent-pro (nested
+      # cmd/go.mod + replace). Checkout the repo and build from source.
+      - name: Checkout agent-pro for fake-opencode
+        uses: actions/checkout@v4
+        with:
+          repository: xhd2015/agent-pro
+          path: external/agent-pro-ci
+      - name: Build fake-opencode
+        run: |
+          mkdir -p "$HOME/go/bin"
+          # Nested cmd/go.mod: build from that package dir (replace => .. is OK as main module).
+          go build -C ./external/agent-pro-ci/cmd/fake-opencode -mod=mod -o "$HOME/go/bin/fake-opencode" .
+          command -v fake-opencode
       - name: Doctest
         run: doctest test -v --label-all ./...
