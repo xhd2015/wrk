@@ -440,6 +440,87 @@ func remapPeeledLabelsToMain(members []StackMember, peeledLabels []string) []Sta
 	return out
 }
 
+// applyEarlyPeelTagWave tags owned-changed modules on a just-peeled label at
+// main HEAD and optionally pushes those tags. The next early peel's pinReady
+// can then pin a published next version instead of stale LatestTag (CS-pin-old-tag).
+func applyEarlyPeelTagWave(label string, members []StackMember, flags UnwindFlags, tagCache tagScopePlanCache, addReinstallMainPath func(string), stats *UnwindApplyStats) error {
+	if label == "" || len(members) == 0 {
+		return nil
+	}
+	byLabel := pickPeelMembersByLabel(members)
+	m, ok := byLabel[label]
+	if !ok {
+		return nil
+	}
+	if tagCache != nil {
+		delete(tagCache, storage.NormalizePath(m.Path))
+		delete(tagCache, storage.NormalizePath(m.MainRepo))
+	}
+	mainPath := m.MainRepo
+	if mainPath == "" {
+		mainPath = m.Path
+	}
+	mainPath = storage.NormalizePath(mainPath)
+	if mainPath == "" {
+		return nil
+	}
+
+	waveMembers := refreshStackMembersAfterLand(members)
+	waveMembers = remapPeeledLabelsToMain(waveMembers, []string{label})
+	byWave := pickPeelMembersByLabel(waveMembers)
+	nodes, _, err := buildUnwindModuleGraph(waveMembers, byWave)
+	if err != nil {
+		return err
+	}
+	// Fresh tagscope at landed main HEAD (pre-peel cache had NextTag empty).
+	attachTagScopeToModules(nodes, waveMembers, nil)
+	if tagCache != nil {
+		delete(tagCache, mainPath)
+		delete(tagCache, storage.NormalizePath(m.Path))
+	}
+
+	var created []string
+	seen := make(map[string]struct{})
+	for _, n := range nodes {
+		if n.RepoLabel != label || !cascadeModuleShouldTag(n) {
+			continue
+		}
+		if _, dup := seen[n.NextTag]; dup {
+			continue
+		}
+		if err := requireMainActiveRoot(mainPath, "--tag-next"); err != nil {
+			return err
+		}
+		if err := cascadeCreateOneTag(mainPath, n.NextTag); err != nil {
+			return err
+		}
+		fmt.Printf("tag-next %s @ %s\n", n.Path, n.NextTag)
+		seen[n.NextTag] = struct{}{}
+		created = append(created, n.NextTag)
+		if stats != nil {
+			stats.Tagged++
+		}
+	}
+	if addReinstallMainPath != nil {
+		addReinstallMainPath(mainPath)
+	}
+	if !flags.Push || len(created) == 0 {
+		return nil
+	}
+	fmt.Println()
+	if err := runPushMain(mainPath, false, flags.Force, created); err != nil {
+		if isNoPushRemoteErr(err) {
+			fmt.Fprintf(os.Stderr, "warning: skip push %s: %v\n", mainPath, err)
+			return nil
+		}
+		return err
+	}
+	if stats != nil {
+		stats.Pushed++
+	}
+	return nil
+}
+
 // pinReadyExternalReplacesBeforeGenCommit applies cascade pins for **ready**
 // droppable external stack replaces whose consumer modules live on checkout,
 // as separate `wrk: cascade pin …` auto-commits, before feature gen-commit.
@@ -546,6 +627,12 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 		// Defense-in-depth: never pinReady a version whose full release tag is not
 		// yet on free main (avoids go mod tidy unknown revision if tagscope miss).
 		if !pinReadyReleaseTagExists(depNode, step.TagOrVersion, byLabel) {
+			continue
+		}
+		// CS-pin-old-tag: pinning LatestTag is only safe when HEAD *is* that tag.
+		// After land, HEAD is ahead of Latest and new packages live only on the
+		// untagged tip — pinReady must wait for tag-next (early wave / cascade).
+		if !pinReadyPinVersionIsCurrentHEAD(depNode, step.TagOrVersion, byLabel) {
 			continue
 		}
 
@@ -673,6 +760,35 @@ func pinReadyReleaseTagExists(dep UnwindGraphModuleNode, pinVer string, byLabel 
 		return false
 	}
 	return gitTagRefExists(mainRepo, full)
+}
+
+// pinReadyPinVersionIsCurrentHEAD reports whether pinning pinVer is safe
+// against dep main HEAD. Pinning LatestTag is ready only when HEAD is that
+// tag. NextTag / other pins rely on pinReadyReleaseTagExists.
+func pinReadyPinVersionIsCurrentHEAD(dep UnwindGraphModuleNode, pinVer string, byLabel map[string]StackMember) bool {
+	if pinVer == "" {
+		return false
+	}
+	if dep.LatestTag == "" || !versionsMatch(goRequireVersionFromTag(dep.LatestTag), pinVer) {
+		return true
+	}
+	full := cascadeFullTagForPinVersion(dep, pinVer)
+	if full == "" {
+		full = pinVer
+	}
+	mainRepo := ""
+	if dep.RepoLabel != "" {
+		if m, ok := byLabel[dep.RepoLabel]; ok {
+			mainRepo = m.MainRepo
+			if mainRepo == "" {
+				mainRepo = m.Path
+			}
+		}
+	}
+	if mainRepo == "" {
+		return false
+	}
+	return cascadeTagAtHEAD(mainRepo, full)
 }
 
 // cascadeFullTagForPinVersion maps a go require version to a full release tag on
@@ -1013,6 +1129,17 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			}
 			if err := requireMainActiveRoot(main, "--tag-next"); err != nil {
 				return skippedTags, err
+			}
+			// Early peel wave may already have created this tag at HEAD.
+			if cascadeTagAtHEAD(main, step.TagOrVersion) {
+				recordTag(main, step.TagOrVersion)
+				if addReinstallMainPath != nil {
+					addReinstallMainPath(main)
+				}
+				if err := maybePushMain(main, i); err != nil {
+					return skippedTags, err
+				}
+				continue
 			}
 			if err := cascadeCreateOneTag(main, step.TagOrVersion); err != nil {
 				return skippedTags, err
@@ -1627,20 +1754,27 @@ func mergeCascadeTagNextSteps(planned, extra []UnwindCascadeStep) []UnwindCascad
 	return out
 }
 
+// cascadeTagAtHEAD reports whether refs/tags/<tag> points at mainRepo HEAD.
+func cascadeTagAtHEAD(mainRepo, tag string) bool {
+	if mainRepo == "" || tag == "" {
+		return false
+	}
+	out, err := gitOutputDir(mainRepo, "rev-parse", "--verify", "--quiet", "refs/tags/"+tag)
+	if err != nil || strings.TrimSpace(out) == "" {
+		return false
+	}
+	head, herr := gitOutputDir(mainRepo, "rev-parse", "HEAD")
+	return herr == nil && strings.TrimSpace(out) == strings.TrimSpace(head)
+}
+
 // cascadeCreateOneTag creates a single lightweight tag at HEAD (one scope only).
 // No-op when the tag already exists at HEAD; errors if it exists elsewhere.
 func cascadeCreateOneTag(mainRepo, tag string) error {
 	if mainRepo == "" || tag == "" {
 		return fmt.Errorf("wrk: cascade tag requires main repo and tag name")
 	}
-	// Already present?
-	out, err := gitOutputDir(mainRepo, "rev-parse", "--verify", "--quiet", "refs/tags/"+tag)
-	if err == nil && strings.TrimSpace(out) != "" {
-		head, herr := gitOutputDir(mainRepo, "rev-parse", "HEAD")
-		if herr == nil && strings.TrimSpace(out) == strings.TrimSpace(head) {
-			return nil
-		}
-		// Tag exists on another commit — leave as hard error from git tag.
+	if cascadeTagAtHEAD(mainRepo, tag) {
+		return nil
 	}
 	if err := gitRunDir(mainRepo, "tag", tag, "HEAD"); err != nil {
 		return fmt.Errorf("wrk: cascade tag %s: %w", tag, err)

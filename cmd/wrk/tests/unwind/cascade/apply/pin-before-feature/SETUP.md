@@ -61,6 +61,10 @@ dirty consumer (+ optional dirty free) + external replace
      intra require-drift pin tidy** (`intra-pin-tidy-unpublished-wip-import`)
      — cascade intra pin must not `go mod tidy` against Base (no replace)
      while WT source imports a package that exists only on dirty free
+   - CS-pin-old-tag: **uncommitted free unpublished package + 3-level mid
+     replace-target** (`pin-stale-latest-unpublished-import`) — pinReady on
+     early mid peel must not pin free @ LatestTag after leaf land and before
+     tag-next (crime-scene: `does not contain package …/color`)
 
 ## Context
 
@@ -88,6 +92,12 @@ dirty consumer (+ optional dirty free) + external replace
   package. Product now early-peels dirty droppable-replace targets and
   overlays unrelated WIP replaces during partial-edit tidy. Distinct from
   CS-repin (no new import) and T-spl (hook fail, not missing-package tidy).
+- **CS-pin-old-tag (fixed):** CS-openterm2 early-peel of dirty replace-targets
+  also peels **mid** (skills) early. pinReady used to pin mid ← free @
+  **LatestTag** (HEAD==Latest at plan; stale tagCache after leaf land).
+  Product now tag-next+push after each early peel and refuses LatestTag when
+  HEAD is ahead. Distinct from T-tag1 (pin @ **next** / unknown revision) and
+  CS-openterm2 (intra pin overlay, not mid pinReady @ latest).
 - Do not rewrite sealed ASSERT contracts under `clean/`, `dirty-gomod/`,
   `partial-edit/`, `reinstall-local/`, or sealed T1/T2/T-M1/T-tag1/T-spl leaves.
 - **P3 C1:** free monorepo multi-module tags (go-pkgs root + nested `cmd/`) +
@@ -124,6 +134,11 @@ const (
 	csOpenterm2ToolOldVer  = "v0.0.15"
 	csOpenterm2ToolNextVer = "v0.0.16"
 	csOpenterm2ServerRel   = "marcus-macos-app/go-pkgs/server"
+
+	// CS-pin-old-tag: mid label/module matching production pin log
+	// `pin skills <- dot-pkgs @ v0.0.122`.
+	unwindSkillsModule = "example.com/skills"
+	labelSkills        = "skills"
 
 	// Uncommitted feature WIP path for consumer gen-commit (not go.mod).
 	cascadeFeatureWIPFile = "FEATURE_WIP.md"
@@ -783,6 +798,174 @@ func setupApplyPinBeforeFeatureThreeLevelFreeHostDirty(t *testing.T, req *Reques
 		"package agentpro\n\nimport _ \""+unwindDotPkgsModule+"\"\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
 	seedFileModuleProxy(t, proxyRoot, unwindAgentProModule, unwindApplyNextTag, midNextSeed)
 	// Mid zip at next may require free@next from proxy during tidy of top.
+	enableFileModuleProxy(t, req, proxyRoot)
+
+	req.RepoDir = wtDir
+	setPeelOrderDisplays(t, req, leafExt, midExt, wtDir)
+}
+
+// setupApplyPinStaleLatestUnpublishedImport is CS-pin-old-tag
+// (crime-scene 2026-08-13T08:24:53Z-crime-scene-unwind-pin-old-tag):
+//
+//	3-level stack (production: spl → skills → go-pkgs):
+//	  leaf (dot-pkgs): HEAD == LatestTag v0.0.1; **uncommitted** color/
+//	    package (not in published latest)
+//	  mid (skills): pinConsumer of leaf AND dirty replace-target of root;
+//	    replace → leaf; WT source imports example.com/dot-pkgs/color;
+//	    B1+CS-openterm2 peels early → pinReady before cascade tag-next
+//	  top (root): replaces mid + leaf; dirty FEATURE_WIP
+//	modproxy: leaf @ v0.0.1 only in @latest list (no color); v0.0.2 zip
+//	  hidden from list (has color) so post-fix pin @ next can fetch
+//
+// Today RED: after leaf land, pinReady pins mid ← leaf @ LatestTag and
+// tidy dies: `@latest found (v0.0.1), but does not contain package …/color`.
+// Desired: tag-next leaf @ v0.0.2 before pin mid @ v0.0.2; no missing-package.
+func setupApplyPinStaleLatestUnpublishedImport(t *testing.T, req *Request) {
+	t.Helper()
+
+	req.LeafModulePath = unwindDotPkgsModule
+	req.OldRequireVersion = unwindApplyOldTag
+	req.ExpectedPinVersion = unwindApplyNextTag
+
+	// --- leaf free main + origin (HEAD == latest; color is WT-only) ---
+	leafMain := filepath.Join(req.WorkRoot, labelDotPkgs)
+	initGitRepoOnMain(t, leafMain)
+	writeGoModRequire(t, leafMain, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(leafMain, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	runGitIsolated(t, leafMain, "add", "go.mod", "pkg.go")
+	runGitIsolated(t, leafMain, "commit", "-m", "add dot-pkgs module")
+	createLightweightTag(t, leafMain, unwindApplyOldTag, "")
+	leafMain = resolvePath(t, leafMain)
+	req.SecondRepo = leafMain
+	installCascadePermissivePreCommit(t, leafMain)
+
+	leafBare := setupBareOrigin(t, req.WorkRoot, "leaf-origin")
+	attachOriginAndPushMain(t, leafMain, leafBare)
+	if tagRefExists(t, leafMain, unwindApplyOldTag) {
+		runGitIsolated(t, leafMain, "push", "origin", unwindApplyOldTag)
+	}
+	req.OriginBare = leafBare
+
+	// --- mid skills main + origin ---
+	midMain := filepath.Join(req.WorkRoot, labelSkills)
+	initGitRepoOnMain(t, midMain)
+	writeGoModRequire(t, midMain, unwindSkillsModule, unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(midMain, "skills.go"),
+		"package skills\n\nimport _ \""+unwindDotPkgsModule+"\"\n")
+	runGitIsolated(t, midMain, "add", "go.mod", "skills.go")
+	runGitIsolated(t, midMain, "commit", "-m", "add skills mid consumer")
+	createLightweightTag(t, midMain, unwindApplyOldTag, "")
+	midMain = resolvePath(t, midMain)
+	req.DepPath = midMain
+	installCascadePermissivePreCommit(t, midMain)
+
+	midBare := setupBareOrigin(t, req.WorkRoot, "mid-origin")
+	attachOriginAndPushMain(t, midMain, midBare)
+	if tagRefExists(t, midMain, unwindApplyOldTag) {
+		runGitIsolated(t, midMain, "push", "origin", unwindApplyOldTag)
+	}
+
+	// --- top root main + origin ---
+	rootMain := filepath.Join(req.WorkRoot, labelRoot)
+	initGitRepoOnMain(t, rootMain)
+	writeGoModRequire(t, rootMain, unwindRootModule,
+		unwindSkillsModule+"@"+unwindApplyOldTag,
+		unwindDotPkgsModule+"@"+unwindApplyOldTag)
+	writeFile(t, filepath.Join(rootMain, "root.go"),
+		"package root\n\nimport (\n\t_ \""+unwindSkillsModule+"\"\n\t_ \""+unwindDotPkgsModule+"\"\n)\n")
+	runGitIsolated(t, rootMain, "add", "go.mod", "root.go")
+	runGitIsolated(t, rootMain, "commit", "-m", "add root top consumer")
+	createLightweightTag(t, rootMain, unwindApplyOldTag, "")
+	rootMain = resolvePath(t, rootMain)
+	req.MainRepo = rootMain
+
+	rootBare := setupBareOrigin(t, req.WorkRoot, "root-origin")
+	attachOriginAndPushMain(t, rootMain, rootBare)
+	if tagRefExists(t, rootMain, unwindApplyOldTag) {
+		runGitIsolated(t, rootMain, "push", "origin", unwindApplyOldTag)
+	}
+
+	wtDir := filepath.Join(req.WorkRoot, "root-linked")
+	runGitIsolated(t, rootMain, "worktree", "add", "-b", branchNameMainDate(), wtDir)
+	wtDir = resolvePath(t, wtDir)
+	req.WtDir = wtDir
+	req.WtBranch = branchNameMainDate()
+
+	extDir := filepath.Join(wtDir, "external")
+	mkdirAll(t, extDir)
+
+	midExtName := labelSkills + "-" + branchNameMainDate()
+	midExt := filepath.Join(extDir, midExtName)
+	runGitIsolated(t, midMain, "worktree", "add", "-b", branchNameMainDate()+"-mid", midExt)
+	midExt = resolvePath(t, midExt)
+	req.ExternalWtDir = midExt
+
+	leafExtName := labelDotPkgs + "-" + branchNameMainDate()
+	leafExt := filepath.Join(extDir, leafExtName)
+	runGitIsolated(t, leafMain, "worktree", "add", "-b", branchNameMainDate()+"-leaf", leafExt)
+	leafExt = resolvePath(t, leafExt)
+	req.DepsLinkedWtDir = leafExt
+
+	// Unpublished package + next-version pkg.go on leaf WT only — do NOT commit
+	// (HEAD must stay LatestTag so pinReady would otherwise pin @ latest).
+	mkdirAll(t, filepath.Join(leafExt, "color"))
+	writeFile(t, filepath.Join(leafExt, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	writeFile(t, filepath.Join(leafExt, "color", "color.go"),
+		"package color\n\nfunc Red() string { return \"red\" }\n")
+	markDirty(t, leafExt)
+
+	// Mid: droppable replace → leaf; import unpublished color (WT dirt).
+	appendLocalReplace(t, midExt, unwindDotPkgsModule, relLocalReplace(t, midExt, leafExt))
+	runGitIsolated(t, midExt, "add", "go.mod")
+	runGitIsolated(t, midExt, "commit", "-m", "mid external replace to dirty free leaf")
+	writeFile(t, filepath.Join(midExt, "skills.go"),
+		"package skills\n\nimport (\n\t_ \""+unwindDotPkgsModule+"\"\n\t_ \""+unwindDotPkgsModule+"/color\"\n)\n")
+	dirtyCascadeFeatureWIP(t, midExt)
+	markDirty(t, midExt)
+	installCascadePermissivePreCommit(t, midExt)
+
+	// Top replaces mid + leaf so mid is a dirty droppable-replace target (early peel).
+	relMid := filepath.ToSlash(filepath.Join("external", midExtName))
+	relLeaf := filepath.ToSlash(filepath.Join("external", leafExtName))
+	appendLocalReplace(t, wtDir, unwindSkillsModule, "./"+relMid)
+	appendLocalReplace(t, wtDir, unwindDotPkgsModule, "./"+relLeaf)
+	writeFile(t, filepath.Join(wtDir, ".gitignore"), "/external\n")
+	runGitIsolated(t, wtDir, "add", "go.mod", ".gitignore")
+	runGitIsolated(t, wtDir, "commit", "-m", "top replace to mid+leaf + ignore external")
+	dirtyCascadeFeatureWIP(t, wtDir)
+	markDirty(t, wtDir)
+	installCascadePermissivePreCommit(t, wtDir)
+
+	// Proxy: published latest is old (no color). Next zip has color but is
+	// hidden from @v/list so go @latest still sees only v0.0.1.
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	oldLeafSeed := filepath.Join(req.WorkRoot, "seed-leaf-"+unwindApplyOldTag)
+	mkdirAll(t, oldLeafSeed)
+	writeGoModRequire(t, oldLeafSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(oldLeafSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyOldTag+"\" }\n")
+	seedFileModuleProxy(t, proxyRoot, unwindDotPkgsModule, unwindApplyOldTag, oldLeafSeed)
+
+	nextLeafSeed := filepath.Join(req.WorkRoot, "seed-leaf-"+unwindApplyNextTag)
+	mkdirAll(t, filepath.Join(nextLeafSeed, "color"))
+	writeGoModRequire(t, nextLeafSeed, unwindDotPkgsModule)
+	writeFile(t, filepath.Join(nextLeafSeed, "pkg.go"),
+		"package dotpkgs\n\nfunc Version() string { return \""+unwindApplyNextTag+"\" }\n")
+	writeFile(t, filepath.Join(nextLeafSeed, "color", "color.go"),
+		"package color\n\nfunc Red() string { return \"red\" }\n")
+	seedFileModuleProxyHiddenFromLatest(t, proxyRoot, unwindDotPkgsModule, unwindApplyNextTag, nextLeafSeed)
+
+	seedFileModuleProxy(t, proxyRoot, unwindSkillsModule, unwindApplyOldTag, midMain)
+	// After skills early peel+wave, cascade pins root ← skills @ next. Serve
+	// that zip (color import + require free @ next) so tidy can resolve.
+	midNextSeed := filepath.Join(req.WorkRoot, "seed-skills-"+unwindApplyNextTag)
+	mkdirAll(t, midNextSeed)
+	writeGoModRequire(t, midNextSeed, unwindSkillsModule, unwindDotPkgsModule+"@"+unwindApplyNextTag)
+	writeFile(t, filepath.Join(midNextSeed, "skills.go"),
+		"package skills\n\nimport (\n\t_ \""+unwindDotPkgsModule+"\"\n\t_ \""+unwindDotPkgsModule+"/color\"\n)\n")
+	seedFileModuleProxy(t, proxyRoot, unwindSkillsModule, unwindApplyNextTag, midNextSeed)
 	enableFileModuleProxy(t, req, proxyRoot)
 
 	req.RepoDir = wtDir
@@ -2018,6 +2201,36 @@ func assertFreeTagNextBeforeMidPinOfFree(t *testing.T, out string) {
 	}
 	if pinIdx < tagIdx {
 		t.Fatalf("T-tag1: free tag-next must precede mid pin of free @ next (pinReady must skip untagged NextTag)\ntag@%d pin@%d\nneedles: %q then %q\nout:\n%s",
+			tagIdx, pinIdx, tagNeedle, pinNeedle, out)
+	}
+}
+
+// assertFreeTagNextBeforeSkillsPinOfFree locks CS-pin-old-tag order: cascade
+// tag-next for dirty free before pin of skills ← free @ next. pinReady must
+// not pin @ LatestTag after leaf land and before the next tag exists.
+func assertFreeTagNextBeforeSkillsPinOfFree(t *testing.T, out string) {
+	t.Helper()
+	tagNeedle := "tag-next " + unwindDotPkgsModule + " @ " + unwindApplyNextTag
+	pinNeedle := "pin " + labelSkills + " <- " + labelDotPkgs + " @ " + unwindApplyNextTag
+	tagIdx := strings.Index(out, tagNeedle)
+	pinIdx := strings.Index(out, pinNeedle)
+	if pinIdx < 0 {
+		alt := "<- " + labelDotPkgs + " @ " + unwindApplyNextTag
+		pinIdx = strings.Index(out, alt)
+		if pinIdx >= 0 {
+			pinNeedle = alt
+		}
+	}
+	if tagIdx < 0 {
+		t.Fatalf("CS-pin-old-tag: missing free tag-next line %q (free must be tagged before mid pin)\nout:\n%s",
+			tagNeedle, out)
+	}
+	if pinIdx < 0 {
+		t.Fatalf("CS-pin-old-tag: missing mid pin of free @ next (want %q or pin … <- %s @ %s)\nout:\n%s",
+			pinNeedle, labelDotPkgs, unwindApplyNextTag, out)
+	}
+	if pinIdx < tagIdx {
+		t.Fatalf("CS-pin-old-tag: free tag-next must precede skills pin of free @ next\ntag@%d pin@%d\nneedles: %q then %q\nout:\n%s",
 			tagIdx, pinIdx, tagNeedle, pinNeedle, out)
 	}
 }

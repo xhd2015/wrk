@@ -895,6 +895,8 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 	} else {
 		// B1 epochs (tag-next path):
 		//   1. early peels  — free / freeHost / dirty replace-target land prelude
+		//      After each peel: tag-next+push that main (CS-pin-old-tag wave) so
+		//      the next peel's pinReady can pin a published next, not LatestTag.
 		//   2. cascade      — free-first tag + pin (defer pure-consumer TagNext)
 		//   3. deferred peels — pure pin-consumer feature gen-commit (replace already pinned)
 		//   4. re-tagscope + tag deferred — NextTags at final main HEAD
@@ -905,8 +907,17 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		// Pure pin-consumer TagNext waits until after those peels so the
 		// consumer self-tag lands at main HEAD (not pre-feature cascade tip).
 		early, deferred := splitPeelOrderB1(plan.PeelOrder, members)
-		if err := peelLabels(early); err != nil {
-			return err
+		for _, lab := range early {
+			if err := applyUnwindPeelOne(workDir, wrkHome, lab, byLabel, members, edges, flags, &stats, addReinstallMainPath, peelCount > 0, tagCache); err != nil {
+				return err
+			}
+			peelCount++
+			if err := applyEarlyPeelTagWave(lab, members, flags, tagCache, addReinstallMainPath, &stats); err != nil {
+				return err
+			}
+			// Next peel's pinReady must tagscope landed mains, not residual WTs.
+			members = refreshStackMembersAfterLand(members)
+			members = remapPeeledLabelsToMain(members, []string{lab})
 		}
 		// Early peels landed unpublished WIP onto main: drop stale tagscope
 		// (NextTag was empty at HEAD==Latest). Cascade must re-plan @ next.
@@ -1110,7 +1121,9 @@ func applyUnwindPeelOne(
 		}
 	}
 
-	// With --tag-next: land prelude only; tag/pin/push are global cascade + ship tail.
+	// With --tag-next: land prelude only here. Tag-next of this main runs in
+	// applyEarlyPeelTagWave (before the next peel's pinReady); remaining pin/push
+	// stay in global cascade + ship tail.
 	// Without --tag-next: pin consumers to latest; push/sync deferred to ship tail
 	// so consumer pin commits are included before final push/sync.
 	if !flags.TagNext {
