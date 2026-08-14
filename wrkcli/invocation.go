@@ -128,24 +128,39 @@ var flagValueArgs = map[string]struct{}{
 	"--comment":  {},
 }
 
+// slurpNonFlagTokens returns consecutive tokens from start that do not start
+// with '-'. Used for Varargs-style --bring (every following value, not just one).
+func slurpNonFlagTokens(args []string, start int) (values []string, next int) {
+	next = start
+	for next < len(args) && !strings.HasPrefix(args[next], "-") {
+		values = append(values, args[next])
+		next++
+	}
+	return values, next
+}
+
 func extractEventArgs(original, positionals []string) []string {
 	pos := 0
-	skipValue := false
 	var out []string
-	for _, arg := range original {
-		if skipValue {
-			skipValue = false
-			out = append(out, arg)
-			continue
-		}
+	for i := 0; i < len(original); i++ {
+		arg := original[i]
 		if pos < len(positionals) && arg == positionals[pos] {
 			pos++
 			continue
 		}
 		if strings.HasPrefix(arg, "-") {
 			out = append(out, arg)
+			if arg == "--bring" {
+				vals, next := slurpNonFlagTokens(original, i+1)
+				out = append(out, vals...)
+				i = next - 1
+				continue
+			}
 			if _, ok := flagValueArgs[arg]; ok {
-				skipValue = true
+				if i+1 < len(original) {
+					out = append(out, original[i+1])
+					i++
+				}
 			}
 		}
 	}

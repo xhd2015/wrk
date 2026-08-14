@@ -44,7 +44,7 @@ consumer (git or plain non-git) + dep path -> wrk --bring <dep> [--no-dep] [-v]
 - `--exec` after successful `--bring` (including SKIP) runs in the external worktree.
 - See `not-git-cwd/`, `no-dep/`, `verbose/`, `help-mentions-no-dep/`, and `removed-flags/` for flag/cwd-specific leaves.
 - Hard removal of legacy `--dep` / `--all-deps` is asserted under `removed-flags/` (expect RED until implementer lands).
-- **Multi-bring** (repeatable `--bring p1 --bring p2`, fail-fast hard errors, soft-SKIP continue, reject multi+`--exec` / positionals / duplicates): leaves under `multi/` (classic TDD RED until implementer lands StringSlice + loop).
+- **Multi-bring** (`Varargs` `--bring p1 p2` and repeat `--bring p1 --bring p2`, fail-fast hard errors, soft-SKIP continue, reject exclusive-multi+`--exec` / exact duplicates; bare `--bring` requires a value): leaves under `multi/`. Compose with create lives under `create-bring/`.
 
 ```go
 import (

@@ -1,18 +1,18 @@
 # Scenario
 
-**Feature**: repeatable `wrk --bring p1 --bring p2` brings multiple deps in one invocation
+**Feature**: `wrk --bring p1 p2` (Varargs) and repeatable `--bring` bring multiple deps
 
 ```
-# Multi-bring (v1): lessflags.StringSlice --bring only (not multi-value sugar)
+# Multi-bring: Varargs --bring p1 p2 (and repeat --bring still works)
 # Order left → right; stdout one abs path per line (trailing \n)
 # Soft SKIP continues; hard errors fail-fast (keep earlier external WTs)
-# --exec rejected when len(bringPaths) > 1
-# Positionals with --bring rejected (unexpected arguments)
+# --exec rejected when len(bringPaths) > 1 (exclusive bring only)
 # Exact duplicate bring args → error
-# --no-dep applies to all brought deps
+# --no-dep applies to all brought deps; Varargs stops at next flag
+# Bare --bring / --bring --no-dep → requires a value
 # P2 preflight-ambiguous: multi ambiguous basenames Select one-by-one;
 #   after all resolves succeed, stderr "will bring:" plan (multi-only)
-consumer + dep1 + dep2 -> wrk --bring <dep1> --bring <dep2>
+consumer + dep1 + dep2 -> wrk --bring <dep1> <dep2>
   -> external/{basename}-main-{date} per dep
   -> replace/tidy best-effort per dep (skipped with --no-dep)
 ```
@@ -32,12 +32,13 @@ consumer + dep1 + dep2 -> wrk --bring <dep1> --bring <dep2>
   - `req.SecondRepo` — second dep main path when needed
   - `req.ConsumerTop` / `req.RepoDir` — consumer git toplevel / cwd
   - `req.ExternalWtDir` / `req.ExternalWtDir2` — expected external paths (assert may set)
-- `req.Args` uses repeated `--bring` flags, e.g. `{"--bring", dep1, "--bring", dep2}`.
+- `req.Args` uses `{"--bring", dep1, "--bring", dep2}` (repeat) or
+  `{"--bring", dep1, dep2}` (`varargs-two/`).
 
 ## Context
 
-- Locked CLI form: **repeatable** `--bring` only (`wrk --bring p1 --bring p2`).
-  Not v1: `wrk --bring p1 p2` multi-value sugar.
+- `--bring` is **Varargs**: one flag may take ≥1 non-flag tokens; repeat still
+  appends (`two-success/` stays `--bring p1 --bring p2`).
 - Preferred hard-error prefixes: `wrk:`; soft SKIP uses existing
   `SKIP local dep replacement: …` wording.
 - Preferred multi+exec error: `wrk: --exec is only valid with a single --bring path`
@@ -47,8 +48,10 @@ consumer + dep1 + dep2 -> wrk --bring <dep1> --bring <dep2>
 
 ```go
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/xhd2015/doctest/assert"
@@ -158,6 +161,49 @@ func multiRecordSavedProject(t *testing.T, req *Request, repoPath string) {
 	runWrkWithArgs(t, req, req.WorkRoot, "--add", repoPath)
 }
 
+type multiEvent struct {
+	TS       string   `json:"ts"`
+	Command  string   `json:"command"`
+	WorkDir  string   `json:"work_dir"`
+	MainRepo string   `json:"main_repo"`
+	Args     []string `json:"args"`
+	ExitCode int      `json:"exit_code"`
+}
+
+func multiLastEvent(t *testing.T, wrkHome string) multiEvent {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(wrkHome, "events.jsonl"))
+	if err != nil {
+		t.Fatalf("read events.jsonl: %v", err)
+	}
+	var last multiEvent
+	n := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev multiEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("parse event line %q: %v", line, err)
+		}
+		last = ev
+		n++
+	}
+	if n == 0 {
+		t.Fatal("expected at least one events.jsonl entry")
+	}
+	return last
+}
+
+func multiEventArgsContain(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
 func ensureMultiBringHelpersUsed() {
 	_ = initMultiBringConsumerWithTwoRequires
 	_ = initMultiBringDepRepo
@@ -166,6 +212,8 @@ func ensureMultiBringHelpersUsed() {
 	_ = multiSnapshotBringGoMod
 	_ = multiAssertBringGoModUnchanged
 	_ = multiRecordSavedProject
+	_ = multiLastEvent
+	_ = multiEventArgsContain
 	_ = multiBringDep1Module
 	_ = multiBringDep2Module
 }

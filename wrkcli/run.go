@@ -299,7 +299,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--open-in-agent", &openInAgent).
 		Bool("--no-open-in-agent", &noOpenInAgent).
 		Bool("--no-config", &noConfig).
-		StringSlice("--bring", &bringPaths).
+		Varargs("--bring", &bringPaths).
 		Bool("--no-dep", &noDep).
 		String("-t,--task", &taskDesc).
 		String("--set-task", &setTaskDesc).
@@ -437,13 +437,27 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	removeFlagSet := removePath != nil
 	whereFlagSet := where
 	portFlagSet := portFlag != nil
+	uxFlags := createUXFlags{
+		newWindow:     newWindow,
+		noNewWindow:   noNewWindow,
+		newTerminal:   newTerminal,
+		reuseTerminal: reuseTerminal,
+		smartTerminal: smartTerminal,
+		noNewTerminal: noNewTerminal,
+		openInAgent:   openInAgent,
+		noOpenInAgent: noOpenInAgent,
+	}
+	// Exclusive bring: cwd consumer. Compose: --new / -t / leftover positionals /
+	// create UX flags. --no-config / --exec / --no-cd alone are not compose signals.
+	createCompose := bringMode && (newFlag || taskFlagSet || len(remaining) > 0 || uxFlags.any())
+	exclusiveBring := bringMode && !createCompose
 
 	if webFlag {
 		ctx.command = "web"
 	} else if scanGitRepos {
 		ctx.command = "scan-git-repos"
 	} else {
-		ctx.command = resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, bringMode, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, prFlag, cd, mainFlag, unwind)
+		ctx.command = resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, exclusiveBring, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, prFlag, cd, mainFlag, unwind)
 		if pinLocals {
 			ctx.command = "pin-locals"
 		}
@@ -509,10 +523,6 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	}
 	if len(remaining) == 2 {
 		spawnTarget = remaining[1]
-	}
-	// --bring does not accept leftover positionals (no multi-value sugar; no workDir override).
-	if bringMode && len(remaining) > 0 {
-		return fmt.Errorf("wrk: unexpected arguments")
 	}
 
 	wrkHome, err := resolveWrkHome()
@@ -734,17 +744,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 
 	// Resolve sourceDir to absolute; default to process cwd when absent.
 	// Passed to every sub-command as workDir instead of using os.Getwd/Chdir.
-	createMode := isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status, bringMode, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, prFlag, list, done, mergeBack, cd, mainFlag, unwind) && !pinLocals && !depReplaceMode && !depUpdateMode
-	uxFlags := createUXFlags{
-		newWindow:     newWindow,
-		noNewWindow:   noNewWindow,
-		newTerminal:   newTerminal,
-		reuseTerminal: reuseTerminal,
-		smartTerminal: smartTerminal,
-		noNewTerminal: noNewTerminal,
-		openInAgent:   openInAgent,
-		noOpenInAgent: noOpenInAgent,
-	}
+	createMode := isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status, exclusiveBring, reinstallLocal, tagNext, propagateTags, syncFlag, pushFlag, prFlag, list, done, mergeBack, cd, mainFlag, unwind) && !pinLocals && !depReplaceMode && !depUpdateMode
 	if err := uxFlags.validate(); err != nil {
 		return err
 	}
@@ -847,15 +847,15 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if taskFlagSet && strings.TrimSpace(*taskDesc) == "" {
 		return fmt.Errorf("wrk: task description must not be empty")
 	}
-	// --task is only valid with create mode.
-	if taskFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || mergeBack || prFlag || cd || mainFlag || unwind) {
-		return fmt.Errorf("wrk: --task is mutually exclusive with --done, --merge-back, --list, --status, --repos, --projects, --add, --rm, --where, and --bring")
+	// --task is only valid with create mode (create+bring compose is allowed).
+	if taskFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || reinstallLocal || tagNext || propagateTags || syncFlag || mergeBack || prFlag || cd || mainFlag || unwind) {
+		return fmt.Errorf("wrk: --task is mutually exclusive with --done, --merge-back, --list, --status, --repos, --projects, --add, --rm, and --where")
 	}
 
-	// --new is the create entry; exclusive with non-create modes.
+	// --new is the create entry; exclusive with non-create modes (--bring composes).
 	if newFlag {
 		otherMode := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
-			addFlagSet || removeFlagSet || whereFlagSet || setTaskFlagSet || bringMode ||
+			addFlagSet || removeFlagSet || whereFlagSet || setTaskFlagSet ||
 			reinstallLocal || tagNext || propagateTags || syncFlag || pushFlag || prFlag || jsonFlag ||
 			cd || mainFlag || dryRun
 		if otherMode {
@@ -1135,7 +1135,8 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	}
 
 	// spawnTarget only applies to the create path. Reject for any other mode.
-	if spawnTarget != "" && (bringMode || reinstallLocal || tagNext || propagateTags || syncFlag || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || done || mergeBack || prFlag || cd || mainFlag || unwind) {
+	// create+bring compose may use <target-dir> (bring applies inside the spawn).
+	if spawnTarget != "" && (reinstallLocal || tagNext || propagateTags || syncFlag || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || done || mergeBack || prFlag || cd || mainFlag || unwind) {
 		return fmt.Errorf("wrk: unexpected arguments")
 	}
 
@@ -1364,7 +1365,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if repos {
 		return runRepos(workDir)
 	}
-	if bringMode {
+	if exclusiveBring {
 		return runBring(workDir, bringPaths, wrkHome, args, execArgs, noDep)
 	}
 	if list {
@@ -1538,7 +1539,26 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if err != nil {
 		return err
 	}
-	return runCreate(workDir, origWd, spawnTarget, task, noCd, forceCd, execArgs, uxPlan)
+
+	// Compose: resolve every --bring arg before window/create so unknown
+	// basenames / duplicates never leave a new worktree.
+	var bringPlan *bringApplyPlan
+	if createCompose {
+		resolved, resolveErrs, perr := preflightResolveBringArgs(bringPaths, wrkHome, args)
+		if perr != nil {
+			return perr
+		}
+		for _, e := range resolveErrs {
+			if e != nil {
+				return e
+			}
+		}
+		if len(bringPaths) > 1 {
+			printBringPlan(bringPaths, resolved)
+		}
+		bringPlan = &bringApplyPlan{args: bringPaths, resolved: resolved, noDep: noDep}
+	}
+	return runCreate(workDir, origWd, spawnTarget, task, noCd, forceCd, execArgs, uxPlan, bringPlan)
 }
 
 // isDashboardBareEntry is true when the invocation is pure bare no-args dashboard
@@ -1622,7 +1642,7 @@ Flags:
                                    with --where: print main path; with --cd: runCd to main;
                                    with --reinstall-local: reinstall from main repo modules;
                                    with pipeline stages: run activeRoot as main, no nested shell)
-  --bring <path>                  spawn a dependency worktree under ./external (repeatable: --bring p1 --bring p2); soft-skip go.mod replace when not a module dep
+  --bring p1 p2                   spawn one or more dep worktrees under ./external (repeatable); with create, apply inside the new worktree
   --no-dep                        with --bring: worktree only; skip replace and tidy
   --reinstall-local [--dry-run]   reinstall local module binaries already in GOBIN/GOPATH/bin
                                   (with --main: scan main repository modules for this checkout;
@@ -2796,41 +2816,107 @@ func runBring(workDir string, bringArgs []string, wrkHome string, rawArgs []stri
 		return err
 	}
 
-	multi := len(bringArgs) > 1
-	// Multi-only plan on stderr after full successful preflight, before create.
+	// Multi-only plan on stderr after full successful preflight, before apply.
 	// Single-arg skips this (noise). Duplicate/hard preflight err returns above.
-	if multi {
-		allResolved := true
-		for _, e := range resolveErrs {
-			if e != nil {
-				allResolved = false
-				break
-			}
-		}
-		if allResolved {
-			fmt.Fprintln(os.Stderr, "will bring:")
-			for i, a := range bringArgs {
-				fmt.Fprintf(os.Stderr, "  %s → %s\n", a, resolved[i])
-			}
-		}
+	if len(bringArgs) > 1 && bringAllResolved(resolveErrs) {
+		printBringPlan(bringArgs, resolved)
 	}
 
+	lastExternal, err := applyBringResolved(workDir, bringArgs, resolved, resolveErrs, noDep)
+	if err != nil {
+		return err
+	}
+
+	// --exec only valid with single bring (rejected above for multi).
+	return runExecInDir(lastExternal, execArgs)
+}
+
+// bringApplyPlan is a preflighted --bring apply for create compose.
+type bringApplyPlan struct {
+	args     []string
+	resolved []string
+	noDep    bool
+}
+
+func printBringPlan(bringArgs, resolved []string) {
+	fmt.Fprintln(os.Stderr, "will bring:")
+	for i, a := range bringArgs {
+		fmt.Fprintf(os.Stderr, "  %s → %s\n", a, resolved[i])
+	}
+}
+
+func bringAllResolved(resolveErrs []error) bool {
+	for _, e := range resolveErrs {
+		if e != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func applyBringPlan(consumer string, bring *bringApplyPlan) error {
+	if bring == nil || len(bring.args) == 0 {
+		return nil
+	}
+	_, err := applyBringResolved(consumer, bring.args, bring.resolved, nil, bring.noDep)
+	return err
+}
+
+// seedConsumerGoModFromSource copies the source checkout's working-tree go.mod /
+// go.sum into a newly created worktree when those files are missing there.
+// git worktree add only checks out HEAD; an uncommitted module file (the usual
+// create+bring source) would otherwise leave the new WT with no go.mod, so
+// replace cannot apply.
+func seedConsumerGoModFromSource(srcRoot, consumer string, bring *bringApplyPlan) error {
+	if bring == nil || len(bring.args) == 0 || srcRoot == "" || consumer == "" {
+		return nil
+	}
+	if sameDirPath(srcRoot, consumer) {
+		return nil
+	}
+	for _, name := range []string{"go.mod", "go.sum"} {
+		dest := filepath.Join(consumer, name)
+		if _, err := os.Stat(dest); err == nil {
+			continue
+		} else if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		src := filepath.Join(srcRoot, name)
+		data, err := os.ReadFile(src)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		if err := os.WriteFile(dest, data, 0o644); err != nil {
+			return fmt.Errorf("copy %s into new worktree: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// applyBringResolved materializes each resolved --bring arg left→right into
+// consumer. resolveErrs[i] is returned at that index (exclusive bring defers
+// unknown basenames to the apply loop). Compose callers pass nil resolveErrs
+// after failing closed on any preflight resolve error.
+func applyBringResolved(consumer string, bringArgs, resolved []string, resolveErrs []error, noDep bool) (lastExternal string, err error) {
+	multi := len(bringArgs) > 1
 	tidyAtEnd := make(map[string]struct{})
-	var lastExternal string
 
 	for i := range bringArgs {
-		if resolveErrs[i] != nil {
-			return resolveErrs[i]
+		if resolveErrs != nil && resolveErrs[i] != nil {
+			return lastExternal, resolveErrs[i]
 		}
 		depPath := resolved[i]
 		if depPath == "" {
 			// Args after a preflight resolve failure are left empty; fail-fast
 			// returns at the first resolveErrs[i] above before reaching them.
-			return fmt.Errorf("wrk: internal: unresolved --bring path: %s", bringArgs[i])
+			return lastExternal, fmt.Errorf("wrk: internal: unresolved --bring path: %s", bringArgs[i])
 		}
-		externalPath, replacedDirs, err := bringOneFromResolved(workDir, depPath, noDep, !multi)
+		externalPath, replacedDirs, err := bringOneFromResolved(consumer, depPath, noDep, !multi)
 		if err != nil {
-			return err
+			return lastExternal, err
 		}
 		for _, d := range replacedDirs {
 			tidyAtEnd[d] = struct{}{}
@@ -2838,7 +2924,7 @@ func runBring(workDir string, bringArgs []string, wrkHome string, rawArgs []stri
 		// Print each success before attempting the next (fail-fast still shows first path).
 		absPath, err := filepath.Abs(externalPath)
 		if err != nil {
-			return fmt.Errorf("resolve external worktree path: %w", err)
+			return lastExternal, fmt.Errorf("resolve external worktree path: %w", err)
 		}
 		fmt.Println(absPath)
 		lastExternal = absPath
@@ -2852,13 +2938,36 @@ func runBring(workDir string, bringArgs []string, wrkHome string, rawArgs []stri
 		sort.Strings(dirs)
 		for _, d := range dirs {
 			if err := goModTidyForBring(d); err != nil {
-				return err
+				return lastExternal, err
 			}
 		}
 	}
+	return lastExternal, nil
+}
 
-	// --exec only valid with single bring (rejected above for multi).
-	return runExecInDir(lastExternal, execArgs)
+// runCreateUXAndBring runs create UX and bring apply concurrently when both
+// are needed. UX failure does not cancel bring; bring failure does not roll
+// back create. Wait for both, then prefer the UX error if both fail.
+func runCreateUXAndBring(path, taskDesc string, ux createUXPlan, bring *bringApplyPlan) error {
+	if bring == nil || len(bring.args) == 0 {
+		return runCreateUX(path, taskDesc, ux)
+	}
+	var uxErr, bringErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		uxErr = runCreateUX(path, taskDesc, ux)
+	}()
+	go func() {
+		defer wg.Done()
+		bringErr = applyBringPlan(path, bring)
+	}()
+	wg.Wait()
+	if uxErr != nil {
+		return uxErr
+	}
+	return bringErr
 }
 
 // preflightResolveBringArgs resolves each --bring arg once and rejects
@@ -3514,7 +3623,7 @@ func externalCandidateBlocked(mainRepo, wtPath, branch string) bool {
 	return branchExists(mainRepo, branch)
 }
 
-func runCreate(workDir string, origWd string, targetDir string, taskDesc string, noCd, forceCd bool, execArgs []string, ux createUXPlan) error {
+func runCreate(workDir string, origWd string, targetDir string, taskDesc string, noCd, forceCd bool, execArgs []string, ux createUXPlan, bring *bringApplyPlan) error {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
@@ -3566,7 +3675,7 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 	slug = fitted
 
 	if targetDir != "" {
-		return runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, branchBase, pathToken, date, slug, noCd, forceCd, execArgs, taskDesc, ux)
+		return runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, branchBase, pathToken, date, slug, noCd, forceCd, execArgs, taskDesc, ux, bring)
 	}
 
 	wrkHome, err := resolveWrkHome()
@@ -3584,8 +3693,11 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 		return err
 	}
 	fmt.Println(result.Path)
-	// Pipeline: [window] → create (path printed) → terminal-or-agent → exec → follow-up cd.
-	if err := runCreateUX(result.Path, taskDesc, ux); err != nil {
+	// Pipeline: [window] → create (path printed) → UX ∥ bring → exec → follow-up cd.
+	if err := seedConsumerGoModFromSource(checkoutRoot, result.Path, bring); err != nil {
+		return err
+	}
+	if err := runCreateUXAndBring(result.Path, taskDesc, ux, bring); err != nil {
 		return err
 	}
 	if err := runExecInDir(result.Path, execArgs); err != nil {
@@ -3612,7 +3724,7 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 // parent(intendedSpawn), porcelain-clean, and HEAD==source checkout. TTY: prompt
 // skip (default Y, wording "would reuse" / "skip creating"); non-TTY: create
 // without refuse. No reusable siblings → create as today with no banner.
-func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, branchBase, pathToken, date, slug string, noCd, forceCd bool, execArgs []string, taskDesc string, ux createUXPlan) error {
+func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, branchBase, pathToken, date, slug string, noCd, forceCd bool, execArgs []string, taskDesc string, ux createUXPlan, bring *bringApplyPlan) error {
 	// Resolve <target-dir> against the shell cwd (origWd), not the repo dir.
 	// Abs-normalize so parent comparisons match live worktree paths (macOS
 	// /var → /private/var).
@@ -3682,6 +3794,13 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 				return fmt.Errorf("resolve worktree path: %w", err)
 			}
 			fmt.Println(absPath)
+			// Policy B reuse: bring into the reused sibling, then exec there.
+			if err := seedConsumerGoModFromSource(checkoutRoot, absPath, bring); err != nil {
+				return err
+			}
+			if err := applyBringPlan(absPath, bring); err != nil {
+				return err
+			}
 			if err := runExecInDir(absPath, execArgs); err != nil {
 				return err
 			}
@@ -3722,7 +3841,10 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 				return fmt.Errorf("resolve worktree path: %w", err)
 			}
 			fmt.Println(absPath)
-			if err := runCreateUX(absPath, taskDesc, ux); err != nil {
+			if err := seedConsumerGoModFromSource(checkoutRoot, absPath, bring); err != nil {
+				return err
+			}
+			if err := runCreateUXAndBring(absPath, taskDesc, ux, bring); err != nil {
 				return err
 			}
 			// Target-dir create skips home-gated auto-cd; --force-cd still lands.
@@ -3777,7 +3899,10 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 			return fmt.Errorf("resolve worktree path: %w", err)
 		}
 		fmt.Println(absPath)
-		if err := runCreateUX(absPath, taskDesc, ux); err != nil {
+		if err := seedConsumerGoModFromSource(checkoutRoot, absPath, bring); err != nil {
+			return err
+		}
+		if err := runCreateUXAndBring(absPath, taskDesc, ux, bring); err != nil {
 			return err
 		}
 		// Target-dir create skips home-gated auto-cd; --force-cd still lands.

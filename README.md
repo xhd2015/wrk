@@ -30,7 +30,7 @@ wrk --done                       # merge back and remove worktree
 | `wrk --projects --github` | Same as `--projects`, only github.com origin remotes |
 | `wrk --where <basename>` | Look up saved project path(s) |
 | `wrk --main` | Nested shell at main repository root |
-| `wrk --bring <path>` | Spawn a dependency worktree under `./external`; soft-skip replace when not a module dep |
+| `wrk --bring p1 p2` | Spawn one or more dependency worktrees under `./external`; with create, apply inside the new worktree |
 | `wrk --web` | Local web UI (React SPA + API on 127.0.0.1) |
 
 Run `wrk -h` for the full flag list.

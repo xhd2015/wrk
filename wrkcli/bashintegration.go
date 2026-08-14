@@ -687,10 +687,13 @@ func completionContext(words []string, cword int) (kind, prefix string) {
 
 	if cword > 0 {
 		switch words[cword-1] {
-		case "--bring", "--where", "--add", "--rm", "--cd", "-l", "--list", "--status":
+		case "--where", "--add", "--rm", "--cd", "-l", "--list", "--status":
 			return "basenames", cur
 		case "-t", "--task", "--set-task":
 			return "none", ""
+		}
+		if completingBringValue(words, cword) {
+			return "basenames", cur
 		}
 	}
 
@@ -703,6 +706,20 @@ func completionContext(words []string, cword int) (kind, prefix string) {
 	}
 
 	return "none", ""
+}
+
+// completingBringValue is true when cword is still inside a --bring Varargs
+// slurp (every non-flag token after --bring until a '-' token).
+func completingBringValue(words []string, cword int) bool {
+	for i := cword - 1; i >= 0; i-- {
+		if words[i] == "--bring" {
+			return true
+		}
+		if strings.HasPrefix(words[i], "-") {
+			return false
+		}
+	}
+	return false
 }
 
 func filterFlags(prefix string) []string {

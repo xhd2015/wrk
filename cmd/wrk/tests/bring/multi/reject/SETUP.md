@@ -1,10 +1,10 @@
 # Scenario
 
-**Feature**: multi-bring CLI rejections (exec, positionals, exact duplicates)
+**Feature**: multi-bring CLI rejections (exec, missing value, exact duplicates)
 
 ```
-# multi + --exec          -> non-zero; --exec only with single --bring
-# --bring p1 p2           -> non-zero; unexpected arguments (no multi-value sugar)
+# multi + --exec          -> non-zero; --exec only with single exclusive --bring
+# --bring / --bring --no-dep -> non-zero; requires a value
 # --bring p1 --bring p1   -> non-zero; exact duplicate resolved path rejected
 ```
 
@@ -16,13 +16,6 @@
 ## Context
 
 - Preferred exec error: `wrk: --exec is only valid with a single --bring path`
-- Preferred positional: `wrk: unexpected arguments`
+- Preferred missing value: library wording `requires a value`
 - Preferred duplicate: error naming duplicate / already listed / same path (soft wording).
-
-```go
-func Setup(t *testing.T, d *session.Doctest, req *Request) error {
-	_ = d
-	_ = req
-	return nil
-}
-```
+- `wrk --bring p1 p2` is **success** (see `../varargs-two/`), not a reject.

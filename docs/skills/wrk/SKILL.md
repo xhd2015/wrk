@@ -92,8 +92,11 @@ wrk --projects-dep-graph
 wrk --where <basename>
 # nested shell at main repo root
 wrk --main
-# dep worktree under ./external
+# dep worktree(s) under ./external (one or more paths; repeatable)
 wrk --bring <path>
+wrk --bring p1 p2
+# create + bring into the new worktree
+wrk src --bring p1 p2
 # worktree only; skip replace/tidy
 wrk --bring <path> --no-dep
 ```

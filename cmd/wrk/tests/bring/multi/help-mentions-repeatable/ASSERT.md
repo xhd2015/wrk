@@ -38,9 +38,11 @@ func multiBringHelpMentionsRepeatable(help string) bool {
 		if strings.Contains(lower, "multiple") ||
 			strings.Contains(lower, "repeat") ||
 			strings.Contains(lower, "more than one") ||
+			strings.Contains(lower, "one or more") ||
 			strings.Contains(lower, "several") ||
 			strings.Contains(lower, "dependencies") ||
 			strings.Contains(lower, "can be") ||
+			strings.Contains(lower, "p1 p2") ||
 			// e.g. --bring path  (repeatable)
 			strings.Contains(lower, "repeatable") {
 			return true
@@ -60,6 +62,8 @@ func multiBringHelpMentionsRepeatable(help string) bool {
 	return strings.Contains(window, "multiple") ||
 		strings.Contains(window, "repeat") ||
 		strings.Contains(window, "dependencies") ||
+		strings.Contains(window, "one or more") ||
+		strings.Contains(window, "p1 p2") ||
 		strings.Contains(window, "more than one")
 }
 ```

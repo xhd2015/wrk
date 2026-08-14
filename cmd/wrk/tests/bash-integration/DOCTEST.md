@@ -59,6 +59,7 @@ bash-integration/
 │   ├── flags/                       # wrk -<tab> flag candidates (incl. --pr/--title/--comment)
 │   ├── list-dir/                    # wrk -l <tab>
 │   ├── bring/                       # wrk --bring <tab>
+│   ├── bring-second-value/          # wrk --bring already-typed be → beta
 │   ├── where/                       # wrk --where <tab>
 │   ├── status/                      # wrk --status <tab>
 │   ├── add-rm/                      # wrk --add/--rm <tab>
