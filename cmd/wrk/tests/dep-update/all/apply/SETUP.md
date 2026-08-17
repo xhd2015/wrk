@@ -5,7 +5,7 @@
 ```
 consumer git toplevel + inventory owners + optional file:// GOPROXY
   -> wrk --dep-update --all
-  -> dep-update lines; go mod tidy ok; summary
+  -> dep-update lines; go mod tidy ok | skip tidy (vendor/); summary
   -> only consumer-tree go.mod/go.sum change; no commit
 ```
 

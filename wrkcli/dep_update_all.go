@@ -268,8 +268,8 @@ func replaceTargetUnderToplevel(consumerModDir, newPath, consumerToplevel string
 
 // runDepUpdateAll implements wrk --dep-update --all [--dry-run].
 // Consumer root = git toplevel of cwd. Pins inventory-owned outdated requires,
-// then go mod tidy once per affected consumer module. No commit/build.
-func runDepUpdateAll(workDir, wrkHome string, dryRun bool) error {
+// then tidyDepUpdateConsumer once per affected consumer module. No commit/build.
+func runDepUpdateAll(workDir, wrkHome string, dryRun bool, ctx *invocationContext) error {
 	plan, err := PlanDepUpdateAll(workDir, wrkHome)
 	if err != nil {
 		return err
@@ -338,14 +338,9 @@ func runDepUpdateAll(workDir, wrkHome string, dryRun bool) error {
 			}
 			updated++
 		}
-		if dryRun {
-			fmt.Printf("would: go mod tidy  module %s\n", cg.Path)
-			continue
+		if err := tidyDepUpdateConsumer(cg.ModDir, cg.Path, dryRun, withGoFromCtx(ctx)); err != nil {
+			return err
 		}
-		if err := goModTidy(cg.ModDir); err != nil {
-			return fmt.Errorf("wrk: go mod tidy in %s: %w", cg.ModDir, err)
-		}
-		fmt.Printf("go mod tidy ok  module %s\n", cg.Path)
 	}
 
 	if dryRun {

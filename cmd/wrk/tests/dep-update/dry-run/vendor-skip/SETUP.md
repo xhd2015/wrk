@@ -1,26 +1,25 @@
 # Scenario
 
-**Feature**: dry-run prints would: dep-update and would: go mod tidy; no write
+**Feature**: dir-mode dry-run plans skip tidy when vendor/ is present
 
 ```
-consumer has replace + require v0.0.1; dep tags up to v0.0.2
+nearest consumer has replace + require + empty vendor/
   -> wrk --dep-update <dep> --dry-run
   -> would: dep-update example.com/dep -> v0.0.2
-  -> would: go mod tidy  module example.com/consumer
-  -> go.mod identical to baseline
-  -> exit 0
+  -> would: skip tidy  module example.com/consumer  (vendor/)
+  -> go.mod unchanged; vendor/ untouched
 ```
 
 ## Steps
 
-1. Seed drop-replace-latest fixture.
+1. Seed drop-replace-latest + empty `vendor/`.
 2. Run with `--dry-run`.
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = d
 	req.InProcess = true
-	setupDropReplaceLatest(t, req)
+	setupVendorSkipDir(t, req)
 	req.Args = []string{"--dep-update", req.DepDir, "--dry-run"}
 	return nil
 }

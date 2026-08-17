@@ -1,15 +1,13 @@
 ## Expected
 
 - Exit 0.
-- Stdout `dep-update example.com/dep -> v0.0.2` (optional tag form OK).
-- Stdout `go mod tidy ok  module example.com/consumer`.
-- No `would:` vocabulary.
-- go.mod: no replace for example.com/dep; require at v0.0.2.
-- go.sum exists after tidy.
+- Pin + tidy for `example.com/app` only.
+- No pin/tidy line for `example.com/other`.
+- Sibling go.mod identical to baseline (no new require).
 
 ## Side Effects
 
-- Replace dropped; require pinned to latest tag version; tidy ran.
+- Only modules that already required xxx are mutated.
 
 ## Exit Code
 
@@ -24,11 +22,11 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
-	assertNotContains(t, resp.Stdout, "would:")
 	assertDepUpdateLine(t, resp.Stdout, modDep, req.WantVersion)
 	assertTidyOkLine(t, resp.Stdout, req.WantConsumerModule)
-	assertNoReplaceFor(t, req.ConsumerGoMod, modDep)
+	assertNotContains(t, resp.Stdout, req.WantConsumer2Module)
 	assertRequireVersion(t, req.ConsumerGoMod, modDep, req.WantVersion)
+	assertGoModUnchangedAt(t, req.Consumer2GoMod, req.Baseline2GoMod)
 	assertGoSumExists(t, req.ConsumerModDir)
 }
 ```

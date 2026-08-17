@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/withgo"
 )
 
 // runCaptureMu serializes Capture / RunWithWriters because product code writes
@@ -26,10 +28,10 @@ var runCaptureMu sync.Mutex
 // (no os.Chdir); captureUserHome peels HOME= from Capture Env without Setenv so
 // parallel doctest Setup/git keep a valid real getcwd and real $HOME.
 var (
-	captureWrkHome   string
-	captureWrkDate   string
-	captureDir       string
-	captureUserHome  string
+	captureWrkHome  string
+	captureWrkDate  string
+	captureDir      string
+	captureUserHome string
 )
 
 // processCwd returns the effective process working directory. During Capture
@@ -93,6 +95,9 @@ type CaptureOpts struct {
 	// ScanTestPauseAfterFirstPrint is passed through to RunWithOpts (not env).
 	// See RunOpts.ScanTestPauseAfterFirstPrint for docs and supporting tests.
 	ScanTestPauseAfterFirstPrint time.Duration
+	// WithGo is the injectable Go SDK resolver for dep-update versioned tidy.
+	// Production leaves this zero; Capture tests set InstallDir + Download:false.
+	WithGo withgo.ResolveOptions
 }
 
 // CaptureResult is the CLI-shaped outcome of Capture / RunWithWriters.
@@ -169,6 +174,7 @@ func runOptsFromCapture(opts CaptureOpts) RunOpts {
 	return RunOpts{
 		Args:                         opts.Args,
 		ScanTestPauseAfterFirstPrint: opts.ScanTestPauseAfterFirstPrint,
+		WithGo:                       opts.WithGo,
 	}
 }
 
@@ -250,6 +256,18 @@ func applyCaptureOverrides(opts CaptureOpts) (restore func()) {
 	// Other keys stay in rest as before.
 	if userHome != "" {
 		rest = append([]string{"HOME=" + userHome}, rest...)
+	}
+	// Child `go` (Pin, tidy) inherits Capture env. Default telemetry off so
+	// FakeHome TempDir cleanup is not raced by $HOME/.../go/telemetry writes.
+	hasTelemetry := false
+	for _, p := range rest {
+		if strings.HasPrefix(p, "GOTELEMETRY=") {
+			hasTelemetry = true
+			break
+		}
+	}
+	if !hasTelemetry {
+		rest = append(rest, "GOTELEMETRY=off")
 	}
 
 	restoreEnv := applyEnvPairs(rest)

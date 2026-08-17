@@ -1,9 +1,9 @@
 # Scenario
 
-**Feature**: wrk --dep-update hard-fails on missing dir, non-module, no tags, no consumer
+**Feature**: wrk --dep-update hard-fails on missing dir, non-module, no tags, no consumer, zero requirers
 
 ```
-invalid dep | plain dir | untagged module | workDir without go.mod
+invalid dep | plain dir | untagged module | no go.mod ancestor | git module without require
   -> wrk --dep-update …
   -> Error non-zero
 ```

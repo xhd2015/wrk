@@ -25,6 +25,7 @@ import (
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/mod/scan"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/replace"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/resolve"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/withgo"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/pathfmt"
 	lessflags "github.com/xhd2015/less-flags"
 	"github.com/xhd2015/wrk/workops"
@@ -45,6 +46,10 @@ type RunOpts struct {
 	//   - cmd/wrk/tests/scan-git-repos/interrupt/sigint-after-first-path
 	//   - (other leaves under scan-git-repos/interrupt/ if added)
 	ScanTestPauseAfterFirstPrint time.Duration
+
+	// WithGo is the injectable Go SDK resolver for dep-update versioned tidy.
+	// Zero value: production defaults (userHomeDir()/installed, Download:true).
+	WithGo withgo.ResolveOptions
 }
 
 // Run executes wrk logic with args. The first positional argument,
@@ -61,6 +66,7 @@ func RunWithOpts(opts RunOpts) error {
 		return fmt.Errorf("get cwd: %w", err)
 	}
 	ctx := newInvocationContext(origWd, opts.Args)
+	ctx.withGo = opts.WithGo
 	var runErr error
 	defer func() {
 		exitCode := 0
@@ -1314,12 +1320,12 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if depReplaceMode {
 		return runDepReplace(workDir, depReplacePaths, dryRun)
 	}
-	// --dep-update: dir pin (no tidy) or --all inventory pull (+ tidy).
+	// --dep-update: dir-mode fan-out pin + versioned tidy, or --all inventory pull.
 	if depUpdateMode {
 		if allFlag {
-			return runDepUpdateAll(workDir, wrkHome, dryRun)
+			return runDepUpdateAll(workDir, wrkHome, dryRun, ctx)
 		}
-		return runDepUpdate(workDir, depUpdatePaths, dryRun)
+		return runDepUpdate(workDir, depUpdatePaths, dryRun, ctx)
 	}
 	// Bare / --main --reinstall-local before bare --main so compose does not open a nested shell.
 	// Multi-stage reinstall is handled by activeRoot pipeline below.
@@ -1619,9 +1625,10 @@ Flags:
   --dep-replace <dir>… [--dry-run]
                                   absolute replace into nearest consumer go.mod (no tidy; fail-fast multi-dir)
   --dep-update <dir>… [--dry-run]
-                                  drop replace + require latest git tag in nearest consumer go.mod (no tidy)
+                                  pin latest tag into every existing requirer under git toplevel of cwd
+                                  (else nearest go.mod); versioned go mod tidy unless vendor/ (never go mod vendor)
   --dep-update --all [--dry-run]  pin inventory-owned requires under git toplevel of cwd to latest tags;
-                                  go mod tidy once per affected consumer module (no commit/build)
+                                  same versioned tidy / vendor skip once per affected consumer (no commit/build)
   --all                           with --dep-update: inventory pull mode (not a standalone mode)
   --projects                      list recorded main repository paths
   --projects-dep-graph            module-level dep graph across registered projects

@@ -1,12 +1,13 @@
 # Scenario
 
-**Feature**: wrk --dep-update applies drop-replace + require@latest tag
+**Feature**: wrk --dep-update applies drop-replace + require@latest + versioned tidy
 
 ```
 consumer + tagged dep(s)
   -> wrk --dep-update <dir>…
   -> dep-update <mod> -> vN.N.N
-  -> replace dropped; require set; no tidy
+  -> replace dropped; require set
+  -> go mod tidy ok  module …  |  skip tidy  module …  (vendor/)
 ```
 
 ## Steps

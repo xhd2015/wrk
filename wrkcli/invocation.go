@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/withgo"
 	"github.com/xhd2015/wrk/wrkcli/storage"
 )
 
@@ -16,6 +17,7 @@ type invocationContext struct {
 	eventArgs []string
 	wrkHome   string
 	skipEvent bool
+	withGo    withgo.ResolveOptions
 }
 
 func newInvocationContext(origWd string, args []string) *invocationContext {

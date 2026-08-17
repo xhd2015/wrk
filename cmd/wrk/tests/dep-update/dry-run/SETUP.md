@@ -1,11 +1,12 @@
 # Scenario
 
-**Feature**: wrk --dep-update --dry-run plans pin without writing
+**Feature**: wrk --dep-update --dry-run plans pin + tidy/skip without writing
 
 ```
 consumer + tagged dep with replace
   -> wrk --dep-update <dep> --dry-run
-  -> would: dep-update …; go.mod unchanged
+  -> would: dep-update …; would: go mod tidy | would: skip tidy (vendor/)
+  -> go.mod unchanged
 ```
 
 ## Steps

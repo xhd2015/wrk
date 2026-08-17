@@ -1,43 +1,49 @@
 # Scenario
 
-**Feature**: wrk --dep-update dir pin + inventory pull (`--all`)
+**Feature**: wrk --dep-update dir-mode fan-out + versioned tidy + `--all` inventory pull
 
 ```
 # isolated WRK_HOME; consumer go.mod + git-tagged dep / owner modules
-# dir mode: consumer has replace + old require
+# dir mode: pin every existing requirer under git toplevel (else nearest go.mod)
   -> wrk --dep-update <dir>… [--dry-run]
-  -> dry-run: would: dep-update <mod> -> vN.N.N; no write
-  -> apply: drop replace; require@latest; dep-update line; no tidy
+  -> dry-run: would: dep-update; would: go mod tidy | would: skip tidy (vendor/)
+  -> apply: drop replace; require@latest; versioned tidy or skip tidy (vendor/)
 # --all mode: git toplevel consumers + BuildInventory owners
   -> wrk --dep-update --all [--dry-run]
-  -> pin inventory-owned outdated requires; tidy affected modules
+  -> pin inventory-owned outdated requires; same tidy helper
   -> skip external / same-toplevel filesystem replace; warn no-tag
-  -> no dirs / exclusive / bare --all: Error non-zero
+  -> no dirs / exclusive / bare --all / zero requirers: Error non-zero
 ```
 
 ## Preconditions
 
 - Nested root: **no inheritance** from `cmd/wrk/tests` monotree.
-- Go toolchain and **git** on PATH (tag resolution; `--all` tidy).
+- Go toolchain and **git** on PATH (tag resolution; versioned tidy wrapper execs host `go`).
 - Per-leaf `t.TempDir()` WorkRoot; `WRK_HOME={WorkRoot}/.wrk`.
-- L2: `req.InProcess = true` (wrkcli.Capture).
-- Fixtures seed git tags with `git tag` (isolated git).
-- `--all` apply leaves may seed `{WorkRoot}/modproxy` + `GOPROXY=file://…`
-  so offline `go mod tidy` resolves synthetic `example.com/*` versions.
-- Parallel-safe: no process env/cwd mutation; inject Env/Dir via Capture.
+- L2: `req.InProcess = true` (wrkcli.Capture). `Run` passes `CaptureOpts.WithGo`.
+- Root Setup seeds `$InstallDir/go1.22.12/bin/go` host-go wrapper (`go 1.22` pin).
+  Versioned-tidy leaf also seeds `go1.19.13`. Parallel-safe: no Setenv/Chdir.
+- Fixtures seed git tags with `git tag` (isolated git). Existing dir-mode
+  consumer dirs stay **non-git** (nearest-only). Fan-out / zero-requirer
+  leaves init git at the consumer toplevel.
+- Dir-mode apply that tidies and `--all` apply seed `{WorkRoot}/modproxy` +
+  `GOPROXY=file://…` so offline tidy resolves synthetic `example.com/*`.
+- Parallel-safe: no process env/cwd mutation; inject Env/Dir/`WithGo` via Capture.
 
 ## Steps
 
-1. Root `Setup` creates isolated WorkRoot / WrkHome.
-2. Leaves seed consumer + tagged dep/owner git repos; set Args / paths.
-3. Root `Run` invokes Capture.
+1. Root `Setup` creates isolated WorkRoot / WrkHome and seeds the `go1.22.12` wrapper.
+2. Leaves seed consumer + tagged dep/owner git repos; set Args / paths / extra wrappers.
+3. Root `Run` invokes Capture with `WithGo`.
 
 ## Context
 
 - **Dir-mode module paths:**
-  - `example.com/consumer` — nearest consumer
+  - `example.com/consumer` — nearest consumer (existing apply leaves; **not** git)
   - `example.com/dep` — primary dep (root-module tags `v0.0.1`, `v0.0.2`)
   - `example.com/dep2` — second dep for multi-dir
+  - Fan-out git workspace: `example.com/app` + `example.com/app/pkg` both require dep
+  - Skip sibling: `example.com/other` under same toplevel, no require of dep
 - **Nested monorepo dep (dir):** git root without go.mod; module at `packages/dep`
   with tags `packages/dep/v0.0.1`, `packages/dep/v0.0.2` → version `v0.0.2`.
 - **`--all` module paths:**
@@ -47,11 +53,15 @@
   - `example.com/mono` / `example.com/mono/lib` — same-toplevel local replace skip
   - Nested owner: monorepo owner with `packages/dep` module path
     `example.com/lib/dep`, tags `packages/dep/v0.1.0`, `packages/dep/v0.2.0`
-- **Stdout dir apply:** `dep-update <module> -> v0.0.2` (+ optional tag form)
-- **Stdout `--all` apply:** pin lines + `go mod tidy ok  module …` + summary
-- **Dry-run dir:** `would: dep-update …`
+- **Stdout dir apply:** pin line(s) then `go mod tidy ok  module …` or
+  `skip tidy  module …  (vendor/)` per consumer. No dir-mode summary.
+- **Stdout `--all` apply:** pin lines + tidy/skip + summary
+- **Dry-run dir:** `would: dep-update …` + `would: go mod tidy …` or
+  `would: skip tidy  module …  (vendor/)`
 - **Dry-run `--all`:** `would: dep-update …` + `would: go mod tidy  module …` +
   `dep-update: would update N, already A, skipped S`
+- **Tidy pin:** `go 1.22` → wrapper `$InstallDir/go1.22.12/bin/go`; versioned-tidy
+  uses `go 1.19` → `go1.19.13`.
 
 ```go
 import (
@@ -60,12 +70,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/withgo"
 	"github.com/xhd2015/gitops/git/git_isolated"
 )
 
@@ -77,11 +89,16 @@ const (
 	modDep2     = "example.com/dep2"
 
 	modApp      = "example.com/app"
+	modAppPkg   = "example.com/app/pkg"
+	modOther    = "example.com/other"
 	modLib      = "example.com/lib"
 	modLibDep   = "example.com/lib/dep"
 	modExternal = "example.com/external"
 	modMono     = "example.com/mono"
 	modMonoLib  = "example.com/mono/lib"
+
+	pinGo122 = "go1.22.12"
+	pinGo119 = "go1.19.13"
 )
 
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
@@ -97,6 +114,13 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	}
 	req.RepoDir = workRoot
 	req.InProcess = true
+	req.InstallDir = filepath.Join(workRoot, "installed")
+	req.ExtraEnv = append(req.ExtraEnv, "HOME="+workRoot)
+	_ = seedHostGoWrapper(t, req.InstallDir, pinGo122)
+	req.WithGo = withgo.ResolveOptions{
+		InstallDir: req.InstallDir,
+		Download:   false,
+	}
 	ensureDepUpdateHelpersUsed()
 	return nil
 }
@@ -165,8 +189,13 @@ func gitTag(t *testing.T, repo, tag string) {
 
 func writeGoMod(t *testing.T, dir, modulePath, body string) {
 	t.Helper()
+	writeGoModVersion(t, dir, modulePath, "1.22", body)
+}
+
+func writeGoModVersion(t *testing.T, dir, modulePath, goVersion, body string) {
+	t.Helper()
 	mkdirAll(t, dir)
-	content := "module " + modulePath + "\n\ngo 1.22\n"
+	content := "module " + modulePath + "\n\ngo " + goVersion + "\n"
 	if body != "" {
 		content += "\n" + body
 		if !strings.HasSuffix(content, "\n") {
@@ -224,12 +253,14 @@ func writeConsumerWithReplace(t *testing.T, req *Request, depDir, modulePath, ol
 	body := fmt.Sprintf("require %s %s\n\nreplace %s => %s\n",
 		modulePath, oldVersion, modulePath, depDir)
 	writeGoMod(t, consumer, modConsumer, body)
-	writeLibPkg(t, consumer, "consumer", "Hello")
+	writeFile(t, filepath.Join(consumer, "pkg.go"),
+		fmt.Sprintf("package consumer\n\nimport _ %q\n\nfunc Hello() string { return \"Hello\" }\n", modulePath))
 	consumer = resolvePath(t, consumer)
 	req.RepoDir = consumer
 	req.ConsumerModDir = consumer
 	req.ConsumerGoMod = filepath.Join(consumer, "go.mod")
 	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modConsumer
 }
 
 // setupDropReplaceLatest: consumer has replace+require v0.0.1; dep tagged v0.0.1,v0.0.2.
@@ -267,12 +298,15 @@ func setupTwoTaggedDeps(t *testing.T, req *Request) {
 		modDep, modDep2, modDep, dep, modDep2, dep2,
 	)
 	writeGoMod(t, consumer, modConsumer, body)
-	writeLibPkg(t, consumer, "consumer", "Hello")
+	writeFile(t, filepath.Join(consumer, "pkg.go"),
+		fmt.Sprintf("package consumer\n\nimport (\n\t_ %q\n\t_ %q\n)\n\nfunc Hello() string { return \"Hello\" }\n",
+			modDep, modDep2))
 	consumer = resolvePath(t, consumer)
 	req.RepoDir = consumer
 	req.ConsumerModDir = consumer
 	req.ConsumerGoMod = filepath.Join(consumer, "go.mod")
 	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modConsumer
 }
 
 // setupNoTagsDep: git dep module with no version tags.
@@ -720,6 +754,178 @@ func setupAllNoTagOwner(t *testing.T, req *Request) {
 	writeProjectsJSON(t, req.WrkHome, lib)
 }
 
+// seedHostGoWrapper writes $installDir/<pin>/bin/go that records GOROOT/PATH0
+// then execs the host go so real `go mod tidy` still works. Returns last-run path.
+func seedHostGoWrapper(t *testing.T, installDir, pin string) string {
+	t.Helper()
+	hostGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("look up host go: %v", err)
+	}
+	dest := filepath.Join(installDir, pin)
+	bin := filepath.Join(dest, "bin", "go")
+	record := filepath.Join(dest, "last-run")
+	script := fmt.Sprintf(`#!/bin/sh
+{
+  printf 'GOROOT=%%s\n' "$GOROOT"
+  IFS=:
+  set -- $PATH
+  printf 'PATH0=%%s\n' "$1"
+} > %q
+exec %q "$@"
+`, record, hostGo)
+	writeFile(t, bin, script)
+	if err := os.Chmod(bin, 0o755); err != nil {
+		t.Fatalf("chmod go wrapper %s: %v", bin, err)
+	}
+	return record
+}
+
+// enableDirModeTidyProxy publishes tagged dir-mode deps under file:// GOPROXY.
+func enableDirModeTidyProxy(t *testing.T, req *Request) {
+	t.Helper()
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	if req.DepDir != "" && req.WantVersion != "" {
+		seedFileModuleProxy(t, proxyRoot, modDep, req.WantVersion, req.DepDir)
+		seedFileModuleProxy(t, proxyRoot, modDep, "v0.0.1", req.DepDir)
+	}
+	if req.Dep2Dir != "" && req.WantVersion2 != "" {
+		seedFileModuleProxy(t, proxyRoot, modDep2, req.WantVersion2, req.Dep2Dir)
+		seedFileModuleProxy(t, proxyRoot, modDep2, "v0.1.0", req.Dep2Dir)
+	}
+	enableFileModuleProxy(t, req, proxyRoot)
+}
+
+func writeRequireReplaceBody(modulePath, oldVersion, depDir string) string {
+	return fmt.Sprintf("require %s %s\n\nreplace %s => %s\n",
+		modulePath, oldVersion, modulePath, depDir)
+}
+
+// setupFanOutRequirers: git workspace; root example.com/app and pkg/ both require dep.
+func setupFanOutRequirers(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedRootTaggedDep(t, req.WorkRoot, "dep", modDep, "v0.0.1", "v0.0.2")
+	req.DepDir = dep
+	req.WantVersion = "v0.0.2"
+
+	ws := filepath.Join(req.WorkRoot, "workspace")
+	initGitRepoOnMain(t, ws)
+	body := writeRequireReplaceBody(modDep, "v0.0.1", dep)
+	writeGoMod(t, ws, modApp, body)
+	writeConsumerMainWithImports(t, ws, modDep)
+
+	pkg := filepath.Join(ws, "pkg")
+	writeGoMod(t, pkg, modAppPkg, body)
+	writeConsumerMainWithImports(t, pkg, modDep)
+	gitCommitAll(t, ws, "init fan-out consumers")
+
+	ws = resolvePath(t, ws)
+	pkg = resolvePath(t, pkg)
+	req.RepoDir = ws
+	req.ConsumerModDir = ws
+	req.ConsumerGoMod = filepath.Join(ws, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = pkg
+	req.Consumer2GoMod = filepath.Join(pkg, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modAppPkg
+	enableDirModeTidyProxy(t, req)
+}
+
+// setupSkipNonRequirer: git workspace with app requiring dep and sibling other that does not.
+func setupSkipNonRequirer(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedRootTaggedDep(t, req.WorkRoot, "dep", modDep, "v0.0.1", "v0.0.2")
+	req.DepDir = dep
+	req.WantVersion = "v0.0.2"
+
+	ws := filepath.Join(req.WorkRoot, "workspace")
+	initGitRepoOnMain(t, ws)
+	app := filepath.Join(ws, "app")
+	writeGoMod(t, app, modApp, writeRequireReplaceBody(modDep, "v0.0.1", dep))
+	writeConsumerMainWithImports(t, app, modDep)
+
+	other := filepath.Join(ws, "other")
+	writeGoMod(t, other, modOther, "")
+	writeLibPkg(t, other, "other", "Hi")
+	gitCommitAll(t, ws, "init skip-non-requirer")
+
+	ws = resolvePath(t, ws)
+	app = resolvePath(t, app)
+	other = resolvePath(t, other)
+	req.RepoDir = ws
+	req.ConsumerModDir = app
+	req.ConsumerGoMod = filepath.Join(app, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = other
+	req.Consumer2GoMod = filepath.Join(other, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modOther
+	enableDirModeTidyProxy(t, req)
+}
+
+// setupVendorSkipDir: nearest consumer (not git) with empty vendor/ beside go.mod.
+func setupVendorSkipDir(t *testing.T, req *Request) {
+	t.Helper()
+	setupDropReplaceLatest(t, req)
+	vendor := filepath.Join(req.ConsumerModDir, "vendor")
+	mkdirAll(t, vendor)
+	req.VendorDir = vendor
+}
+
+// setupVersionedTidy: nearest consumer with go 1.19; seed go1.19.13 wrapper.
+func setupVersionedTidy(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedRootTaggedDep(t, req.WorkRoot, "dep", modDep, "v0.0.1", "v0.0.2")
+	req.DepDir = dep
+	req.WantVersion = "v0.0.2"
+
+	consumer := filepath.Join(req.WorkRoot, "consumer")
+	writeGoModVersion(t, consumer, modConsumer, "1.19", writeRequireReplaceBody(modDep, "v0.0.1", dep))
+	writeFile(t, filepath.Join(consumer, "pkg.go"),
+		fmt.Sprintf("package consumer\n\nimport _ %q\n\nfunc Hello() string { return \"Hello\" }\n", modDep))
+	consumer = resolvePath(t, consumer)
+	req.RepoDir = consumer
+	req.ConsumerModDir = consumer
+	req.ConsumerGoMod = filepath.Join(consumer, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modConsumer
+	req.WantGoPin = pinGo119
+	req.WrapperRecord = seedHostGoWrapper(t, req.InstallDir, pinGo119)
+	enableDirModeTidyProxy(t, req)
+}
+
+// setupNoConsumerRequires: git repo whose go.mod does not require the dep.
+func setupNoConsumerRequires(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedRootTaggedDep(t, req.WorkRoot, "dep", modDep, "v0.0.1", "v0.0.2")
+	req.DepDir = dep
+	req.WantVersion = "v0.0.2"
+
+	ws := filepath.Join(req.WorkRoot, "workspace")
+	initGitRepoOnMain(t, ws)
+	writeGoMod(t, ws, modApp, "")
+	writeLibPkg(t, ws, "app", "Hi")
+	gitCommitAll(t, ws, "init no-requirer")
+	ws = resolvePath(t, ws)
+	req.RepoDir = ws
+	req.ConsumerModDir = ws
+	req.ConsumerGoMod = filepath.Join(ws, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+}
+
+// setupAllVendorSkip: --all cross-project outdated + empty vendor/ (skip tidy).
+func setupAllVendorSkip(t *testing.T, req *Request) {
+	t.Helper()
+	setupAllWithProxy(t, req)
+	vendor := filepath.Join(req.ConsumerModDir, "vendor")
+	mkdirAll(t, vendor)
+	req.VendorDir = vendor
+}
+
 // --- asserts ---
 
 func assertErrIsNil(t *testing.T, err error) {
@@ -916,35 +1122,97 @@ func assertGoSumExists(t *testing.T, consumerModDir string) {
 
 func assertTidyOkLine(t *testing.T, stdout, consumerModule string) {
 	t.Helper()
-	// go mod tidy ok  module <consumer-module-path>
+	needle := "go mod tidy ok  module " + consumerModule
 	found := false
 	for _, line := range strings.Split(stdout, "\n") {
-		trim := strings.TrimSpace(line)
-		if strings.Contains(trim, "go mod tidy ok") && strings.Contains(trim, consumerModule) {
+		if strings.TrimSpace(line) == needle {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("stdout missing go mod tidy ok for %s; got:\n%s", consumerModule, stdout)
+		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
 	}
 }
 
 func assertWouldTidyLine(t *testing.T, stdout, consumerModule string) {
 	t.Helper()
-	// would: go mod tidy  module <consumer-module-path>
+	needle := "would: go mod tidy  module " + consumerModule
 	found := false
 	for _, line := range strings.Split(stdout, "\n") {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "would:") &&
-			strings.Contains(trim, "go mod tidy") &&
-			strings.Contains(trim, consumerModule) {
+		if strings.TrimSpace(line) == needle {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("stdout missing would: go mod tidy for %s; got:\n%s", consumerModule, stdout)
+		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
+	}
+}
+
+func assertSkipTidyLine(t *testing.T, stdout, consumerModule string) {
+	t.Helper()
+	needle := "skip tidy  module " + consumerModule + "  (vendor/)"
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.TrimSpace(line) == needle {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
+	}
+}
+
+func assertWouldSkipTidyLine(t *testing.T, stdout, consumerModule string) {
+	t.Helper()
+	needle := "would: skip tidy  module " + consumerModule + "  (vendor/)"
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.TrimSpace(line) == needle {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
+	}
+}
+
+func assertVendorUntouched(t *testing.T, vendorDir string) {
+	t.Helper()
+	if vendorDir == "" {
+		t.Fatal("VendorDir required")
+	}
+	fi, err := os.Stat(vendorDir)
+	if err != nil || !fi.IsDir() {
+		t.Fatalf("vendor/ dir should remain at %s: %v", vendorDir, err)
+	}
+	if _, err := os.Stat(filepath.Join(vendorDir, "modules.txt")); err == nil {
+		t.Fatalf("vendor/modules.txt created (go mod vendor must not run): %s", vendorDir)
+	}
+}
+
+func assertGoModUnchangedAt(t *testing.T, path, baseline string) {
+	t.Helper()
+	if path == "" || baseline == "" {
+		t.Fatal("path and baseline required")
+	}
+	got := readFile(t, path)
+	if got != baseline {
+		t.Fatalf("go.mod mutated unexpectedly\n got:\n%s\nwant:\n%s", got, baseline)
+	}
+}
+
+func assertVersionedGoUsed(t *testing.T, req *Request) {
+	t.Helper()
+	if req.WrapperRecord == "" || req.WantGoPin == "" {
+		t.Fatal("WrapperRecord and WantGoPin required")
+	}
+	rec := readFile(t, req.WrapperRecord)
+	if !strings.Contains(rec, req.WantGoPin) {
+		t.Fatalf("wrapper record missing pin %s:\n%s", req.WantGoPin, rec)
 	}
 }
 
@@ -1026,9 +1294,24 @@ func ensureDepUpdateHelpersUsed() {
 	_ = assertStdoutTrailingNewline
 	_ = assertWarningStderr
 	_ = writeGoMod
+	_ = writeGoModVersion
 	_ = writeLibPkg
 	_ = initGitRepoOnMain
 	_ = gitCommitAll
 	_ = gitTag
+	_ = seedHostGoWrapper
+	_ = enableDirModeTidyProxy
+	_ = writeRequireReplaceBody
+	_ = setupFanOutRequirers
+	_ = setupSkipNonRequirer
+	_ = setupVendorSkipDir
+	_ = setupVersionedTidy
+	_ = setupNoConsumerRequires
+	_ = setupAllVendorSkip
+	_ = assertSkipTidyLine
+	_ = assertWouldSkipTidyLine
+	_ = assertVendorUntouched
+	_ = assertGoModUnchangedAt
+	_ = assertVersionedGoUsed
 }
 ```

@@ -7,7 +7,7 @@
 cwd consumer (or linked worktree)
   -> wrk --dep-update --all [--dry-run]
   -> BuildInventory ownership + latest tags
-  -> pin outdated inventory-owned requires; tidy affected modules
+  -> pin outdated inventory-owned requires; same versioned tidy helper (vendor skip)
   -> skip external / same-toplevel filesystem replace; warn no-tag
 ```
 

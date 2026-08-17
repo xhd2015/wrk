@@ -4,6 +4,7 @@
 - Stdout contains `dep-update example.com/dep -> v0.0.2`.
 - If tag parenthetical present, may include `packages/dep/v0.0.2` (implementer-owned).
 - go.mod: no replace; require v0.0.2 (not the full tag string as version).
+- `go mod tidy ok` for the consumer; go.sum exists.
 
 ## Side Effects
 
@@ -31,7 +32,9 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if strings.Contains(body, "require "+modDep+" packages/") {
 		t.Fatalf("require must not use full tag path as version:\n%s", body)
 	}
+	assertTidyOkLine(t, resp.Stdout, req.WantConsumerModule)
 	assertNoReplaceFor(t, req.ConsumerGoMod, modDep)
+	assertGoSumExists(t, req.ConsumerModDir)
 	// Soft: if product prints tag form, prefer WantTagHint.
 	if req.WantTagHint != "" && strings.Contains(resp.Stdout, "tag") {
 		if !strings.Contains(resp.Stdout, req.WantTagHint) &&
@@ -40,6 +43,5 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 			_ = req.WantTagHint
 		}
 	}
-	assertNoTidyArtifacts(t, req)
 }
 ```
