@@ -267,6 +267,7 @@ func openIterm(dir string, mode iterm2.OpenMode, followUps []string) error {
 	cfg := &iterm2.Config{
 		Mode:             mode,
 		FollowUpCommands: followUps,
+		SafeInputIgnore:  true,
 	}
 	if out := os.Getenv("KOOL_ITERM2_SCRIPT_OUT"); out != "" {
 		cfg.Osascript = func(script string) error {
