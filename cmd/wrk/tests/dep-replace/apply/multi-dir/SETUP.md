@@ -5,7 +5,7 @@
 ```
 consumer + dep + dep2
   -> wrk --dep-replace <dep> <dep2>
-  -> two dep-replace lines
+  -> two dep headers; both replaces
   -> both absolute replaces in go.mod
   -> exit 0
 ```

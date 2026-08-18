@@ -5,7 +5,7 @@
 ```
 consumer + tagged dep with replace
   -> wrk --dep-update <dep> --dry-run
-  -> would: dep-update …; would: go mod tidy | would: skip tidy (vendor/)
+  -> ==== dep-update (dry-run) ====; would: pin; would: go mod tidy | would: skip tidy (vendor/)
   -> go.mod unchanged
 ```
 

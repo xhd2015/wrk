@@ -1,14 +1,16 @@
 # Scenario
 
-**Feature**: wrk --dep-replace writes absolute replace into nearest consumer go.mod
+**Feature**: wrk --dep-replace stack fan-out + CLI tree (absolute, no tidy)
 
 ```
-# isolated WRK_HOME + plain go.mod fixtures under WorkRoot (git not required)
+# isolated WRK_HOME; nearest not-git fallback or CollectStackInventory
 consumer go.mod + dep module dir(s)
   -> wrk --dep-replace <dir>… [--dry-run]
-  -> dry-run: would: dep-replace <mod> => <abs>; no go.mod write; no tidy
-  -> apply: dep-replace <mod> => <abs>; absolute replace; no tidy
-  -> multi-arg fail-fast; exclusive / empty / missing / not-module: Error non-zero
+  -> dry-run: ==== dep-replace (dry-run) ====; would: replace; no write
+  -> apply: ==== dep-replace ====; checkout → module → replace
+  -> git stack: gate require|existing replace; self skipped
+  -> not-git nearest: D7 write even with no require
+  -> exclusive / empty / missing / not-module / zero gated: wrk: error; no banner
 ```
 
 ## Preconditions
@@ -17,8 +19,11 @@ consumer go.mod + dep module dir(s)
 - Go toolchain on PATH (uses `go mod edit` via product/library).
 - Per-leaf `t.TempDir()` WorkRoot; `WRK_HOME={WorkRoot}/.wrk`.
 - L2: every leaf sets `req.InProcess = true` (wrkcli.Capture).
-- **No git required** for replace success paths (unlike `--dep-update` / pin-locals stack).
-- Offline-friendly: no network needed (`go mod edit` only; no tidy).
+- Existing nearest leaves stay **non-git** (D7 walk-up fallback). Stack leaves
+  init a primary git repo plus an independent `external/kool` (or
+  `external/dep`) git repo and a **local filesystem replace** so
+  `CollectStackInventory` BFS includes it.
+- Offline-friendly: no network / no GOPROXY (`go mod edit` only; no tidy).
 
 ## Steps
 
@@ -29,12 +34,17 @@ consumer go.mod + dep module dir(s)
 ## Context
 
 - **Module paths** used in fixtures:
-  - `example.com/consumer` — nearest consumer
+  - `example.com/consumer` — nearest consumer (not-git apply leaves)
+  - `example.com/app` — stack primary
+  - `example.com/kool` — stack other-checkout at `external/kool`
   - `example.com/dep` — primary dep
   - `example.com/dep2` — second dep (multi-dir)
-- **Stdout apply line:** `dep-replace <module> => <abs>`
-- **Dry-run:** prefix `would: `
-- **Consumer resolution:** walk up from `RepoDir` (Capture Dir) to nearest go.mod.
+- **Stdout apply:** `==== dep-replace ====`; `dep` headers; checkout →
+  module → `replace`; `dep-replace: replaced in N modules in C checkouts`
+- **Dry-run:** `==== dep-replace (dry-run) ====`; `would: replace`;
+  `would replace in N modules in C checkouts`
+- **Not-git consumer resolution:** walk up from `RepoDir` to nearest go.mod.
+- **Git consumer set:** `CollectStackInventory(cwd)`.
 - Absolute NewPath must match resolved dep dir (EvalSymlinks-normalized when needed).
 
 ```go
@@ -46,6 +56,7 @@ import (
 	"testing"
 
 	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/gitops/git/git_isolated"
 )
 
 const (
@@ -54,6 +65,11 @@ const (
 	modConsumer = "example.com/consumer"
 	modDep      = "example.com/dep"
 	modDep2     = "example.com/dep2"
+
+	modApp       = "example.com/app"
+	modKool      = "example.com/kool"
+	checkoutKool = "external/kool"
+	checkoutDep  = "external/dep"
 )
 
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
@@ -156,6 +172,10 @@ func setupConsumerWithDep(t *testing.T, req *Request, requireDep bool) {
 	req.ConsumerGoMod = filepath.Join(consumer, "go.mod")
 	req.DepDir = dep
 	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modConsumer
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 }
 
 // setupConsumerTwoDeps: consumer + dep + dep2 modules.
@@ -171,6 +191,9 @@ func setupConsumerTwoDeps(t *testing.T, req *Request) {
 	writeFile(t, req.ConsumerGoMod, gm)
 	req.Dep2Dir = resolvePath(t, dep2)
 	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 }
 
 // setupNestedConsumerWorkDir: consumer at root; RepoDir = consumer/sub (no go.mod).
@@ -182,6 +205,9 @@ func setupNestedConsumerWorkDir(t *testing.T, req *Request) {
 	mkdirAll(t, sub)
 	req.RepoDir = resolvePath(t, sub)
 	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantCheckout = ".."
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
 }
 
 // setupDepOnly: dep module exists; no consumer go.mod under WorkRoot (error path).
@@ -193,6 +219,282 @@ func setupDepOnly(t *testing.T, req *Request) {
 	req.DepDir = resolvePath(t, dep)
 	// RepoDir stays WorkRoot (empty of go.mod)
 	req.RepoDir = req.WorkRoot
+}
+
+func runGitIsolated(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	git_isolated.MustRun(t, dir, args...)
+}
+
+func initGitRepoOnMain(t *testing.T, path string) {
+	t.Helper()
+	mkdirAll(t, path)
+	if err := git_isolated.Init(path, "main"); err != nil {
+		t.Fatalf("git init %s: %v", path, err)
+	}
+	runGitIsolated(t, path, "config", "user.email", "test@test.com")
+	runGitIsolated(t, path, "config", "user.name", "Test")
+}
+
+func gitCommitAll(t *testing.T, repo, subject string) {
+	t.Helper()
+	runGitIsolated(t, repo, "add", "-A")
+	runGitIsolated(t, repo, "commit", "-m", subject, "--allow-empty")
+}
+
+func initStackPrimary(t *testing.T, req *Request) string {
+	t.Helper()
+	primary := filepath.Join(req.WorkRoot, "primary")
+	initGitRepoOnMain(t, primary)
+	writeFile(t, filepath.Join(primary, ".gitignore"), "/external\n")
+	return primary
+}
+
+func seedExternalGitModule(t *testing.T, primary, name, modulePath, goModBody string) string {
+	t.Helper()
+	dir := filepath.Join(primary, "external", name)
+	initGitRepoOnMain(t, dir)
+	writeGoMod(t, dir, modulePath, goModBody)
+	return resolvePath(t, dir)
+}
+
+func seedPlainDep(t *testing.T, req *Request) string {
+	t.Helper()
+	dep := filepath.Join(req.WorkRoot, "dep")
+	writeGoMod(t, dep, modDep, "")
+	writeLibPkg(t, dep, "dep", "Version")
+	dep = resolvePath(t, dep)
+	req.DepDir = dep
+	return dep
+}
+
+func seedPlainDep2(t *testing.T, req *Request) string {
+	t.Helper()
+	dep2 := filepath.Join(req.WorkRoot, "dep2")
+	writeGoMod(t, dep2, modDep2, "")
+	writeLibPkg(t, dep2, "dep2", "V2")
+	dep2 = resolvePath(t, dep2)
+	req.Dep2Dir = dep2
+	return dep2
+}
+
+func writeConsumerMainWithImports(t *testing.T, dir string, importPaths ...string) {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("package main\n\n")
+	if len(importPaths) > 0 {
+		b.WriteString("import (\n")
+		for _, p := range importPaths {
+			fmt.Fprintf(&b, "\t_ %q\n", p)
+		}
+		b.WriteString(")\n\n")
+	}
+	b.WriteString("func main() {}\n")
+	writeFile(t, filepath.Join(dir, "main.go"), b.String())
+}
+
+// setupStackOtherCheckout: primary + external/kool both require dep.
+func setupStackOtherCheckout(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedPlainDep(t, req)
+	_ = dep
+
+	primary := initStackPrimary(t, req)
+	kool := seedExternalGitModule(t, primary, "kool", modKool, "require "+modDep+" v0.0.1\n")
+	writeLibPkg(t, kool, "kool", "Hi")
+	gitCommitAll(t, kool, "kool requirer")
+
+	body := fmt.Sprintf(
+		"require (\n\t%s v0.0.1\n\t%s v0.0.0\n)\n\nreplace %s => ./external/kool\n",
+		modDep, modKool, modKool,
+	)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep, modKool)
+	gitCommitAll(t, primary, "primary + replace kool")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = kool
+	req.Consumer2GoMod = filepath.Join(kool, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modKool
+	req.WantCheckout = "."
+	req.WantCheckout2 = checkoutKool
+	req.WantUpdated = 2
+	req.WantCheckouts = 2
+}
+
+// setupStackSkipNonConsumer: kool has neither require nor replace for dep.
+func setupStackSkipNonConsumer(t *testing.T, req *Request) {
+	t.Helper()
+	_ = seedPlainDep(t, req)
+
+	primary := initStackPrimary(t, req)
+	kool := seedExternalGitModule(t, primary, "kool", modKool, "")
+	writeLibPkg(t, kool, "kool", "Hi")
+	gitCommitAll(t, kool, "kool no require")
+
+	body := fmt.Sprintf(
+		"require (\n\t%s v0.0.1\n\t%s v0.0.0\n)\n\nreplace %s => ./external/kool\n",
+		modDep, modKool, modKool,
+	)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep, modKool)
+	gitCommitAll(t, primary, "primary + replace kool")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = kool
+	req.Consumer2GoMod = filepath.Join(kool, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modKool
+	req.WantCheckout = "."
+	req.WantCheckout2 = checkoutKool
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+}
+
+// setupStackExistingReplace: kool has replace for dep but no require (still gated).
+func setupStackExistingReplace(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedPlainDep(t, req)
+	oldAbs := filepath.Join(req.WorkRoot, "old-dep-placeholder")
+	mkdirAll(t, oldAbs)
+	oldAbs = resolvePath(t, oldAbs)
+
+	primary := initStackPrimary(t, req)
+	koolBody := fmt.Sprintf("replace %s => %s\n", modDep, oldAbs)
+	kool := seedExternalGitModule(t, primary, "kool", modKool, koolBody)
+	writeLibPkg(t, kool, "kool", "Hi")
+	gitCommitAll(t, kool, "kool existing replace")
+
+	body := fmt.Sprintf(
+		"require (\n\t%s v0.0.1\n\t%s v0.0.0\n)\n\nreplace %s => ./external/kool\n",
+		modDep, modKool, modKool,
+	)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep, modKool)
+	gitCommitAll(t, primary, "primary + replace kool")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = kool
+	req.Consumer2GoMod = filepath.Join(kool, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modKool
+	req.WantCheckout = "."
+	req.WantCheckout2 = checkoutKool
+	req.WantUpdated = 2
+	req.WantCheckouts = 2
+	_ = dep
+}
+
+// setupStackSkipSelf: dep checkout lives on the stack via replace; self not rewritten.
+func setupStackSkipSelf(t *testing.T, req *Request) {
+	t.Helper()
+	primary := initStackPrimary(t, req)
+	dep := seedExternalGitModule(t, primary, "dep", modDep, "")
+	writeLibPkg(t, dep, "dep", "Version")
+	gitCommitAll(t, dep, "dep init")
+	dep = resolvePath(t, dep)
+	req.DepDir = dep
+
+	body := fmt.Sprintf("require %s v0.0.1\n\nreplace %s => ./external/dep\n", modDep, modDep)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep)
+	gitCommitAll(t, primary, "primary replace dep")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = dep
+	req.Consumer2GoMod = filepath.Join(dep, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modDep
+	req.WantCheckout = "."
+	req.WantCheckout2 = checkoutDep
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+}
+
+// setupMultiDirStack: primary requires dep+dep2; kool requires only dep.
+func setupMultiDirStack(t *testing.T, req *Request) {
+	t.Helper()
+	_ = seedPlainDep(t, req)
+	_ = seedPlainDep2(t, req)
+
+	primary := initStackPrimary(t, req)
+	kool := seedExternalGitModule(t, primary, "kool", modKool, "require "+modDep+" v0.0.1\n")
+	writeLibPkg(t, kool, "kool", "Hi")
+	gitCommitAll(t, kool, "kool requires dep only")
+
+	body := fmt.Sprintf(
+		"require (\n\t%s v0.0.1\n\t%s v0.0.1\n\t%s v0.0.0\n)\n\nreplace %s => ./external/kool\n",
+		modDep, modDep2, modKool, modKool,
+	)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep, modDep2, modKool)
+	gitCommitAll(t, primary, "primary requires both")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = kool
+	req.Consumer2GoMod = filepath.Join(kool, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modKool
+	req.WantCheckout = "."
+	req.WantCheckout2 = checkoutKool
+	req.WantUpdated = 2
+	req.WantCheckouts = 2
+}
+
+// setupStackZeroGated: git stack whose modules neither require nor replace dep.
+func setupStackZeroGated(t *testing.T, req *Request) {
+	t.Helper()
+	_ = seedPlainDep(t, req)
+
+	primary := initStackPrimary(t, req)
+	kool := seedExternalGitModule(t, primary, "kool", modKool, "")
+	writeLibPkg(t, kool, "kool", "Hi")
+	gitCommitAll(t, kool, "kool empty")
+
+	body := fmt.Sprintf(
+		"require %s v0.0.0\n\nreplace %s => ./external/kool\n",
+		modKool, modKool,
+	)
+	writeGoMod(t, primary, modApp, body)
+	writeLibPkg(t, primary, "app", "Hi")
+	gitCommitAll(t, primary, "primary no dep gate")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = kool
+	req.Consumer2GoMod = filepath.Join(kool, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modKool
 }
 
 // --- assert helpers ---
@@ -396,8 +698,127 @@ func assertNoTidyArtifacts(t *testing.T, req *Request) {
 	}
 	sum := filepath.Join(req.ConsumerModDir, "go.sum")
 	if _, err := os.Stat(sum); err == nil {
-		// Allowed only if baseline already had go.sum (we never create one).
 		t.Fatalf("go.sum created (tidy must not run): %s", sum)
+	}
+	if req.Consumer2ModDir != "" {
+		sum2 := filepath.Join(req.Consumer2ModDir, "go.sum")
+		if _, err := os.Stat(sum2); err == nil {
+			t.Fatalf("go.sum created on other checkout (tidy must not run): %s", sum2)
+		}
+	}
+}
+
+func wantCheckoutsOf(req *Request) int {
+	if req.WantCheckouts > 0 {
+		return req.WantCheckouts
+	}
+	return 1
+}
+
+func checkoutLabelOf(req *Request) string {
+	if req.WantCheckout != "" {
+		return req.WantCheckout
+	}
+	return "."
+}
+
+func assertApplyBanner(t *testing.T, stdout string) {
+	t.Helper()
+	if !strings.Contains(stdout, "==== dep-replace ====") {
+		t.Fatalf("stdout missing apply banner ==== dep-replace ====; got:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "==== dep-replace (dry-run) ====") {
+		t.Fatalf("apply must not use dry-run banner; got:\n%s", stdout)
+	}
+}
+
+func assertDryRunBanner(t *testing.T, stdout string) {
+	t.Helper()
+	if !strings.Contains(stdout, "==== dep-replace (dry-run) ====") {
+		t.Fatalf("stdout missing dry-run banner ==== dep-replace (dry-run) ====; got:\n%s", stdout)
+	}
+}
+
+func assertNoBanner(t *testing.T, stdout string) {
+	t.Helper()
+	if strings.Contains(stdout, "====") {
+		t.Fatalf("must not print banner; got:\n%s", stdout)
+	}
+}
+
+func assertDepHeader(t *testing.T, stdout, modulePath string) {
+	t.Helper()
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "dep  ") && strings.Contains(trim, modulePath) && strings.Contains(trim, "=>") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing dep header %s =>; got:\n%s", modulePath, stdout)
+	}
+}
+
+func assertReplaceLine(t *testing.T, stdout, modulePath string) {
+	t.Helper()
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.Contains(trim, "replace  "+modulePath) && strings.Contains(trim, "=>") &&
+			!strings.HasPrefix(trim, "would:") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing replace  %s =>; got:\n%s", modulePath, stdout)
+	}
+}
+
+func assertWouldReplaceLine(t *testing.T, stdout, modulePath string) {
+	t.Helper()
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "would: replace  ") && strings.Contains(trim, modulePath) && strings.Contains(trim, "=>") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing would: replace  %s =>; got:\n%s", modulePath, stdout)
+	}
+	for _, line := range strings.Split(stdout, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "replace  ") {
+			t.Fatalf("dry-run must not emit bare replace lines: %q", trim)
+		}
+	}
+}
+
+func assertDirSummary(t *testing.T, stdout string, modules, checkouts int, dryRun bool) {
+	t.Helper()
+	var needle string
+	if dryRun {
+		needle = fmt.Sprintf("dep-replace: would replace in %d modules in %d checkouts", modules, checkouts)
+	} else {
+		needle = fmt.Sprintf("dep-replace: replaced in %d modules in %d checkouts", modules, checkouts)
+	}
+	if !strings.Contains(stdout, needle) {
+		t.Fatalf("stdout missing summary %q; got:\n%s", needle, stdout)
+	}
+}
+
+func assertGoModUnchangedAt(t *testing.T, path, baseline string) {
+	t.Helper()
+	if path == "" || baseline == "" {
+		t.Fatal("path and baseline required")
+	}
+	got := readFile(t, path)
+	if got != baseline {
+		t.Fatalf("go.mod mutated unexpectedly\n got:\n%s\nwant:\n%s", got, baseline)
 	}
 }
 
@@ -406,6 +827,17 @@ func ensureDepReplaceHelpersUsed() {
 	_ = setupConsumerTwoDeps
 	_ = setupNestedConsumerWorkDir
 	_ = setupDepOnly
+	_ = setupStackOtherCheckout
+	_ = setupStackSkipNonConsumer
+	_ = setupStackExistingReplace
+	_ = setupStackSkipSelf
+	_ = setupMultiDirStack
+	_ = setupStackZeroGated
+	_ = seedPlainDep
+	_ = seedPlainDep2
+	_ = initStackPrimary
+	_ = seedExternalGitModule
+	_ = writeConsumerMainWithImports
 	_ = assertAbsoluteReplace
 	_ = assertNoReplaceFor
 	_ = assertDepReplaceLine
@@ -413,6 +845,16 @@ func ensureDepReplaceHelpersUsed() {
 	_ = assertGoModUnchanged
 	_ = assertMutualExclusion
 	_ = assertNoTidyArtifacts
+	_ = assertApplyBanner
+	_ = assertDryRunBanner
+	_ = assertNoBanner
+	_ = assertDepHeader
+	_ = assertReplaceLine
+	_ = assertWouldReplaceLine
+	_ = assertDirSummary
+	_ = assertGoModUnchangedAt
+	_ = wantCheckoutsOf
+	_ = checkoutLabelOf
 	_ = writeGoMod
 	_ = writeLibPkg
 }

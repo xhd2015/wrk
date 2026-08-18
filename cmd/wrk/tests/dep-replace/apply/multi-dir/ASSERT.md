@@ -1,9 +1,23 @@
+## Expected Output
+
+```
+==== dep-replace ====
+dep  example.com/dep => <abs>
+dep  example.com/dep2 => <abs2>
+
+  checkout  .
+    module  example.com/consumer
+      replace  example.com/dep => <abs>
+      replace  example.com/dep2 => <abs2>
+
+dep-replace: replaced in 1 modules in 1 checkouts
+```
+
 ## Expected
 
 - Exit 0.
-- Stdout has `dep-replace` lines for both `example.com/dep` and `example.com/dep2`.
+- Two argv `dep` headers (argv order); one consumer; both replaces; no tidy.
 - go.mod has absolute replaces for both modules.
-- No tidy / no go.sum.
 
 ## Side Effects
 
@@ -15,6 +29,7 @@
 
 ```go
 import (
+	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
 )
 
@@ -22,8 +37,22 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
-	assertDepReplaceLine(t, resp.Stdout, modDep, req.DepDir)
-	assertDepReplaceLine(t, resp.Stdout, modDep2, req.Dep2Dir)
+	assert.Output(t, resp.Stdout, `---
+version: 3
+__ABS__: type=string
+__ABS2__: type=string
+---
+==== dep-replace ====
+dep  example\.com/dep => __ABS__
+dep  example\.com/dep2 => __ABS2__
+
+  checkout  \.
+    module  example\.com/consumer
+      replace  example\.com/dep => __ABS__
+      replace  example\.com/dep2 => __ABS2__
+
+dep-replace: replaced in 1 modules in 1 checkouts
+`)
 	assertAbsoluteReplace(t, req.ConsumerGoMod, modDep, req.DepDir)
 	assertAbsoluteReplace(t, req.ConsumerGoMod, modDep2, req.Dep2Dir)
 	assertNoTidyArtifacts(t, req)

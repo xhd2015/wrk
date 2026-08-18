@@ -5,9 +5,10 @@
 ```
 # lib tagged v1.2.3; app already requires example.com/lib@v1.2.3
 cwd=app -> wrk --dep-update --all --dry-run
+  -> ==== dep-update ==== (or dry-run banner)
   -> dep-update: already up to date
-  -> dep-update: updated 0, already 1, skipped 0
-  -> no would: dep-update pin lines
+  -> dep-update: updated 0, already 1, skipped 0 in 1 checkouts
+  -> no pin tree
   -> go.mod unchanged
 ```
 

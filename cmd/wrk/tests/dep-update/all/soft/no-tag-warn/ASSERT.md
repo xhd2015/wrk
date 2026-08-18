@@ -32,16 +32,14 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		t.Fatalf("warning should mention tag/version, got %q", resp.Stderr)
 	}
 	// No pin success for the untagged module.
+	assertNoPinFor(t, resp.Stdout, modLib)
 	for _, line := range strings.Split(resp.Stdout, "\n") {
 		trim := strings.TrimSpace(line)
 		if strings.HasPrefix(trim, "dep-update "+modLib) && strings.Contains(trim, "->") {
 			t.Fatalf("must not pin untagged module: %q", trim)
 		}
-		if strings.HasPrefix(trim, "would: dep-update "+modLib) {
-			t.Fatalf("must not plan pin for untagged module: %q", trim)
-		}
 	}
-	assertAllSummary(t, resp.Stdout, req.WantUpdated, req.WantAlready, req.WantSkipped, false)
+	assertAllSummary(t, resp.Stdout, req.WantUpdated, req.WantAlready, req.WantSkipped, wantCheckoutsOf(req), false)
 	assertGoModUnchanged(t, req)
 	assertOwnerGoModUnchanged(t, req)
 }

@@ -5,8 +5,8 @@
 ```
 nearest consumer has replace + require + empty vendor/
   -> wrk --dep-update <dep> --dry-run
-  -> would: dep-update example.com/dep -> v0.0.2
-  -> would: skip tidy  module example.com/consumer  (vendor/)
+  -> would: pin example.com/dep
+  -> would: skip tidy  (vendor/)
   -> go.mod unchanged; vendor/ untouched
 ```
 

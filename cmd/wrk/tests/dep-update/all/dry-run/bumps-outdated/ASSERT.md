@@ -1,18 +1,23 @@
 ## Expected Output
 
 ```
-would: dep-update example.com/lib -> v1.2.3
-would: go mod tidy  module example.com/app
-dep-update: would update 1, already 0, skipped 0
+==== dep-update (dry-run) ====
+
+  checkout  .
+    module  example.com/app
+      would: pin  example.com/lib  v1.0.0 -> v1.2.3
+      would: go mod tidy
+
+dep-update: would update 1, already 0, skipped 0 in 1 checkouts
 ```
 
 ## Expected
 
 - Exit 0.
-- Stdout has `would: dep-update` for `example.com/lib` → `v1.2.3`.
-- Stdout has `would: go mod tidy` for consumer module `example.com/app`.
-- Summary `dep-update: would update 1, already 0, skipped 0`.
-- No bare apply `dep-update ` pin lines (without `would:`).
+- Dry-run banner; **no** argv `dep` header list.
+- `would: pin` for `example.com/lib` v1.0.0 -> v1.2.3.
+- `would: go mod tidy` under the consumer module.
+- Summary `dep-update: would update 1, already 0, skipped 0 in 1 checkouts`.
 - Trailing newline on stdout.
 
 ## Side Effects
@@ -25,6 +30,7 @@ dep-update: would update 1, already 0, skipped 0
 
 ```go
 import (
+	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
 )
 
@@ -32,9 +38,19 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
-	assertWouldDepUpdateLine(t, resp.Stdout, modLib, req.WantVersion)
-	assertWouldTidyLine(t, resp.Stdout, req.WantConsumerModule)
-	assertAllSummary(t, resp.Stdout, req.WantUpdated, req.WantAlready, req.WantSkipped, true)
+	assertNoArgvDepHeader(t, resp.Stdout)
+	assert.Output(t, resp.Stdout, `---
+version: 3
+---
+==== dep-update \(dry-run\) ====
+
+  checkout  \.
+    module  example\.com/app
+      would: pin  example\.com/lib  v1\.0\.0 -> v1\.2\.3
+      would: go mod tidy
+
+dep-update: would update 1, already 0, skipped 0 in 1 checkouts
+`)
 	assertStdoutTrailingNewline(t, resp.Stdout)
 	assertGoModUnchanged(t, req)
 	assertOwnerGoModUnchanged(t, req)

@@ -5,7 +5,7 @@
 ```
 consumer requires example.com/dep; no replace
   -> wrk --dep-replace <dep>
-  -> dep-replace example.com/dep => <abs>
+  -> ==== dep-replace ====; replace example.com/dep => <abs>
   -> go.mod replace absolute (not relative)
   -> no go.sum / no tidy
   -> exit 0

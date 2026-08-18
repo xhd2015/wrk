@@ -1,14 +1,14 @@
 # Scenario
 
-**Feature**: wrk --dep-update --all inventory pull under git toplevel of cwd
+**Feature**: wrk --dep-update --all inventory pull over the unwind stack
 
 ```
-# consumer git toplevel + registered owner modules in WRK_HOME
+# stack consumer set + registered owner modules in WRK_HOME
 cwd consumer (or linked worktree)
   -> wrk --dep-update --all [--dry-run]
-  -> BuildInventory ownership + latest tags
-  -> pin outdated inventory-owned requires; same versioned tidy helper (vendor skip)
-  -> skip external / same-toplevel filesystem replace; warn no-tag
+  -> CollectStackInventory + BuildInventory ownership + latest tags
+  -> pin outdated inventory-owned requires on every stack checkout; same tidy helper
+  -> skip external / same-checkout filesystem replace; warn no-tag
 ```
 
 ## Preconditions
@@ -26,7 +26,7 @@ cwd consumer (or linked worktree)
 ## Context
 
 - Default partner flags only; leaves append `--dry-run` when needed.
-- Blast radius: mutate go.mods under current git toplevel only.
+- Blast radius: mutate go.mods under the stack member Paths (linked worktree Path, not MainRepo).
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {

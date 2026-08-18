@@ -1,11 +1,11 @@
 # Scenario
 
-**Feature**: wrk --dep-replace applies absolute replaces into nearest consumer go.mod
+**Feature**: wrk --dep-replace applies absolute replaces (nearest or stack)
 
 ```
 consumer + dep module(s)
   -> wrk --dep-replace <dir>…
-  -> dep-replace <mod> => <abs>
+  -> ==== dep-replace ====; checkout → module → replace
   -> go.mod gains absolute replace; no tidy
 ```
 

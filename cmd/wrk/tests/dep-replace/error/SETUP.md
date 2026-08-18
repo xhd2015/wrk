@@ -1,6 +1,6 @@
 # Scenario
 
-**Feature**: wrk --dep-replace hard-fails on missing dir, non-module dep, or no consumer go.mod
+**Feature**: wrk --dep-replace hard-fails on missing dir, non-module dep, no consumer go.mod, or zero gated stack consumers
 
 ```
 invalid dep path | plain dir without go.mod | workDir with no go.mod uptree

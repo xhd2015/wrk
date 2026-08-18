@@ -5,8 +5,8 @@
 ```
 consumer replace+require for dep and dep2; both tagged
   -> wrk --dep-update <dep> <dep2>
-  -> two dep-update lines with latest versions
-  -> go mod tidy ok once for example.com/consumer
+  -> two dep headers; both pins; tidy once
+  -> go mod tidy ok under example.com/consumer
   -> both replaces dropped
   -> exit 0
 ```

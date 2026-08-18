@@ -5,8 +5,9 @@
 ```
 consumer has replace + require v0.0.1; dep tags up to v0.0.2
   -> wrk --dep-update <dep> --dry-run
-  -> would: dep-update example.com/dep -> v0.0.2
-  -> would: go mod tidy  module example.com/consumer
+  -> ==== dep-update (dry-run) ====
+  -> would: pin example.com/dep v0.0.1 -> v0.0.2
+  -> would: go mod tidy
   -> go.mod identical to baseline
   -> exit 0
 ```

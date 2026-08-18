@@ -5,9 +5,10 @@
 ```
 consumer + tagged dep(s)
   -> wrk --dep-update <dir>…
-  -> dep-update <mod> -> vN.N.N
+  -> ==== dep-update ====; dep headers; checkout → module → pin
   -> replace dropped; require set
-  -> go mod tidy ok  module …  |  skip tidy  module …  (vendor/)
+  -> go mod tidy ok | skip tidy  (vendor/)
+  -> dep-update: updated N modules in C checkouts
 ```
 
 ## Steps

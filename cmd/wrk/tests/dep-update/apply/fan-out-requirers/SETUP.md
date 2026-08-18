@@ -5,9 +5,9 @@
 ```
 # git workspace: example.com/app and pkg/ example.com/app/pkg both require dep
 cwd=workspace -> wrk --dep-update <dep>
-  -> pin + tidy root app
-  -> pin + tidy pkg
+  -> checkout . ; pin + tidy root app then pkg
   -> both requires @v0.0.2; both go.sum exist
+  -> updated 2 modules in 1 checkouts
 ```
 
 ## Steps

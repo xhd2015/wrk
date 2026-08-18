@@ -26,6 +26,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertExitNonZero(t, resp)
 	assertGoModUnchanged(t, req)
 	assertNotContains(t, resp.Stdout, "dep-replace ")
+	assertNoBanner(t, resp.Stdout)
 	se := strings.ToLower(resp.Stderr)
 	if !strings.Contains(se, "no such") &&
 		!strings.Contains(se, "not found") &&

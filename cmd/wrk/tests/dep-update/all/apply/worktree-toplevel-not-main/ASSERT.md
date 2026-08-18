@@ -1,15 +1,15 @@
 ## Expected
 
 - Exit 0.
-- Pin + tidy success for worktree consumer.
-- Summary updated 1.
+- Apply tree from the linked worktree (`checkout  .`); pin + tidy.
+- Summary `updated 1, already 0, skipped 0 in 1 checkouts`.
 - Linked worktree go.mod require at v1.2.3.
 - **Main** consumer go.mod still at v1.0.0 (not mutated).
 - Owner go.mod unchanged.
 
 ## Side Effects
 
-- Blast radius is ShowToplevel(cwd)=linked worktree only.
+- Blast radius is the linked worktree Path (stack member), not MainRepo.
 
 ## Exit Code
 
@@ -28,9 +28,12 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
 	assertNotContains(t, resp.Stdout, "would:")
-	assertDepUpdateLine(t, resp.Stdout, modLib, req.WantVersion)
+	assertApplyBanner(t, resp.Stdout)
+	assertNoArgvDepHeader(t, resp.Stdout)
+	assertCheckoutLine(t, resp.Stdout, checkoutLabelOf(req))
+	assertPinLine(t, resp.Stdout, modLib, req.WantOldVersion, req.WantVersion)
 	assertTidyOkLine(t, resp.Stdout, req.WantConsumerModule)
-	assertAllSummary(t, resp.Stdout, req.WantUpdated, req.WantAlready, req.WantSkipped, false)
+	assertAllSummary(t, resp.Stdout, req.WantUpdated, req.WantAlready, req.WantSkipped, wantCheckoutsOf(req), false)
 	assertRequireVersion(t, req.ConsumerGoMod, modLib, req.WantVersion)
 	assertGoSumExists(t, req.ConsumerModDir)
 	assertOwnerGoModUnchanged(t, req)

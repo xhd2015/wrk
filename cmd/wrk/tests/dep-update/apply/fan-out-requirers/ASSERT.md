@@ -1,19 +1,26 @@
 ## Expected Output
 
 ```
-dep-update example.com/dep -> v0.0.2
-go mod tidy ok  module example.com/app
-dep-update example.com/dep -> v0.0.2
-go mod tidy ok  module example.com/app/pkg
+==== dep-update ====
+dep  example.com/dep -> v0.0.2
+
+  checkout  .
+    module  example.com/app
+      pin  example.com/dep  v0.0.1 -> v0.0.2
+      go mod tidy ok
+    module  example.com/app/pkg
+      pin  example.com/dep  v0.0.1 -> v0.0.2
+      go mod tidy ok
+
+dep-update: updated 2 modules in 1 checkouts
 ```
 
 ## Expected
 
 - Exit 0.
-- Per consumer: pin line then tidy line (scan order: `.` then `pkg/`).
+- Same checkout `.`; root then `pkg/` modules; each pin then tidy.
 - Both go.mods: replace dropped; require `example.com/dep` @ `v0.0.2`.
 - Both consumers have go.sum.
-- No dir-mode summary.
 
 ## Side Effects
 
@@ -25,8 +32,7 @@ go mod tidy ok  module example.com/app/pkg
 
 ```go
 import (
-	"strings"
-
+	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
 )
 
@@ -35,15 +41,22 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
 	assertNotContains(t, resp.Stdout, "would:")
-	assertDepUpdateLine(t, resp.Stdout, modDep, req.WantVersion)
-	assertTidyOkLine(t, resp.Stdout, req.WantConsumerModule)
-	assertTidyOkLine(t, resp.Stdout, req.WantConsumer2Module)
-	iApp := strings.Index(resp.Stdout, "go mod tidy ok  module "+req.WantConsumerModule+"\n")
-	iPkg := strings.Index(resp.Stdout, "go mod tidy ok  module "+req.WantConsumer2Module)
-	if iApp < 0 || iPkg < 0 || iApp > iPkg {
-		t.Fatalf("expected tidy app then pkg; got:\n%s", resp.Stdout)
-	}
-	assertNotContains(t, resp.Stdout, "dep-update: updated")
+	assert.Output(t, resp.Stdout, `---
+version: 3
+---
+==== dep-update ====
+dep  example\.com/dep -> v0\.0\.2(?:  \(tag .+\))?
+
+  checkout  \.
+    module  example\.com/app
+      pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
+      go mod tidy ok
+    module  example\.com/app/pkg
+      pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
+      go mod tidy ok
+
+dep-update: updated 2 modules in 1 checkouts
+`)
 	assertNoReplaceFor(t, req.ConsumerGoMod, modDep)
 	assertNoReplaceFor(t, req.Consumer2GoMod, modDep)
 	assertRequireVersion(t, req.ConsumerGoMod, modDep, req.WantVersion)

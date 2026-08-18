@@ -5,7 +5,8 @@
 ```
 consumer requires dep; no replace yet
   -> wrk --dep-replace <dep> --dry-run
-  -> would: dep-replace example.com/dep => <abs>
+  -> ==== dep-replace (dry-run) ====
+  -> would: replace example.com/dep => <abs>
   -> go.mod identical to baseline
   -> exit 0
 ```

@@ -5,8 +5,8 @@
 ```
 consumer: require v0.0.1 + replace => local dep; tags v0.0.1,v0.0.2
   -> wrk --dep-update <dep>
-  -> dep-update example.com/dep -> v0.0.2
-  -> go mod tidy ok  module example.com/consumer
+  -> ==== dep-update ====; pin example.com/dep v0.0.1 -> v0.0.2
+  -> go mod tidy ok
   -> no replace for example.com/dep
   -> require example.com/dep v0.0.2; go.sum exists
   -> exit 0

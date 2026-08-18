@@ -1,10 +1,11 @@
 # Scenario
 
-**Feature**: wrk root help documents --dep-replace
+**Feature**: wrk root help documents --dep-replace and unwind/stack
 
 ```
 wrk -h
   -> root usage mentions --dep-replace
+  -> root usage mentions unwind/stack for --dep-replace
 ```
 
 ## Steps

@@ -3,10 +3,10 @@
 **Feature**: wrk --dep-update --all --dry-run plans inventory pins without writes
 
 ```
-consumer git toplevel + inventory owners
+# stack consumers + inventory owners
   -> wrk --dep-update --all --dry-run
-  -> would: dep-update / would: go mod tidy (when pins planned)
-  -> zero go.mod writes
+  -> ==== dep-update (dry-run) ====; would: pin / would: go mod tidy (when pins planned)
+  -> no argv dep list; zero go.mod writes
 ```
 
 ## Steps

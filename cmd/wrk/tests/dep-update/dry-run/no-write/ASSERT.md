@@ -1,9 +1,22 @@
+## Expected Output
+
+```
+==== dep-update (dry-run) ====
+dep  example.com/dep -> v0.0.2
+
+  checkout  .
+    module  example.com/consumer
+      would: pin  example.com/dep  v0.0.1 -> v0.0.2
+      would: go mod tidy
+
+dep-update: would update 1 modules in 1 checkouts
+```
+
 ## Expected
 
 - Exit 0.
-- Stdout contains `would: dep-update example.com/dep -> v0.0.2`.
-- Stdout contains `would: go mod tidy  module example.com/consumer`.
-- No bare `dep-update ` apply lines.
+- Dry-run banner + `would: pin` + `would: go mod tidy`.
+- No bare `pin` apply lines.
 - go.mod unchanged (replace still present); no go.sum.
 
 ## Side Effects
@@ -16,6 +29,7 @@
 
 ```go
 import (
+	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
 )
 
@@ -23,8 +37,19 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
-	assertWouldDepUpdateLine(t, resp.Stdout, modDep, req.WantVersion)
-	assertWouldTidyLine(t, resp.Stdout, req.WantConsumerModule)
+	assert.Output(t, resp.Stdout, `---
+version: 3
+---
+==== dep-update \(dry-run\) ====
+dep  example\.com/dep -> v0\.0\.2(?:  \(tag .+\))?
+
+  checkout  \.
+    module  example\.com/consumer
+      would: pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
+      would: go mod tidy
+
+dep-update: would update 1 modules in 1 checkouts
+`)
 	assertGoModUnchanged(t, req)
 	assertNoTidyArtifacts(t, req)
 }

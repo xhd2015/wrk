@@ -1,18 +1,18 @@
 # Scenario
 
-**Feature**: wrk --dep-update dir-mode fan-out + versioned tidy + `--all` inventory pull
+**Feature**: wrk --dep-update stack fan-out + CLI tree + `--all` inventory pull
 
 ```
 # isolated WRK_HOME; consumer go.mod + git-tagged dep / owner modules
-# dir mode: pin every existing requirer under git toplevel (else nearest go.mod)
+# dir mode: CollectStackInventory consumers (else nearest go.mod)
   -> wrk --dep-update <dir>… [--dry-run]
-  -> dry-run: would: dep-update; would: go mod tidy | would: skip tidy (vendor/)
-  -> apply: drop replace; require@latest; versioned tidy or skip tidy (vendor/)
-# --all mode: git toplevel consumers + BuildInventory owners
+  -> dry-run: ==== dep-update (dry-run) ====; would: pin; would: go mod tidy
+  -> apply: ==== dep-update ====; checkout → module → pin; tidy or skip tidy (vendor/)
+# --all mode: same stack set + BuildInventory owners; no argv dep headers
   -> wrk --dep-update --all [--dry-run]
-  -> pin inventory-owned outdated requires; same tidy helper
-  -> skip external / same-toplevel filesystem replace; warn no-tag
-  -> no dirs / exclusive / bare --all / zero requirers: Error non-zero
+  -> pin inventory-owned outdated requires on every stack checkout; same tidy helper
+  -> skip external / same-checkout filesystem replace; warn no-tag
+  -> no dirs / exclusive / bare --all / zero requirers: wrk: error; no banner
 ```
 
 ## Preconditions
@@ -23,9 +23,12 @@
 - L2: `req.InProcess = true` (wrkcli.Capture). `Run` passes `CaptureOpts.WithGo`.
 - Root Setup seeds `$InstallDir/go1.22.12/bin/go` host-go wrapper (`go 1.22` pin).
   Versioned-tidy leaf also seeds `go1.19.13`. Parallel-safe: no Setenv/Chdir.
-- Fixtures seed git tags with `git tag` (isolated git). Existing dir-mode
-  consumer dirs stay **non-git** (nearest-only). Fan-out / zero-requirer
-  leaves init git at the consumer toplevel.
+- Fixtures seed git tags with `git tag` (isolated git). Existing nearest
+  consumer dirs stay **non-git** (nearest-only fallback). Same-checkout
+  fan-out / zero-requirer leaves init git at the consumer toplevel. Stack
+  leaves add an independent git repo at `external/kool` (or `external/dep`)
+  plus a **local filesystem replace** so `CollectStackInventory` BFS includes
+  it (pin-locals multi-repo style).
 - Dir-mode apply that tidies and `--all` apply seed `{WorkRoot}/modproxy` +
   `GOPROXY=file://…` so offline tidy resolves synthetic `example.com/*`.
 - Parallel-safe: no process env/cwd mutation; inject Env/Dir/`WithGo` via Capture.
@@ -44,22 +47,26 @@
   - `example.com/dep2` — second dep for multi-dir
   - Fan-out git workspace: `example.com/app` + `example.com/app/pkg` both require dep
   - Skip sibling: `example.com/other` under same toplevel, no require of dep
+  - Stack other-checkout: `example.com/kool` at `external/kool` (own git repo)
 - **Nested monorepo dep (dir):** git root without go.mod; module at `packages/dep`
   with tags `packages/dep/v0.0.1`, `packages/dep/v0.0.2` → version `v0.0.2`.
 - **`--all` module paths:**
   - `example.com/lib` — inventory owner (tags `v1.0.0`, `v1.2.3`)
   - `example.com/app` — consumer under git toplevel (need not be registered)
   - `example.com/external` — non-inventory require (silent skip)
-  - `example.com/mono` / `example.com/mono/lib` — same-toplevel local replace skip
+  - `example.com/mono` / `example.com/mono/lib` — same-checkout local replace skip
   - Nested owner: monorepo owner with `packages/dep` module path
     `example.com/lib/dep`, tags `packages/dep/v0.1.0`, `packages/dep/v0.2.0`
-- **Stdout dir apply:** pin line(s) then `go mod tidy ok  module …` or
-  `skip tidy  module …  (vendor/)` per consumer. No dir-mode summary.
-- **Stdout `--all` apply:** pin lines + tidy/skip + summary
-- **Dry-run dir:** `would: dep-update …` + `would: go mod tidy …` or
-  `would: skip tidy  module …  (vendor/)`
-- **Dry-run `--all`:** `would: dep-update …` + `would: go mod tidy  module …` +
-  `dep-update: would update N, already A, skipped S`
+  - Stack other-checkout: `example.com/kool` with inventory-owned lib require
+- **Stdout dir apply:** `==== dep-update ====`; `dep` headers; checkout →
+  module → `pin` + `go mod tidy ok` or `skip tidy  (vendor/)`;
+  `dep-update: updated N modules in C checkouts`
+- **Stdout `--all` apply:** same tree; **no** argv `dep` list;
+  `dep-update: updated N, already A, skipped S in C checkouts`
+- **Dry-run dir:** `==== dep-update (dry-run) ====`; `would: pin` +
+  `would: go mod tidy` or `would: skip tidy  (vendor/)`
+- **Dry-run `--all`:** dry-run banner + tree; no argv `dep` list;
+  `dep-update: would update N, already A, skipped S in C checkouts`
 - **Tidy pin:** `go 1.22` → wrapper `$InstallDir/go1.22.12/bin/go`; versioned-tidy
   uses `go 1.19` → `go1.19.13`.
 
@@ -91,6 +98,9 @@ const (
 	modApp      = "example.com/app"
 	modAppPkg   = "example.com/app/pkg"
 	modOther    = "example.com/other"
+	modKool     = "example.com/kool"
+	checkoutKool = "external/kool"
+	checkoutDep  = "external/dep"
 	modLib      = "example.com/lib"
 	modLibDep   = "example.com/lib/dep"
 	modExternal = "example.com/external"
@@ -269,6 +279,10 @@ func setupDropReplaceLatest(t *testing.T, req *Request) {
 	dep := seedRootTaggedDep(t, req.WorkRoot, "dep", modDep, "v0.0.1", "v0.0.2")
 	req.DepDir = dep
 	req.WantVersion = "v0.0.2"
+	req.WantOldVersion = "v0.0.1"
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 	writeConsumerWithReplace(t, req, dep, modDep, "v0.0.1")
 }
 
@@ -278,7 +292,11 @@ func setupNestedTagPrefix(t *testing.T, req *Request) {
 	dep, tagHint := seedNestedPrefixedDep(t, req.WorkRoot)
 	req.DepDir = dep
 	req.WantVersion = "v0.0.2"
+	req.WantOldVersion = "v0.0.1"
 	req.WantTagHint = tagHint
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 	writeConsumerWithReplace(t, req, dep, modDep, "v0.0.1")
 }
 
@@ -291,6 +309,11 @@ func setupTwoTaggedDeps(t *testing.T, req *Request) {
 	req.Dep2Dir = dep2
 	req.WantVersion = "v0.0.2"
 	req.WantVersion2 = "v0.1.1"
+	req.WantOldVersion = "v0.0.1"
+	req.WantOldVersion2 = "v0.1.0"
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 
 	consumer := filepath.Join(req.WorkRoot, "consumer")
 	body := fmt.Sprintf(
@@ -538,10 +561,13 @@ func setupAllCrossProjectOutdated(t *testing.T, req *Request) {
 	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
 	req.RepoDir = app
 	req.WantVersion = "v1.2.3"
+	req.WantOldVersion = "v1.0.0"
 	req.WantConsumerModule = modApp
 	req.WantUpdated = 1
 	req.WantAlready = 0
 	req.WantSkipped = 0
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 	writeProjectsJSON(t, req.WrkHome, lib)
 }
 
@@ -558,10 +584,13 @@ func setupAllAlreadyCurrent(t *testing.T, req *Request) {
 	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
 	req.RepoDir = app
 	req.WantVersion = "v1.2.3"
+	req.WantOldVersion = "v1.2.3"
 	req.WantConsumerModule = modApp
 	req.WantUpdated = 0
 	req.WantAlready = 1
 	req.WantSkipped = 0
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 	writeProjectsJSON(t, req.WrkHome, lib)
 }
 
@@ -598,10 +627,13 @@ func setupAllWorktreeOutdated(t *testing.T, req *Request) {
 	// Snapshot main go.mod separately (must stay unchanged).
 	req.RepoDir = linked
 	req.WantVersion = "v1.2.3"
+	req.WantOldVersion = "v1.0.0"
 	req.WantConsumerModule = modApp
 	req.WantUpdated = 1
 	req.WantAlready = 0
 	req.WantSkipped = 0
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 	writeProjectsJSON(t, req.WrkHome, lib)
 
 	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
@@ -640,11 +672,14 @@ func setupAllSkipIntraLocalReplace(t *testing.T, req *Request) {
 	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
 	req.RepoDir = mono
 	req.WantVersion = "v1.2.3"
+	req.WantOldVersion = "v1.0.0"
 	req.WantConsumerModule = modMono
 	// inventory bump for lib; local replace skipped
 	req.WantUpdated = 1
 	req.WantAlready = 0
 	req.WantSkipped = 1
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 	writeProjectsJSON(t, req.WrkHome, lib)
 
 	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
@@ -669,10 +704,13 @@ func setupAllSkipExternal(t *testing.T, req *Request) {
 	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
 	req.RepoDir = app
 	req.WantVersion = "v1.2.3"
+	req.WantOldVersion = "v1.0.0"
 	req.WantConsumerModule = modApp
 	req.WantUpdated = 1
 	req.WantAlready = 0
 	req.WantSkipped = 0 // external is silent, not counted as skipped
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 	writeProjectsJSON(t, req.WrkHome, lib)
 
 	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
@@ -716,11 +754,14 @@ func setupAllNestedOwnerModuleTag(t *testing.T, req *Request) {
 	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
 	req.RepoDir = app
 	req.WantVersion = "v0.2.0"
+	req.WantOldVersion = "v0.1.0"
 	req.WantTagHint = "packages/dep/v0.2.0"
 	req.WantConsumerModule = modApp
 	req.WantUpdated = 1
 	req.WantAlready = 0
 	req.WantSkipped = 0
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 	writeProjectsJSON(t, req.WrkHome, owner)
 
 	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
@@ -751,6 +792,8 @@ func setupAllNoTagOwner(t *testing.T, req *Request) {
 	req.WantUpdated = 0
 	req.WantAlready = 0
 	req.WantSkipped = 1
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 	writeProjectsJSON(t, req.WrkHome, lib)
 }
 
@@ -807,6 +850,10 @@ func setupFanOutRequirers(t *testing.T, req *Request) {
 	dep := seedRootTaggedDep(t, req.WorkRoot, "dep", modDep, "v0.0.1", "v0.0.2")
 	req.DepDir = dep
 	req.WantVersion = "v0.0.2"
+	req.WantOldVersion = "v0.0.1"
+	req.WantUpdated = 2
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 
 	ws := filepath.Join(req.WorkRoot, "workspace")
 	initGitRepoOnMain(t, ws)
@@ -839,6 +886,10 @@ func setupSkipNonRequirer(t *testing.T, req *Request) {
 	dep := seedRootTaggedDep(t, req.WorkRoot, "dep", modDep, "v0.0.1", "v0.0.2")
 	req.DepDir = dep
 	req.WantVersion = "v0.0.2"
+	req.WantOldVersion = "v0.0.1"
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 
 	ws := filepath.Join(req.WorkRoot, "workspace")
 	initGitRepoOnMain(t, ws)
@@ -892,6 +943,10 @@ func setupVersionedTidy(t *testing.T, req *Request) {
 	req.ConsumerGoMod = filepath.Join(consumer, "go.mod")
 	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
 	req.WantConsumerModule = modConsumer
+	req.WantOldVersion = "v0.0.1"
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
 	req.WantGoPin = pinGo119
 	req.WrapperRecord = seedHostGoWrapper(t, req.InstallDir, pinGo119)
 	enableDirModeTidyProxy(t, req)
@@ -924,6 +979,224 @@ func setupAllVendorSkip(t *testing.T, req *Request) {
 	vendor := filepath.Join(req.ConsumerModDir, "vendor")
 	mkdirAll(t, vendor)
 	req.VendorDir = vendor
+}
+
+// initStackPrimary starts a git primary checkout with .gitignore /external.
+func initStackPrimary(t *testing.T, req *Request) string {
+	t.Helper()
+	primary := filepath.Join(req.WorkRoot, "primary")
+	initGitRepoOnMain(t, primary)
+	writeFile(t, filepath.Join(primary, ".gitignore"), "/external\n")
+	return primary
+}
+
+// seedExternalGitModule creates an independent git repo at primary/external/<name>.
+func seedExternalGitModule(t *testing.T, primary, name, modulePath, goModBody string) string {
+	t.Helper()
+	dir := filepath.Join(primary, "external", name)
+	initGitRepoOnMain(t, dir)
+	writeGoMod(t, dir, modulePath, goModBody)
+	return resolvePath(t, dir)
+}
+
+// setupStackOtherCheckoutRequirer: primary requires dep + kool; replace kool =>
+// ./external/kool (own git repo) so CollectStackInventory BFS includes it.
+// Both primary and kool already require dep.
+func setupStackOtherCheckoutRequirer(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedRootTaggedDep(t, req.WorkRoot, "dep", modDep, "v0.0.1", "v0.0.2")
+	req.DepDir = dep
+	req.WantVersion = "v0.0.2"
+	req.WantOldVersion = "v0.0.1"
+
+	primary := initStackPrimary(t, req)
+	kool := seedExternalGitModule(t, primary, "kool", modKool, fmt.Sprintf("require %s v0.0.1\n", modDep))
+	writeConsumerMainWithImports(t, kool, modDep)
+	gitCommitAll(t, kool, "kool requirer")
+
+	body := fmt.Sprintf(
+		"require (\n\t%s v0.0.1\n\t%s v0.0.0\n)\n\nreplace %s => ./external/kool\n",
+		modDep, modKool, modKool,
+	)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep, modKool)
+	gitCommitAll(t, primary, "primary + replace kool")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = kool
+	req.Consumer2GoMod = filepath.Join(kool, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modKool
+	req.WantCheckout = "."
+	req.WantCheckout2 = checkoutKool
+	req.WantUpdated = 2
+	req.WantCheckouts = 2
+}
+
+// setupStackSkipNonRequirerOther: same topology; kool does not require dep.
+func setupStackSkipNonRequirerOther(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedRootTaggedDep(t, req.WorkRoot, "dep", modDep, "v0.0.1", "v0.0.2")
+	req.DepDir = dep
+	req.WantVersion = "v0.0.2"
+	req.WantOldVersion = "v0.0.1"
+
+	primary := initStackPrimary(t, req)
+	kool := seedExternalGitModule(t, primary, "kool", modKool, "")
+	writeLibPkg(t, kool, "kool", "Hi")
+	gitCommitAll(t, kool, "kool no require")
+
+	body := fmt.Sprintf(
+		"require (\n\t%s v0.0.1\n\t%s v0.0.0\n)\n\nreplace %s => ./external/kool\n",
+		modDep, modKool, modKool,
+	)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep, modKool)
+	gitCommitAll(t, primary, "primary + replace kool")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = kool
+	req.Consumer2GoMod = filepath.Join(kool, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modKool
+	req.WantCheckout = "."
+	req.WantCheckout2 = checkoutKool
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+}
+
+// setupStackSkipSelf: dep checkout lives on the stack via replace; self not pinned.
+func setupStackSkipSelf(t *testing.T, req *Request) {
+	t.Helper()
+	primary := initStackPrimary(t, req)
+	dep := seedExternalGitModule(t, primary, "dep", modDep, "")
+	writeLibPkg(t, dep, "dep", "Version")
+	gitCommitAll(t, dep, "dep init")
+	gitTag(t, dep, "v0.0.1")
+	gitTag(t, dep, "v0.0.2")
+	dep = resolvePath(t, dep)
+	req.DepDir = dep
+	req.WantVersion = "v0.0.2"
+	req.WantOldVersion = "v0.0.1"
+
+	body := writeRequireReplaceBody(modDep, "v0.0.1", "./external/dep")
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep)
+	gitCommitAll(t, primary, "primary replace dep")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = dep
+	req.Consumer2GoMod = filepath.Join(dep, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modDep
+	req.WantCheckout = "."
+	req.WantCheckout2 = checkoutDep
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+}
+
+// setupMultiDirStack: primary requires dep+dep2; kool requires only dep.
+func setupMultiDirStack(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedRootTaggedDep(t, req.WorkRoot, "dep", modDep, "v0.0.1", "v0.0.2")
+	dep2 := seedRootTaggedDep(t, req.WorkRoot, "dep2", modDep2, "v0.1.0", "v0.1.1")
+	req.DepDir = dep
+	req.Dep2Dir = dep2
+	req.WantVersion = "v0.0.2"
+	req.WantVersion2 = "v0.1.1"
+	req.WantOldVersion = "v0.0.1"
+	req.WantOldVersion2 = "v0.1.0"
+
+	primary := initStackPrimary(t, req)
+	kool := seedExternalGitModule(t, primary, "kool", modKool, fmt.Sprintf("require %s v0.0.1\n", modDep))
+	writeConsumerMainWithImports(t, kool, modDep)
+	gitCommitAll(t, kool, "kool requires dep only")
+
+	body := fmt.Sprintf(
+		"require (\n\t%s v0.0.1\n\t%s v0.1.0\n\t%s v0.0.0\n)\n\nreplace %s => ./external/kool\n",
+		modDep, modDep2, modKool, modKool,
+	)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep, modDep2, modKool)
+	gitCommitAll(t, primary, "primary requires both")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = kool
+	req.Consumer2GoMod = filepath.Join(kool, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modKool
+	req.WantCheckout = "."
+	req.WantCheckout2 = checkoutKool
+	req.WantUpdated = 2
+	req.WantCheckouts = 2
+}
+
+// setupAllStackOutdated: inventory-owned lib require on primary and other checkout.
+func setupAllStackOutdated(t *testing.T, req *Request) {
+	t.Helper()
+	lib := seedOwnerLibRoot(t, req.WorkRoot, "v1.0.0", "v1.2.3")
+
+	primary := initStackPrimary(t, req)
+	koolBody := fmt.Sprintf("require %s v1.0.0\n", modLib)
+	kool := seedExternalGitModule(t, primary, "kool", modKool, koolBody)
+	writeConsumerMainWithImports(t, kool, modLib)
+	gitCommitAll(t, kool, "kool requires lib")
+
+	body := fmt.Sprintf(
+		"require (\n\t%s v1.0.0\n\t%s v0.0.0\n)\n\nreplace %s => ./external/kool\n",
+		modLib, modKool, modKool,
+	)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modLib, modKool)
+	gitCommitAll(t, primary, "primary requires lib + kool")
+
+	primary = resolvePath(t, primary)
+	req.OwnerPath = lib
+	req.OwnerGoMod = filepath.Join(lib, "go.mod")
+	req.BaselineOwnerGoMod = readFile(t, req.OwnerGoMod)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = kool
+	req.Consumer2GoMod = filepath.Join(kool, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modKool
+	req.WantVersion = "v1.2.3"
+	req.WantOldVersion = "v1.0.0"
+	req.WantUpdated = 2
+	req.WantAlready = 0
+	req.WantSkipped = 0
+	req.WantCheckouts = 2
+	req.WantCheckout = "."
+	req.WantCheckout2 = checkoutKool
+	writeProjectsJSON(t, req.WrkHome, lib)
+
+	proxyRoot := filepath.Join(req.WorkRoot, "modproxy")
+	seedFileModuleProxy(t, proxyRoot, modLib, "v1.2.3", lib)
+	seedFileModuleProxy(t, proxyRoot, modLib, "v1.0.0", lib)
+	enableFileModuleProxy(t, req, proxyRoot)
 }
 
 // --- asserts ---
@@ -1052,37 +1325,66 @@ func assertRequireVersion(t *testing.T, goModPath, modulePath, version string) {
 	}
 }
 
-func assertDepUpdateLine(t *testing.T, stdout, modulePath, version string) {
+func wantCheckoutsOf(req *Request) int {
+	if req.WantCheckouts > 0 {
+		return req.WantCheckouts
+	}
+	return 1
+}
+
+func checkoutLabelOf(req *Request) string {
+	if req.WantCheckout != "" {
+		return req.WantCheckout
+	}
+	return "."
+}
+
+func assertApplyBanner(t *testing.T, stdout string) {
 	t.Helper()
-	needle := "dep-update " + modulePath + " -> " + version
-	if !strings.Contains(stdout, needle) {
-		alt := "dep-update " + modulePath
-		if !strings.Contains(stdout, alt) || !strings.Contains(stdout, version) {
-			t.Fatalf("stdout missing dep-update line for %s -> %s; got:\n%s", modulePath, version, stdout)
-		}
-		found := false
-		for _, line := range strings.Split(stdout, "\n") {
-			trim := strings.TrimSpace(line)
-			if strings.Contains(trim, "dep-update") &&
-				strings.Contains(trim, modulePath) &&
-				strings.Contains(trim, version) &&
-				strings.Contains(trim, "->") {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("stdout missing dep-update %s -> %s; got:\n%s", modulePath, version, stdout)
-		}
+	if !strings.Contains(stdout, "==== dep-update ====") {
+		t.Fatalf("stdout missing apply banner ==== dep-update ====; got:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "==== dep-update (dry-run) ====") {
+		t.Fatalf("apply must not use dry-run banner; got:\n%s", stdout)
 	}
 }
 
-func assertWouldDepUpdateLine(t *testing.T, stdout, modulePath, version string) {
+func assertDryRunBanner(t *testing.T, stdout string) {
+	t.Helper()
+	if !strings.Contains(stdout, "==== dep-update (dry-run) ====") {
+		t.Fatalf("stdout missing dry-run banner ==== dep-update (dry-run) ====; got:\n%s", stdout)
+	}
+}
+
+func assertNoBanner(t *testing.T, stdout string) {
+	t.Helper()
+	if strings.Contains(stdout, "====") {
+		t.Fatalf("must not print banner; got:\n%s", stdout)
+	}
+}
+
+func assertCheckoutLine(t *testing.T, stdout, label string) {
+	t.Helper()
+	needle := "checkout  " + label
+	if !strings.Contains(stdout, needle) {
+		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
+	}
+}
+
+func assertModuleLine(t *testing.T, stdout, modulePath string) {
+	t.Helper()
+	needle := "module  " + modulePath
+	if !strings.Contains(stdout, needle) {
+		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
+	}
+}
+
+func assertDepHeader(t *testing.T, stdout, modulePath, version string) {
 	t.Helper()
 	found := false
 	for _, line := range strings.Split(stdout, "\n") {
 		trim := strings.TrimSpace(line)
-		if !strings.HasPrefix(trim, "would: dep-update ") {
+		if !strings.HasPrefix(trim, "dep  ") {
 			continue
 		}
 		if strings.Contains(trim, modulePath) && strings.Contains(trim, version) && strings.Contains(trim, "->") {
@@ -1091,12 +1393,107 @@ func assertWouldDepUpdateLine(t *testing.T, stdout, modulePath, version string) 
 		}
 	}
 	if !found {
-		t.Fatalf("stdout missing would: dep-update %s -> %s; got:\n%s", modulePath, version, stdout)
+		t.Fatalf("stdout missing dep header %s -> %s; got:\n%s", modulePath, version, stdout)
+	}
+}
+
+func assertNoArgvDepHeader(t *testing.T, stdout string) {
+	t.Helper()
+	for _, line := range strings.Split(stdout, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "dep  ") {
+			t.Fatalf("--all must not print argv dep header list: %q\n%s", trim, stdout)
+		}
+	}
+}
+
+func assertPinLine(t *testing.T, stdout, modulePath, oldVer, newVer string) {
+	t.Helper()
+	needle := "pin  " + modulePath + "  " + oldVer + " -> " + newVer
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.TrimSpace(line) == needle || strings.Contains(line, needle) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
+	}
+}
+
+func assertWouldPinLine(t *testing.T, stdout, modulePath, oldVer, newVer string) {
+	t.Helper()
+	needle := "would: pin  " + modulePath + "  " + oldVer + " -> " + newVer
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.TrimSpace(line) == needle || strings.Contains(line, needle) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
 	}
 	for _, line := range strings.Split(stdout, "\n") {
 		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "dep-update ") {
-			t.Fatalf("dry-run must not emit bare dep-update lines: %q", trim)
+		if strings.HasPrefix(trim, "pin  ") {
+			t.Fatalf("dry-run must not emit bare pin lines: %q", trim)
+		}
+	}
+}
+
+func assertNoPinFor(t *testing.T, stdout, modulePath string) {
+	t.Helper()
+	for _, line := range strings.Split(stdout, "\n") {
+		trim := strings.TrimSpace(line)
+		if (strings.HasPrefix(trim, "pin  ") || strings.HasPrefix(trim, "would: pin  ")) &&
+			strings.Contains(trim, modulePath) {
+			t.Fatalf("must not pin %s: %q", modulePath, trim)
+		}
+	}
+}
+
+func assertDepUpdateLine(t *testing.T, stdout, modulePath, version string) {
+	t.Helper()
+	// Dir-mode / --all action line is now pin (old -> new). Old version is
+	// fixture-owned; accept any old token as long as pin + path + new + ->.
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		trim := strings.TrimSpace(line)
+		if !strings.Contains(trim, "pin  "+modulePath) {
+			continue
+		}
+		if strings.Contains(trim, version) && strings.Contains(trim, "->") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing pin %s -> %s; got:\n%s", modulePath, version, stdout)
+	}
+}
+
+func assertWouldDepUpdateLine(t *testing.T, stdout, modulePath, version string) {
+	t.Helper()
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		trim := strings.TrimSpace(line)
+		if !strings.HasPrefix(trim, "would: pin  ") {
+			continue
+		}
+		if strings.Contains(trim, modulePath) && strings.Contains(trim, version) && strings.Contains(trim, "->") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing would: pin %s -> %s; got:\n%s", modulePath, version, stdout)
+	}
+	for _, line := range strings.Split(stdout, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "pin  ") {
+			t.Fatalf("dry-run must not emit bare pin lines: %q", trim)
 		}
 	}
 }
@@ -1122,61 +1519,73 @@ func assertGoSumExists(t *testing.T, consumerModDir string) {
 
 func assertTidyOkLine(t *testing.T, stdout, consumerModule string) {
 	t.Helper()
-	needle := "go mod tidy ok  module " + consumerModule
+	if consumerModule != "" {
+		assertModuleLine(t, stdout, consumerModule)
+	}
 	found := false
 	for _, line := range strings.Split(stdout, "\n") {
-		if strings.TrimSpace(line) == needle {
+		if strings.TrimSpace(line) == "go mod tidy ok" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
+		t.Fatalf("stdout missing %q; got:\n%s", "go mod tidy ok", stdout)
 	}
 }
 
 func assertWouldTidyLine(t *testing.T, stdout, consumerModule string) {
 	t.Helper()
-	needle := "would: go mod tidy  module " + consumerModule
+	if consumerModule != "" {
+		assertModuleLine(t, stdout, consumerModule)
+	}
 	found := false
 	for _, line := range strings.Split(stdout, "\n") {
-		if strings.TrimSpace(line) == needle {
+		trim := strings.TrimSpace(line)
+		if trim == "would: go mod tidy" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
+		t.Fatalf("stdout missing %q; got:\n%s", "would: go mod tidy", stdout)
 	}
 }
 
 func assertSkipTidyLine(t *testing.T, stdout, consumerModule string) {
 	t.Helper()
-	needle := "skip tidy  module " + consumerModule + "  (vendor/)"
+	if consumerModule != "" {
+		assertModuleLine(t, stdout, consumerModule)
+	}
 	found := false
 	for _, line := range strings.Split(stdout, "\n") {
-		if strings.TrimSpace(line) == needle {
+		trim := strings.TrimSpace(line)
+		if strings.Contains(trim, "skip tidy") && strings.Contains(trim, "(vendor/)") &&
+			!strings.HasPrefix(trim, "would:") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
+		t.Fatalf("stdout missing skip tidy  (vendor/); got:\n%s", stdout)
 	}
 }
 
 func assertWouldSkipTidyLine(t *testing.T, stdout, consumerModule string) {
 	t.Helper()
-	needle := "would: skip tidy  module " + consumerModule + "  (vendor/)"
+	if consumerModule != "" {
+		assertModuleLine(t, stdout, consumerModule)
+	}
 	found := false
 	for _, line := range strings.Split(stdout, "\n") {
-		if strings.TrimSpace(line) == needle {
+		trim := strings.TrimSpace(line)
+		if strings.Contains(trim, "would: skip tidy") && strings.Contains(trim, "(vendor/)") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
+		t.Fatalf("stdout missing would: skip tidy  (vendor/); got:\n%s", stdout)
 	}
 }
 
@@ -1216,13 +1625,26 @@ func assertVersionedGoUsed(t *testing.T, req *Request) {
 	}
 }
 
-func assertAllSummary(t *testing.T, stdout string, updated, already, skipped int, dryRun bool) {
+func assertDirSummary(t *testing.T, stdout string, modules, checkouts int, dryRun bool) {
 	t.Helper()
 	var needle string
 	if dryRun {
-		needle = fmt.Sprintf("dep-update: would update %d, already %d, skipped %d", updated, already, skipped)
+		needle = fmt.Sprintf("dep-update: would update %d modules in %d checkouts", modules, checkouts)
 	} else {
-		needle = fmt.Sprintf("dep-update: updated %d, already %d, skipped %d", updated, already, skipped)
+		needle = fmt.Sprintf("dep-update: updated %d modules in %d checkouts", modules, checkouts)
+	}
+	if !strings.Contains(stdout, needle) {
+		t.Fatalf("stdout missing summary %q; got:\n%s", needle, stdout)
+	}
+}
+
+func assertAllSummary(t *testing.T, stdout string, updated, already, skipped, checkouts int, dryRun bool) {
+	t.Helper()
+	var needle string
+	if dryRun {
+		needle = fmt.Sprintf("dep-update: would update %d, already %d, skipped %d in %d checkouts", updated, already, skipped, checkouts)
+	} else {
+		needle = fmt.Sprintf("dep-update: updated %d, already %d, skipped %d in %d checkouts", updated, already, skipped, checkouts)
 	}
 	if !strings.Contains(stdout, needle) {
 		t.Fatalf("stdout missing summary %q; got:\n%s", needle, stdout)
@@ -1231,6 +1653,9 @@ func assertAllSummary(t *testing.T, stdout string, updated, already, skipped int
 
 func assertAlreadyUpToDateBanner(t *testing.T, stdout string) {
 	t.Helper()
+	if !strings.Contains(stdout, "==== dep-update") {
+		t.Fatalf("stdout missing ==== dep-update banner; got:\n%s", stdout)
+	}
 	if !strings.Contains(stdout, "dep-update: already up to date") {
 		t.Fatalf("stdout missing already-up-to-date banner; got:\n%s", stdout)
 	}
@@ -1308,10 +1733,30 @@ func ensureDepUpdateHelpersUsed() {
 	_ = setupVersionedTidy
 	_ = setupNoConsumerRequires
 	_ = setupAllVendorSkip
+	_ = setupStackOtherCheckoutRequirer
+	_ = setupStackSkipNonRequirerOther
+	_ = setupStackSkipSelf
+	_ = setupMultiDirStack
+	_ = setupAllStackOutdated
+	_ = initStackPrimary
+	_ = seedExternalGitModule
 	_ = assertSkipTidyLine
 	_ = assertWouldSkipTidyLine
 	_ = assertVendorUntouched
 	_ = assertGoModUnchangedAt
 	_ = assertVersionedGoUsed
+	_ = assertApplyBanner
+	_ = assertDryRunBanner
+	_ = assertNoBanner
+	_ = assertCheckoutLine
+	_ = assertModuleLine
+	_ = assertDepHeader
+	_ = assertNoArgvDepHeader
+	_ = assertPinLine
+	_ = assertWouldPinLine
+	_ = assertNoPinFor
+	_ = assertDirSummary
+	_ = wantCheckoutsOf
+	_ = checkoutLabelOf
 }
 ```

@@ -5,8 +5,7 @@
 ```
 nearest consumer has replace + require + empty vendor/
   -> wrk --dep-update <dep>
-  -> dep-update example.com/dep -> v0.0.2
-  -> skip tidy  module example.com/consumer  (vendor/)
+  -> pin example.com/dep; skip tidy  (vendor/)
   -> no go.sum; vendor/ not rewritten
 ```
 

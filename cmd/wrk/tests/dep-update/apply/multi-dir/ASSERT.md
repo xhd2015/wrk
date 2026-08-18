@@ -1,8 +1,23 @@
+## Expected Output
+
+```
+==== dep-update ====
+dep  example.com/dep -> v0.0.2
+dep  example.com/dep2 -> v0.1.1
+
+  checkout  .
+    module  example.com/consumer
+      pin  example.com/dep  v0.0.1 -> v0.0.2
+      pin  example.com/dep2  v0.1.0 -> v0.1.1
+      go mod tidy ok
+
+dep-update: updated 1 modules in 1 checkouts
+```
+
 ## Expected
 
 - Exit 0.
-- Stdout dep-update lines for both modules with WantVersion / WantVersion2.
-- One `go mod tidy ok  module example.com/consumer`.
+- Two argv `dep` headers (argv order); one consumer; both pins; tidy once.
 - Both replaces dropped; requires at latest tags; go.sum exists.
 
 ## Side Effects
@@ -17,6 +32,7 @@
 import (
 	"strings"
 
+	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
 )
 
@@ -24,11 +40,23 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
-	assertDepUpdateLine(t, resp.Stdout, modDep, req.WantVersion)
-	assertDepUpdateLine(t, resp.Stdout, modDep2, req.WantVersion2)
+	assert.Output(t, resp.Stdout, `---
+version: 3
+---
+==== dep-update ====
+dep  example\.com/dep -> v0\.0\.2(?:  \(tag .+\))?
+dep  example\.com/dep2 -> v0\.1\.1(?:  \(tag .+\))?
+
+  checkout  \.
+    module  example\.com/consumer
+      pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
+      pin  example\.com/dep2  v0\.1\.0 -> v0\.1\.1
+      go mod tidy ok
+
+dep-update: updated 1 modules in 1 checkouts
+`)
 	assertNoReplaceFor(t, req.ConsumerGoMod, modDep)
 	assertNoReplaceFor(t, req.ConsumerGoMod, modDep2)
-	assertTidyOkLine(t, resp.Stdout, req.WantConsumerModule)
 	assertRequireVersion(t, req.ConsumerGoMod, modDep, req.WantVersion)
 	assertRequireVersion(t, req.ConsumerGoMod, modDep2, req.WantVersion2)
 	assertGoSumExists(t, req.ConsumerModDir)

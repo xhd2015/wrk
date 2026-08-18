@@ -1623,11 +1623,12 @@ Flags:
   --pin-locals [--dry-run]        add/normalize relative replace for already-required stack deps
                                   (inventory = unwind stack only; go mod tidy per consumer; soft tidy fails)
   --dep-replace <dir>… [--dry-run]
-                                  absolute replace into nearest consumer go.mod (no tidy; fail-fast multi-dir)
+                                  absolute replace into every gated go.mod on the unwind stack
+                                  (require or existing replace; not-git nearest; no tidy)
   --dep-update <dir>… [--dry-run]
-                                  pin latest tag into every existing requirer under git toplevel of cwd
-                                  (else nearest go.mod); versioned go mod tidy unless vendor/ (never go mod vendor)
-  --dep-update --all [--dry-run]  pin inventory-owned requires under git toplevel of cwd to latest tags;
+                                  pin latest tag into every existing requirer on the unwind stack
+                                  (cwd git + nested/replace BFS; else nearest go.mod); versioned tidy unless vendor/
+  --dep-update --all [--dry-run]  pin inventory-owned requires on the unwind stack to latest tags;
                                   same versioned tidy / vendor skip once per affected consumer (no commit/build)
   --all                           with --dep-update: inventory pull mode (not a standalone mode)
   --projects                      list recorded main repository paths

@@ -1,8 +1,22 @@
+## Expected Output
+
+```
+==== dep-update ====
+dep  example.com/dep -> v0.0.2
+
+  checkout  .
+    module  example.com/consumer
+      pin  example.com/dep  v0.0.1 -> v0.0.2
+      go mod tidy ok
+
+dep-update: updated 1 modules in 1 checkouts
+```
+
 ## Expected
 
 - Exit 0.
-- Stdout `dep-update example.com/dep -> v0.0.2` (optional tag form OK).
-- Stdout `go mod tidy ok  module example.com/consumer`.
+- Apply banner + argv `dep` header; checkout `.`; pin old -> new; tidy ok.
+- Optional `(tag …)` on the `dep` header is allowed.
 - No `would:` vocabulary.
 - go.mod: no replace for example.com/dep; require at v0.0.2.
 - go.sum exists after tidy.
@@ -17,6 +31,7 @@
 
 ```go
 import (
+	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
 )
 
@@ -25,8 +40,19 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
 	assertNotContains(t, resp.Stdout, "would:")
-	assertDepUpdateLine(t, resp.Stdout, modDep, req.WantVersion)
-	assertTidyOkLine(t, resp.Stdout, req.WantConsumerModule)
+	assert.Output(t, resp.Stdout, `---
+version: 3
+---
+==== dep-update ====
+dep  example\.com/dep -> v0\.0\.2(?:  \(tag .+\))?
+
+  checkout  \.
+    module  example\.com/consumer
+      pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
+      go mod tidy ok
+
+dep-update: updated 1 modules in 1 checkouts
+`)
 	assertNoReplaceFor(t, req.ConsumerGoMod, modDep)
 	assertRequireVersion(t, req.ConsumerGoMod, modDep, req.WantVersion)
 	assertGoSumExists(t, req.ConsumerModDir)

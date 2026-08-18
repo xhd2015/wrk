@@ -5,8 +5,8 @@
 ```
 # git workspace: app/ requires dep; other/ does not
 cwd=workspace -> wrk --dep-update <dep>
-  -> pin + tidy example.com/app
-  -> example.com/other go.mod unchanged
+  -> pin + tidy example.com/app (default quiet)
+  -> example.com/other go.mod unchanged; no skip line
 ```
 
 ## Steps

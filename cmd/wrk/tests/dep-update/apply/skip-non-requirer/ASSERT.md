@@ -1,8 +1,22 @@
+## Expected Output
+
+```
+==== dep-update ====
+dep  example.com/dep -> v0.0.2
+
+  checkout  .
+    module  example.com/app
+      pin  example.com/dep  v0.0.1 -> v0.0.2
+      go mod tidy ok
+
+dep-update: updated 1 modules in 1 checkouts
+```
+
 ## Expected
 
 - Exit 0.
-- Pin + tidy for `example.com/app` only.
-- No pin/tidy line for `example.com/other`.
+- Pin + tidy for `example.com/app` only (default quiet: no skip line).
+- No `module  example.com/other`; no `no require` skip vocabulary.
 - Sibling go.mod identical to baseline (no new require).
 
 ## Side Effects
@@ -15,6 +29,7 @@
 
 ```go
 import (
+	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
 )
 
@@ -22,9 +37,21 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
-	assertDepUpdateLine(t, resp.Stdout, modDep, req.WantVersion)
-	assertTidyOkLine(t, resp.Stdout, req.WantConsumerModule)
-	assertNotContains(t, resp.Stdout, req.WantConsumer2Module)
+	assert.Output(t, resp.Stdout, `---
+version: 3
+---
+==== dep-update ====
+dep  example\.com/dep -> v0\.0\.2(?:  \(tag .+\))?
+
+  checkout  \.
+    module  example\.com/app
+      pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
+      go mod tidy ok
+
+dep-update: updated 1 modules in 1 checkouts
+`)
+	assertNotContains(t, resp.Stdout, "module  "+req.WantConsumer2Module)
+	assertNotContains(t, resp.Stdout, "no require")
 	assertRequireVersion(t, req.ConsumerGoMod, modDep, req.WantVersion)
 	assertGoModUnchangedAt(t, req.Consumer2GoMod, req.Baseline2GoMod)
 	assertGoSumExists(t, req.ConsumerModDir)

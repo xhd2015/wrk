@@ -90,6 +90,8 @@ github.com/xhd2015/tty-watch v0.0.4/go.mod h1:pfwohyt9JfOPoaTwicLiSfEFynXeHTCwfl
 github.com/xhd2015/xgo v1.0.40/go.mod h1:LJxlcYSaXo/9YpsnB3yHh9NHe7BRettYCytaNGWY2BE=
 github.com/xhd2015/xgo v1.2.0 h1:DT5mAx73ANIUFDx3Lz+QcKrCVoLV0B7HxCvchGMxJq0=
 github.com/xhd2015/xgo v1.2.0/go.mod h1:LJxlcYSaXo/9YpsnB3yHh9NHe7BRettYCytaNGWY2BE=
+github.com/xhd2015/xgo v1.2.8 h1:ZCaVxd9ESnebg99zYfMawqEySkKBxvkdcMJvb5T38YM=
+github.com/xhd2015/xgo v1.2.8/go.mod h1:LJxlcYSaXo/9YpsnB3yHh9NHe7BRettYCytaNGWY2BE=
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
 github.com/yuin/goldmark v1.4.1/go.mod h1:mwnBkeHKe2W/ZEtQ+71ViKU8L12m81fl3OWwC1Zlc8k=

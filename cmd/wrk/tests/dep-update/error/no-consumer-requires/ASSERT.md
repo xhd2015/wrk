@@ -2,7 +2,7 @@
 
 - Non-zero exit.
 - Stderr is a `wrk:` error containing `requires` (e.g. no module under root requires path).
-- Consumer go.mod unchanged; no successful pin line.
+- No banner. Consumer go.mod unchanged; no successful pin line.
 
 ## Errors
 
@@ -25,6 +25,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertExitNonZero(t, resp)
 	assertGoModUnchanged(t, req)
 	assertNotContains(t, resp.Stdout, "dep-update ")
+	assertNoBanner(t, resp.Stdout)
 	se := strings.ToLower(resp.Stderr)
 	if !strings.Contains(se, "requires") {
 		t.Fatalf("stderr should contain requires, got %q", resp.Stderr)

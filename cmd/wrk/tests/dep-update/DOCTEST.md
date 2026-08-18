@@ -6,16 +6,22 @@
 Decision tree for **`wrk --dep-update`** in two modes:
 
 1. **Dir mode**: `wrk --dep-update <dir>… [--dry-run]` — resolve module path +
-   latest tag from each `<dep-dir>` (`update.Pin`). Consumer root = **git
-   toplevel of cwd** if inside a work tree, else nearest `go.mod`. `scan.Scan`
-   that root and **pin every module that already requires** the path (do not add
-   new requires). After pins: **versioned `go mod tidy`** via `gotool/withgo`
-   unless `vendor/` sits beside that `go.mod`. Multi-arg **fail-fast.** Zero
-   requirers → error. wrk does **not** exec kool; never `go mod vendor`.
-2. **`--all` inventory pull**: `wrk --dep-update --all [--dry-run]` — scan all
-   go.mod under **git toplevel of cwd**, match requires against
-   `BuildInventory(WRK_HOME)`, pin inventory-owned deps to latest tags, then
-   the **same tidy helper** (versioned + vendor skip) once per affected consumer.
+   latest tag from each `<dep-dir>` (`update.Pin`). Consumer set =
+   **`CollectStackInventory(cwd)`** (cwd git toplevel + nested status repos +
+   BFS over local filesystem replaces). Scan **every** `go.mod` under every
+   member `Path` and **pin every module that already requires** the path (do
+   not add new requires). Self (`consumer.Path == dep.Path`) never pinned.
+   Not git → today’s fallback (nearest `go.mod`, already-require). After pins:
+   **versioned `go mod tidy`** via `gotool/withgo` unless `vendor/` sits beside
+   that `go.mod` (once per affected module after all its pins). Multi-arg
+   **validate every dir first** (dry-run: any bad arg → no banner / no tree).
+   Zero requirers on the whole stack → `wrk:` error containing `requires` (no
+   banner). wrk does **not** exec kool; never `go mod vendor`.
+2. **`--all` inventory pull**: `wrk --dep-update --all [--dry-run]` — same
+   **stack consumer set**; match requires against `BuildInventory(WRK_HOME)`,
+   pin inventory-owned deps to latest tags, then the **same tidy helper**
+   (versioned + vendor skip) once per affected consumer. `--all` still requires
+   a git repo.
 
 **CLI migration:** `--dep-update` is a **Bool** flag; dep directories are remaining
 args (dir mode UX unchanged: `wrk --dep-update <dir>…`). Partner **`--all`**
@@ -35,24 +41,24 @@ mutation in harness.
 | D2 | After pins: versioned `go mod tidy` (`withgo.ModuleGoLine` + `withgo.Run`) unless `<modDir>/vendor` exists → `skip tidy  module …  (vendor/)`. Never `go mod vendor`. Missing go line → fail |
 | D3 | Multi-arg **fail-fast** |
 | D4 | Dir mode does not use inventory / `--all` |
-| D5 | Structured wrk lines only (`dep-update …` / tidy / skip tidy); no kool commit-message line; wrk does **not** exec kool |
-| D6 | Consumer root = git toplevel of cwd if in a work tree, else nearest `go.mod`; `scan.Scan`; pin only modules that **already require** the path |
-| D7 | Pin does not add new requires; zero matching consumers → `wrk:` error containing `requires` |
-| D8 | Output grouping = `--all`: per consumer, pin line(s) then tidy/skip line. No dir-mode summary |
+| D5 | Structured CLI tree (`====`, `dep`, `checkout`, `module`, `pin` / `would: pin`, tidy / skip tidy); no kool commit-message line; wrk does **not** exec kool |
+| D6 | Consumer set = `CollectStackInventory(cwd)` when git; else nearest `go.mod`. Scan every `go.mod` under every member `Path`. Pin only modules that **already require** the path. Self never pinned |
+| D7 | Pin does not add new requires; zero matching consumers on the whole stack → `wrk:` error containing `requires`; **no banner** |
+| D8 | One banner per invocation. Deps named once at top (argv order). Body is checkout → module → actions. Tidy once under the module. Dir-mode summary `updated N modules in C checkouts` |
 
 **Locked product rules (`--all`):**
 
 | ID | Rule |
 |----|------|
-| A1 | Consumer root = **git toplevel of cwd** (`worktree.ShowToplevel`), not main repo |
-| A2 | Scan all go.mod under that toplevel; mutate **only** those modules |
+| A1 | Consumer set = **`CollectStackInventory(cwd)`** (not only cwd git toplevel; still not main-repo when cwd is a linked worktree Path) |
+| A2 | Scan all go.mod under every stack member `Path`; mutate **only** those modules |
 | A3 | Inventory read-only (`BuildInventory`); ownership + latest tags from owner main path |
 | A4 | External require → **silent skip** (does **not** increment `skipped S`); same-toplevel + filesystem replace → **skipped** (counts in S; no bump) |
 | A5 | No tag on owner → `warning:` stderr + skip (counts in S); exit 0 |
 | A6 | Already at latest → **already** count (no per-dep noise) |
 
 | A7 | After apply pins: **same tidy helper as dir-mode** (versioned `withgo` + vendor skip) once per consumer with ≥1 pin; no commit/build |
-| A8 | Dry-run: `would:` plan + tidy lines; zero writes |
+| A8 | Dry-run: validate first; then banner `==== dep-update (dry-run) ====`, `would:` action lines, summary `would update N, already A, skipped S in C checkouts`; zero writes |
 | A9 | Consumer need **not** be registered (pull-only) |
 
 **Partners:** `--dry-run`, optional `--color` / `--no-color`, `-v`.
@@ -65,24 +71,30 @@ editing other projects' go.mod; kool CLI; real network / real SDK download.
 
 - **wrk --dep-update** — exclusive top-level Bool mode. Dir args (remaining) **or**
   partner **`--all`**. Partners: `--dry-run`, color, `-v`. Does not exec kool.
+- **Stack consumer set** — `CollectStackInventory(cwd)`: cwd git toplevel +
+  nested status repos + BFS over local filesystem replaces (same as `--unwind` /
+  `--pin-locals`). Scan every `go.mod` under every member `Path`. Not git →
+  nearest `go.mod`. `--all` still requires a git repo.
 - **Dir mode** — for each dep dir: resolve module + latest tag (`update.Pin`).
-  Consumer root = git toplevel of cwd (else nearest `go.mod`). `scan.Scan`; pin
-  every module that already requires that path. Then versioned tidy or
-  `skip tidy  module …  (vendor/)`. Zero requirers → error.
-- **`--all` mode** — resolve git toplevel of cwd; scan consumer modules under it;
-  for each require, consult inventory ownership and owner tags; Pin when outdated
-  inventory-owned; external require silent (not in `skipped S`); same-toplevel
-  filesystem replace + no-tag soft-skips count in `skipped S`; same tidy helper
-  after apply.
+  Pin every stack module that already requires that path. Self never pinned.
+  Then versioned tidy or `skip tidy  (vendor/)` once per affected module.
+  Zero requirers on the stack → `wrk:` error containing `requires`; no banner.
+- **`--all` mode** — same stack consumer set; for each require, consult inventory
+  ownership and owner tags; Pin when outdated inventory-owned; external require
+  silent (not in `skipped S`); same-checkout filesystem replace + no-tag
+  soft-skips count in `skipped S`; same tidy helper after apply.
 - **Inventory** — `BuildInventory(WRK_HOME)`: registered projects + sub-modules;
   latest numeric tags from owner on-disk module dir (main path).
 - **withgo tidy** — `ModuleGoLine` + `Run(ver, ["go","mod","tidy"], WithGo, …)`.
   Pin `go 1.22` → `go1.22.12`. Skip when `vendor/` is a directory beside go.mod.
-- **Dry-run** — plan only; `would:` pin + `would: go mod tidy` or
-  `would: skip tidy  module …  (vendor/)`; zero writes.
+- **CLI tree** — one banner; dir-mode `dep` headers (argv order); body
+  checkout → module → `pin` / `would: pin` + one tidy. Checkout label =
+  `statusDirLine` vs invocation cwd (`.` / `external/kool`).
+- **Dry-run** — validate every dir arg first (any bad → no banner / no tree);
+  then `would:` action lines; zero writes.
 - **Hard errors** — empty mode (no dirs, no `--all`); `--all` with paths; bare
   `--all`; exclusive modes; dir-mode missing dir / not module / no tags / no
-  consumer go.mod / zero requirers; Pin/tidy write failures (fail-fast).
+  consumer go.mod / zero requirers; Pin/tidy write failures (fail-fast). No banner.
 - **Soft warnings (`--all`)** — missing registry paths, no-tag skips (`warning:`).
 
 # Decision Tree
@@ -90,8 +102,9 @@ editing other projects' go.mod; kool CLI; real network / real SDK download.
 ```text
 dep-update/
 ├── help/
-│   ├── mentions-flag                # --dep-update (GREEN)
-│   └── mentions-all                 # --all with --dep-update (RED until help)
+│   ├── mentions-flag                # --dep-update
+│   ├── mentions-all                 # --all with --dep-update
+│   └── mentions-stack               # unwind/stack + --dry-run
 ├── reject/
 │   ├── no-args                      # neither dirs nor --all
 │   ├── with-dep-replace
@@ -104,29 +117,38 @@ dep-update/
 │   ├── not-a-module
 │   ├── no-tags
 │   ├── no-consumer-gomod
-│   └── no-consumer-requires         # git + go.mod, no require of xxx
+│   └── no-consumer-requires         # stack has no requirer of xxx
 ├── dry-run/                         # dir mode
 │   ├── no-write
-│   └── vendor-skip
-├── apply/                           # dir mode
-│   ├── drop-replace-set-require     # pin + tidy (nearest)
-│   ├── nested-module-tag-prefix
-│   ├── multi-dir                    # two pins + tidy once
-│   ├── fan-out-requirers            # git: root + pkg/ both require
-│   ├── skip-non-requirer
 │   ├── vendor-skip
-│   └── versioned-tidy               # go 1.19 → go1.19.13 wrapper
+│   ├── stack-no-write
+│   ├── multi-dir-stack-no-write
+│   └── bad-second-arg               # no banner; first dep not a half-plan
+├── apply/                           # dir mode
+│   ├── drop-replace-set-require     # pin + tidy (nearest / not-git)
+│   ├── nested-module-tag-prefix
+│   ├── multi-dir                    # two pins + tidy once (one consumer)
+│   ├── fan-out-requirers            # same-checkout: root + pkg/ both require
+│   ├── skip-non-requirer            # same-checkout sibling, default quiet
+│   ├── vendor-skip
+│   ├── versioned-tidy               # go 1.19 → go1.19.13 wrapper
+│   ├── stack-requirer-other-checkout
+│   ├── stack-skip-non-requirer      # cross-checkout, default quiet
+│   ├── stack-skip-self
+│   └── multi-dir-stack
 └── all/
     ├── dry-run/
     │   ├── bumps-outdated
-    │   └── already-up-to-date
+    │   ├── already-up-to-date
+    │   └── stack-outdated
     ├── apply/
     │   ├── cross-project-bump-and-tidy
     │   ├── worktree-toplevel-not-main
     │   ├── skip-intra-local-replace
     │   ├── skip-external-require
     │   ├── nested-owner-module-tag
-    │   └── vendor-skip
+    │   ├── vendor-skip
+    │   └── stack-outdated
     └── soft/
         └── no-tag-warn
 ```
@@ -137,6 +159,7 @@ dep-update/
 |------|--------|
 | `help/mentions-flag` | Root help mentions `--dep-update` |
 | `help/mentions-all` | Root help mentions `--all` in context of `--dep-update` |
+| `help/mentions-stack` | Root help mentions unwind/stack (or equivalent) + `--dry-run` for `--dep-update` |
 | `reject/no-args` | Neither dirs nor `--all` → requires directory or `--all` |
 | `reject/with-dep-replace` | XOR with `--dep-replace` |
 | `reject/with-pin-locals` | Exclusive with `--pin-locals` |
@@ -146,88 +169,109 @@ dep-update/
 | `error/not-a-module` | Dir without go.mod → non-zero |
 | `error/no-tags` | Module with no version tags → non-zero (dir mode hard) |
 | `error/no-consumer-gomod` | No git + no go.mod ancestor → non-zero |
-| `error/no-consumer-requires` | Git + go.mod that does not require xxx → `requires` error |
-| `dry-run/no-write` | `would: dep-update` **and** `would: go mod tidy`; no write |
-| `dry-run/vendor-skip` | `would: skip tidy  module …  (vendor/)`; no write |
-| `apply/drop-replace-set-require` | Drop replace; require@latest; `go mod tidy ok`; go.sum |
+| `error/no-consumer-requires` | Stack has no requirer of xxx → `requires` error; no banner |
+| `dry-run/no-write` | Dry-run tree (`would: pin` + `would: go mod tidy`); no write |
+| `dry-run/vendor-skip` | Dry-run tree `would: skip tidy  (vendor/)`; no write |
+| `dry-run/stack-no-write` | Single-target stack tree; go.mod/go.sum unchanged |
+| `dry-run/multi-dir-stack-no-write` | Two `dep` headers; would: pins; no write |
+| `dry-run/bad-second-arg` | No banner; `wrk:` + missing dir; first dep not a half-plan |
+| `apply/drop-replace-set-require` | Drop replace; require@latest; tree + tidy; go.sum |
 | `apply/nested-module-tag-prefix` | Submodule tag prefix → clean version + tidy |
 | `apply/multi-dir` | Two pins + tidy once for the one consumer |
-| `apply/fan-out-requirers` | Git root + `pkg/` both require xxx → both pinned + tidied |
-| `apply/skip-non-requirer` | Sibling under toplevel without require → go.mod unchanged |
-| `apply/vendor-skip` | Pin applied; `skip tidy  module …  (vendor/)`; no go.sum |
+| `apply/fan-out-requirers` | Same-checkout root + `pkg/` both require xxx → both pinned + tidied |
+| `apply/skip-non-requirer` | Same-checkout sibling without require unchanged; default quiet |
+| `apply/vendor-skip` | Pin applied; `skip tidy  (vendor/)`; no go.sum |
 | `apply/versioned-tidy` | Consumer `go 1.19`; wrapper at `go1.19.13` used |
-| `all/dry-run/bumps-outdated` | Inventory pull plan: would bump + would tidy; no write |
-| `all/dry-run/already-up-to-date` | Banner + summary zeros; no would: pin lines |
-| `all/apply/cross-project-bump-and-tidy` | Pin + tidy; consumer only; go.sum |
-| `all/apply/worktree-toplevel-not-main` | Edit linked worktree modules only, not main |
-| `all/apply/skip-intra-local-replace` | Same-toplevel filesystem replace → skipped |
+| `apply/stack-requirer-other-checkout` | Pin+tidy primary **and** other git checkout that requires xxx |
+| `apply/stack-skip-non-requirer` | Other-checkout module without require unchanged; default quiet |
+| `apply/stack-skip-self` | Dep’s own go.mod not pinned when dep checkout is on the stack |
+| `apply/multi-dir-stack` | Two dep args; one consumer both pins + one tidy; other requires only first |
+| `all/dry-run/bumps-outdated` | `--all` dry-run tree; no argv `dep` list; no write |
+| `all/dry-run/already-up-to-date` | Banner + zero summary `in C checkouts`; no pin tree |
+| `all/dry-run/stack-outdated` | Dry-run tree for other-checkout inventory require; no argv `dep` list |
+| `all/apply/cross-project-bump-and-tidy` | Pin + tidy tree; consumer only; go.sum |
+| `all/apply/worktree-toplevel-not-main` | Edit linked worktree Path only, not MainRepo |
+| `all/apply/skip-intra-local-replace` | Same-checkout filesystem replace → skipped |
 | `all/apply/skip-external-require` | Non-inventory require silent; inventory dep bumps |
 | `all/apply/nested-owner-module-tag` | Nested owner tag prefix → clean require version |
 | `all/apply/vendor-skip` | `--all` pin + skip tidy when vendor/ present |
+| `all/apply/stack-outdated` | Inventory-owned require on **other** stack checkout pinned + tidied |
 | `all/soft/no-tag-warn` | Owner no tags → warning: + skip; exit 0 |
 
 # Output contracts (assert targets)
 
+Tokens: `====`, `dep`, `checkout`, `module`, `pin`, `would:`,
+`go mod tidy ok`, `skip tidy`, `(vendor/)`, `->`. Trailing `\n`.
+Checkout path = `statusDirLine` vs invocation cwd (`.` / `external/kool`).
+No short form for a single target. Default quiet: only modules that change
+(`-v` would list `no require` / `self` / `already <ver>` — optional).
+
 ## Dir mode
 
-**Apply success (stdout, trailing `\n`) — per consumer, pin line(s) then tidy/skip:**
+**Apply success (stdout, trailing `\n`) — banner, argv `dep` headers, checkout → module → pin + tidy:**
 
 ```text
-dep-update <module-path> -> v0.0.2
-go mod tidy ok  module <consumer-module-path>
+==== dep-update ====
+dep  <dep-path> -> <new>  (tag <tag>)
+
+  checkout  .
+    module  <consumer-path>
+      pin  <dep-path>  <old> -> <new>
+      go mod tidy ok
+
+dep-update: updated N modules in C checkouts
 ```
 
-Vendor present:
+Tag parenthetical on the header `dep` line is optional if no tag; if present,
+`(tag …)`. Pin lines include **old -> new**. Vendor: `skip tidy  (vendor/)`
+under that module (indent with the tree).
 
-```text
-dep-update <module-path> -> v0.0.2
-skip tidy  module <consumer-module-path>  (vendor/)
-```
+**Multiple targets:** N `dep` header lines (argv order). Each module lists
+only pins for deps it already requires, then one tidy.
 
-Optional tag parenthetical is implementer-owned, e.g.
-`(tag packages/dep/v0.0.2)`. Locked tokens: `dep-update`, `->`, version
-`vN.N.N`, `go mod tidy ok  module`, `skip tidy  module`, `(vendor/)`.
-No dir-mode summary line.
+**Dry-run:** banner `==== dep-update (dry-run) ====`; `would: pin  …`;
+`would: go mod tidy` or `would: skip tidy  (vendor/)`;
+summary `dep-update: would update N modules in C checkouts`. Zero writes.
 
-**Dry-run:**
+**Zero requirers (stderr, non-zero):** `wrk:` error containing `requires`.
+**No banner.**
 
-```text
-would: dep-update <module-path> -> v0.0.2
-would: go mod tidy  module <consumer-module-path>
-```
-
-or `would: skip tidy  module <consumer-module-path>  (vendor/)`.
-
-**Zero requirers (stderr, non-zero):** `wrk:` error containing `requires`
-(e.g. `no module under <root> requires <path>`).
+**Bad second arg on dry-run:** `wrk:` + `no such dir` (or equivalent); no
+banner / no tree; first dep not described as a half-plan.
 
 ## `--all` mode
+
+Same banner + checkout/module tree; **no** argv `dep` header list
+(inventory chooses).
 
 **Apply (stdout):**
 
 ```text
-dep-update <module-path> -> vX.Y.Z  (tag <tag>)
-go mod tidy ok  module <consumer-module-path>
-dep-update: updated N, already A, skipped S
+==== dep-update ====
+
+  checkout  .
+    module  <consumer-path>
+      pin  <dep-path>  <old> -> <new>
+      go mod tidy ok
+
+dep-update: updated N, already A, skipped S in C checkouts
 ```
 
-**Dry-run:**
+**Dry-run:** banner `==== dep-update (dry-run) ====`; `would: pin` /
+`would: go mod tidy`; summary
+`dep-update: would update N, already A, skipped S in C checkouts`.
 
-```text
-would: dep-update <module-path> -> vX.Y.Z
-would: go mod tidy  module <consumer-module-path>
-dep-update: would update N, already A, skipped S
-```
-
-**Already up to date (no pin actions)** — apply **and** dry-run use this form
+**Already up to date (no pin actions)** — keep a banner + zero summary;
+no pin tree required. Apply **and** dry-run use apply wording
 (not `would update` when there are zero planned pins):
 
 ```text
+==== dep-update ====
 dep-update: already up to date
-dep-update: updated 0, already A, skipped S
+dep-update: updated 0, already A, skipped S in C checkouts
 ```
 
-**Summary counts:** `skipped S` = same-toplevel local filesystem replace skips +
+**Summary counts:** `skipped S` = same-checkout local filesystem replace skips +
 no-tag soft-skips only. External (non-inventory) requires are silent and do
 **not** increment S.
 
@@ -235,7 +279,7 @@ no-tag soft-skips only. External (non-inventory) requires are silent and do
 registry paths.
 
 **Errors (stderr, non-zero):** `wrk:` / `Error:` style consistent with existing
-dep-update rejects.
+dep-update rejects. **No banner.**
 
 Trailing `\n` after last stdout content line.
 
@@ -246,11 +290,10 @@ doctest vet ./cmd/wrk/tests/dep-update
 doctest test ./cmd/wrk/tests/dep-update
 ```
 
-Classic TDD: referencing `CaptureOpts.WithGo` is compile-RED until the
-implementer adds the seam. Once the suite compiles: **new/rewritten** dir-mode
-fan-out + tidy + vendor-skip leaves stay **RED** until product lands; unchanged
-leaves (`reject/`, most `error/`, existing `all/` pin-selection, help) stay
-**GREEN**.
+Classic TDD: **new stack / new-stdout** leaves and **rewritten** dir-mode /
+`--all` success/dry-run tree asserts stay **RED** until the implementer lands
+stack fan-out + CLI tree. Reject/error leaves keep today’s meaning and may stay
+**GREEN**. `help/mentions-stack` is RED until help mentions unwind/stack.
 
 ```go
 import (
@@ -302,7 +345,12 @@ type Request struct {
 	WantUpdated        int
 	WantAlready        int
 	WantSkipped        int
-	WantConsumerModule string // e.g. example.com/app for tidy lines
+	WantCheckouts      int    // C in "in C checkouts"; 0 → helper default 1
+	WantOldVersion     string // pin old version (dir-mode v0.0.1 / --all v1.0.0)
+	WantOldVersion2    string
+	WantCheckout       string // statusDirLine vs cwd; default "."
+	WantCheckout2      string // other stack checkout, e.g. external/kool
+	WantConsumerModule string // e.g. example.com/app for module lines
 	ProxyRoot          string
 
 	// Versioned tidy seam: leaves seed $InstallDir/<pin>/bin/go wrappers.

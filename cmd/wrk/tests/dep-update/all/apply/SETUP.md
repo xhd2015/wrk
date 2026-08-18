@@ -3,10 +3,11 @@
 **Feature**: wrk --dep-update --all applies inventory pins and tidies affected modules
 
 ```
-consumer git toplevel + inventory owners + optional file:// GOPROXY
+# stack consumers + inventory owners + optional file:// GOPROXY
   -> wrk --dep-update --all
-  -> dep-update lines; go mod tidy ok | skip tidy (vendor/); summary
-  -> only consumer-tree go.mod/go.sum change; no commit
+  -> ==== dep-update ====; checkout → module → pin; no argv dep list
+  -> go mod tidy ok | skip tidy (vendor/); updated N, already A, skipped S in C checkouts
+  -> only stack-member go.mod/go.sum change; no commit
 ```
 
 ## Preconditions
