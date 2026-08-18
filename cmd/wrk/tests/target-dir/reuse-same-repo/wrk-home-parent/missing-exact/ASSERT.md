@@ -1,14 +1,14 @@
 ---
 label: e2e, tty
-explanation: requires `script` fake TTY so Policy B would prompt today; dump parent must skip it
+explanation: requires `script` fake TTY so a returned Policy B prompt would fail this leaf; dump parent must skip it
 ---
 
 ## Expected
 
 - Exit code 0.
-- Stdout is the **new** exact spawn path (`req.SpawnDir`) plus trailing `\n` — not the dump sibling.
-  (`script(1)` may prefix control characters; when stdout is otherwise exactly the path,
-  lock it with `assertStdoutExactPath`.)
+- Stdout includes the **new** spawn path (`req.SpawnDir`) and is not the dump sibling.
+  Do not require a single exact path line: Linux `script(1)` may add control
+  characters; there is no prompt, so do not send Enter / ExactPath-lock.
 - New path exists as a live linked worktree of source and is listed on `myrepo`.
 - Dump sibling remains on disk and remains listed.
 - Combined stdout+stderr does **not** contain Policy B tokens: `would reuse`,
@@ -44,9 +44,6 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	got := strings.TrimSpace(resp.Stdout)
 	if got != wantNew && !strings.Contains(resp.Stdout, wantNew) {
 		t.Fatalf("stdout should be/include new dump path %q; stdout=%q stderr=%q", wantNew, resp.Stdout, resp.Stderr)
-	}
-	if got == wantNew {
-		assertStdoutExactPath(t, resp.Stdout, wantNew)
 	}
 	if got == req.WtDir {
 		t.Fatalf("stdout must not be dump sibling %q", req.WtDir)

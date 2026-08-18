@@ -4,18 +4,18 @@
 
 ```
 # reusable sibling already under the dump; preferred branch main-{date} taken
-# TTY + Enter (default Y) would reuse the sibling *today* if Policy B ran
-# after skip: create exactly at the missing dump name; no would-reuse / skip-creating
+# TTY so Policy B would prompt if it still ran; no stdin (no prompt to answer)
+# skip: create exactly at the missing dump name; no would-reuse / skip-creating
 {WRK_HOME}/worktrees/myrepo-main-{date} (reusable)
-  -> wrk myrepo {WRK_HOME}/worktrees/myrepo-main-{date}-named  (stdin \n)
-  -> stdout = new exact path; sibling still listed
+  -> wrk myrepo {WRK_HOME}/worktrees/myrepo-main-{date}-named
+  -> stdout includes new path; sibling still listed
 ```
 
 ## Steps
 
 1. Grouping already added one reusable dump sibling (clean, HEAD==source).
 2. Set `req.SpawnDir` to a **new missing** path under `{req.WrkHome}/worktrees`.
-3. Run named create under fake TTY with stdin `\n` (default Y).
+3. Run named create under fake TTY with **no** stdin (Policy B skip means no Y/n).
 
 ```go
 import (
@@ -56,7 +56,6 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 		t.Fatalf("spawn path must be missing: %s", spawn)
 	}
 	req.SpawnDir = spawn
-	req.StdinInput = "\n"
 	return nil
 }
 ```
