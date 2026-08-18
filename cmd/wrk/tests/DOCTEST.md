@@ -43,7 +43,7 @@ after successful create / `--cd` / `--bring` / `--set-task` / `--done`), and
 - **--no-in-module-replace** — bool flag (no value); valid ONLY with `--done`. Restores the fully-strict local-replace guard: every filesystem/local `replace` (intra-repo or extra-repo) blocks `--done`. Without it (default), intra-repo replaces — whose target dir exists and shares the consumer's `git rev-parse --show-toplevel` (`../../`/`./sub` nested-module reference) — only WARN and `--done` proceeds; extra-repo replaces (`./external/foo` dep worktree, non-existent/absolute/sibling) still block. Bare `wrk --no-in-module-replace`, or with any other mode (`--bring`/`--list`/no-args create) → non-zero exit, stderr `wrk: --no-in-module-replace is only valid with --done`.
 - **Request.Args** — CLI arguments passed to `wrk` after optional `<dir>` (empty + no TargetDir/TaskDesc → bare dashboard; create uses `["--new"]` or positionals/task/UX; `["--bring", depPath]` for bring tests; `["--done"]` or `["--done", "--confirm-from-stdin"]` for done tests; `["--list"]` for list tests).
 - **Request.TargetDir** — when set, prepended as the first positional argument to `wrk` (`wrk <dir> ...`); used by `dir-arg/` tests to run from `WorkRoot` while targeting a repo elsewhere.
-- **Request.SpawnDir** — optional second positional `<target-dir>` (`wrk <dir> <target-dir>`); appended after `TargetDir` when set. Overrides the worktree spawn location: missing target with existing parent → spawn exactly at `<target-dir>` (no naming suffix on the path); existing target dir → spawn a default-named sub-dir under it; missing parent → error. Resolved relative to the process (shell) cwd, not `<dir>`. Create-only — errors with `wrk: unexpected arguments` when combined with `--list`/`--done`. Combined with `--bring`, create at the spawn path then bring into that path (`create-bring/success/target-dir/`). `WRK_HOME` is ignored when set. **Named create same-repo reuse (Policy B)**: applies only to `wrk <dir> <target-dir>` (`Request.SpawnDir`). Before create: if the **resolved intended spawn path already exists** (dir/file/linked WT) → non-zero error, no create. Else consider only **live linked worktrees of the source `mainRepo` that are direct siblings under the same cleaned absolute parent as the intended spawn path** (existing target dir → parent of first free named subdir; missing target with parent → parent of exact path). Worktrees under other parents (e.g. `WRK_HOME/worktrees`, other workspace folders) do **not** trigger Policy B. A sibling is **reusable** only when porcelain-clean **and** `HEAD` equals the source checkout HEAD; dirty or clean-but-differs → create as today with **no** Policy B banner. No reusable sibling → create as today, no banner. ≥1 reusable + **stdin TTY** → prompt on stderr with `wrk: warning:` / `would reuse` / `skip creating …? [Y/n]` (primary = lex-smallest reusable path; multi may list `also present:`); empty/`Y`/`y` → **skip** create, stdout = primary path, exit 0; `n`/`N` → create as today. ≥1 reusable + **non-TTY** → **create** as today (no prompt, **no** refuse). No `-y`/`--force` override in scope. Bare `wrk` / `wrk <a>` (no second positional) are **unchanged** (still free to create many under `~/.wrk/worktrees` with `-N`).
+- **Request.SpawnDir** — optional second positional `<target-dir>` (`wrk <dir> <target-dir>`); appended after `TargetDir` when set. Overrides the worktree spawn location: missing target with existing parent → spawn exactly at `<target-dir>` (no naming suffix on the path); existing target dir → spawn a default-named sub-dir under it; missing parent → error. Resolved relative to the process (shell) cwd, not `<dir>`. Create-only — errors with `wrk: unexpected arguments` when combined with `--list`/`--done`. Combined with `--bring`, create at the spawn path then bring into that path (`create-bring/success/target-dir/`). `WRK_HOME` is ignored when set. **Named create same-repo reuse (Policy B)**: applies only to `wrk <dir> <target-dir>` (`Request.SpawnDir`). Before create: if the **resolved intended spawn path already exists** (dir/file/linked WT) → non-zero error, no create. Else consider only **live linked worktrees of the source `mainRepo` that are direct siblings under the same cleaned absolute parent as the intended spawn path** (existing target dir → parent of first free named subdir; missing target with parent → parent of exact path). Worktrees under other parents (e.g. `WRK_HOME/worktrees`, other workspace folders) do **not** trigger Policy B. Same-parent reuse is **skipped entirely** when `abs(clean(parent(intendedSpawn)))` equals `abs(clean({WRK_HOME}/worktrees))` — this process's default dump (`WRK_HOME` env or `~/.wrk`, not a hardcoded home): no sibling scan, no `would reuse` / `also present` / `skip creating another? [Y/n]`; create proceeds as today (missing target + parent exists → exact path; existing dump container → first free named child). Occupied dump path still errors `already exists` (skip ≠ reuse this named worktree). Custom parents (e.g. `{WorkRoot}/target`) keep Policy B. A sibling is **reusable** only when porcelain-clean **and** `HEAD` equals the source checkout HEAD; dirty or clean-but-differs → create as today with **no** Policy B banner. No reusable sibling → create as today, no banner. ≥1 reusable + **stdin TTY** → prompt on stderr with `wrk: warning:` / `would reuse` / `skip creating …? [Y/n]` (primary = lex-smallest reusable path; multi may list `also present:`); empty/`Y`/`y` → **skip** create, stdout = primary path, exit 0; `n`/`N` → create as today. ≥1 reusable + **non-TTY** → **create** as today (no prompt, **no** refuse). No `-y`/`--force` override in scope. Bare `wrk` / `wrk <a>` (no second positional) are **unchanged** (still free to create many under `~/.wrk/worktrees` with `-N`).
 - **external/** — dependency worktrees live at `{consumerTop}/external/{basename}-{token}-{WRK_DATE}[-N]`; not under `WRK_HOME`. They are linked worktrees of the DEP repo (registered under `<depMain>/.git/worktrees/`), not the consumer — the consumer only hosts the working tree on disk.
 - **deps/** — manually linked worktrees may also live under `{consumerTop}/deps/...` (or any path under the checkout); created via `git -C <depMain> worktree add` into the consumer tree. `--done` cascade discovers them via `scan_repo.Scan`, same as `external/*`.
 - **runGitIsolated** / **gitOutputIsolated** / **gitWorktreeListIsolated** — thin wrappers over `github.com/xhd2015/gitops/git/git_isolated` (`MustRun`, `MustOutput`, `WorktreeList`).
@@ -500,7 +500,7 @@ wrk tests
 │       ├── no-prior-linked/      # no linked WT → create; no Policy B banner
 │       ├── exact-path-exists/    # intended spawn path already exists → error
 │       ├── sibling-other-parent/ # WT only under WRK_HOME/other parent → create; no banner
-│       └── sibling-same-parent/  # live linked WT(s) under same parent as spawn
+│       ├── sibling-same-parent/  # live linked WT(s) under same parent as spawn
 │           ├── not-reusable/     # dirty or clean-differs → create; no banner
 │           │   ├── dirty/
 │           │   └── clean-differs-from-source/
@@ -511,6 +511,9 @@ wrk tests
 │               │   └── multi-skip/   # two reusable → lex-smallest; also present
 │               └── non-tty/
 │                   └── creates/  # create; no refuse (automation-friendly)
+│       └── wrk-home-parent/      # spawn parent == {WRK_HOME}/worktrees (dump)
+│           ├── missing-exact/    # TTY + missing dump name → create; no Policy B
+│           └── exact-path-exists/ # occupied dump path → already exists (lock)
 ├── task/                          # wrk --task and wrk --set-task
 │   ├── spawn/                     # --task when creating worktree
 │   │   ├── basic/                 # wrk --task "fix login bug" → slug in name
@@ -839,6 +842,8 @@ wrk tests
 | 60g | target-dir/reuse-same-repo/sibling-same-parent/reusable/tty/proceed-n | TTY + `n` → create new under target (label: tty) |
 | 60h | target-dir/reuse-same-repo/sibling-same-parent/reusable/tty/multi-skip | two reusable siblings + Enter → lex-smallest; also present (label: tty) |
 | 60i | target-dir/reuse-same-repo/sibling-same-parent/reusable/non-tty/creates | non-TTY + reusable sibling → create; no refuse |
+| 60j | target-dir/reuse-same-repo/wrk-home-parent/missing-exact | TTY named create at missing dump path → exact path; no Policy B (label: e2e, tty) |
+| 60k | target-dir/reuse-same-repo/wrk-home-parent/exact-path-exists | occupied dump path → non-zero already exists; no Policy B |
 | 61 | done/no-go-mod | linked wt whose checkout has no go.mod; `--done` merge-back succeeds (guard no-op) |
 | 62 | done/not-linked-no-go-mod | main repo without go.mod; `--done` → `not a linked worktree` (not `no go.mod found`) |
 | 63 | done/sub-module-replace-blocks | main go.mod clean but `sub/go.mod` has local replace → guard blocks `--done` (names go.mod + directive) |
@@ -1364,12 +1369,14 @@ doctest test ./tests/target-dir/target-missing/parent-exists/branch-collision
 doctest test ./tests/target-dir/target-exists/collision-suffix
 doctest test ./tests/target-dir/relative-path
 
-# Same-repo reuse (Policy A auto + Policy B scoped same-parent) — Policy B expects RED until implemented
+# Same-repo reuse (Policy A auto + Policy B scoped same-parent).
+# Dump-parent TTY skip (wrk-home-parent/missing-exact) expects RED until Policy B is skipped under {WRK_HOME}/worktrees.
 doctest vet ./tests/bring/reuse-same-repo
 doctest test ./tests/bring/reuse-same-repo
 doctest vet ./tests/target-dir/reuse-same-repo
 doctest test ./tests/target-dir/reuse-same-repo
 doctest test --label tty ./tests/target-dir/reuse-same-repo/sibling-same-parent/reusable/tty
+doctest test --label tty ./tests/target-dir/reuse-same-repo/wrk-home-parent/missing-exact
 
 # Run a task spawn leaf
 doctest test ./tests/task/spawn/basic

@@ -13,6 +13,9 @@
 #   n/N -> create as today
 #   multi -> primary = lex-smallest; also present: other reusable paths
 # >=1 reusable sibling + non-TTY -> create (no refuse; automation-friendly)
+# parent(intendedSpawn) == {WRK_HOME}/worktrees (this process's dump) -> skip Policy B
+#   entirely (no sibling scan / no would-reuse / no skip-creating); create as today
+#   occupied dump path still errors already exists (skip ≠ reuse this named WT)
 myrepo (main) [+ optional sibling linked WTs under same parent as spawn]
   -> wrk myrepo <target-dir>
 ```
@@ -36,6 +39,11 @@ myrepo (main) [+ optional sibling linked WTs under same parent as spawn]
   porcelain clean, and `HEAD(P)==HEAD(source)`.
 - Dirty or clean-but-differs-from-source → **not** reusable → create, no banner.
 - Worktrees under other parents (`WRK_HOME/worktrees`, other workspace folders) do **not** trigger Policy B.
+- **Dump parent exception**: when `abs(clean(parent(intendedSpawn)))` equals
+  `abs(clean({WRK_HOME}/worktrees))` (this process's dump: `WRK_HOME` env or `~/.wrk`,
+  not a hardcoded home), Policy B does **not** apply — same freedom as bare `wrk` /
+  `wrk <dir>`. No sibling scan, no `would reuse` / `also present` / `skip creating`.
+  Occupied exact dump path still errors `already exists`. Custom parents keep Policy B.
 - stdout: path only. Prompt + warnings + errors on stderr.
 - No override flags (`-y` / `--force` out of scope for this feature).
 
@@ -94,9 +102,14 @@ func policyBAddSiblingUnderParent(t *testing.T, req *Request, parent, name, bran
 	return policyBAddSiblingLinked(t, req, filepath.Join(parent, name), branch)
 }
 
+// policyBDumpParent returns this process's default dump: {req.WrkHome}/worktrees.
+func policyBDumpParent(req *Request) string {
+	return filepath.Join(req.WrkHome, "worktrees")
+}
+
 // namedBringExistingWorktrees creates N sequential wrk worktrees of myrepo under WRK_HOME
 // (other parent relative to {WorkRoot}/target spawn). Returns abs paths in create order.
-// Used only for other-parent fixtures — these must NOT trigger scoped Policy B alone.
+// Used for other-parent fixtures and for dump-parent spawn (wrk-home-parent/).
 func namedBringExistingWorktrees(t *testing.T, req *Request, n int) []string {
 	t.Helper()
 	var paths []string
@@ -126,6 +139,7 @@ func ensureNamedBringReuseHelpersUsed() {
 	_ = policyBAddSiblingUnderParent
 	_ = policyBAddSiblingLinked
 	_ = policyBTargetParent
+	_ = policyBDumpParent
 	_ = assertNoPolicyBBanner
 	_ = filepath.Join
 }

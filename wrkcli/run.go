@@ -3724,6 +3724,8 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 // parent(intendedSpawn), porcelain-clean, and HEAD==source checkout. TTY: prompt
 // skip (default Y, wording "would reuse" / "skip creating"); non-TTY: create
 // without refuse. No reusable siblings → create as today with no banner.
+// Spawn parent == {WRK_HOME}/worktrees (this process's dump) skips Policy B
+// entirely; occupied dump path still errors already exists.
 func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, branchBase, pathToken, date, slug string, noCd, forceCd bool, execArgs []string, taskDesc string, ux createUXPlan, bring *bringApplyPlan) error {
 	// Resolve <target-dir> against the shell cwd (origWd), not the repo dir.
 	// Abs-normalize so parent comparisons match live worktree paths (macOS
@@ -3750,71 +3752,78 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 	}
 
 	// Policy B: reusable same-parent siblings only (not global linked scan).
+	// Dump parent {WRK_HOME}/worktrees: skip entirely (same freedom as bare wrk).
 	spawnParent := filepath.Dir(intendedSpawn)
 	if abs, aerr := filepath.Abs(spawnParent); aerr == nil {
 		spawnParent = filepath.Clean(abs)
 	} else {
 		spawnParent = filepath.Clean(spawnParent)
 	}
-	reusable, err := findReusableSiblingWorktrees(mainRepo, checkoutRoot, spawnParent)
-	if err != nil {
-		return err
+	skipPolicyB := false
+	if wrkHome, herr := resolveWrkHome(); herr == nil {
+		skipPolicyB = isWrkHomeWorktreesParent(spawnParent, wrkHome)
 	}
-	if len(reusable) > 0 && term.IsTerminal(int(os.Stdin.Fd())) {
-		primary := reusable[0]
-		// Color on stderr only when interactive terminal and NO_COLOR is unset.
-		colorOn := term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == ""
-		warnTok := "warning:"
-		if colorOn {
-			warnTok = colorize("warning:", ansiOrange)
-		}
-		pathDisp := func(p string) string {
-			if colorOn {
-				return colorize(p, ansiGrey)
-			}
-			return p
-		}
-		if len(reusable) > 1 {
-			fmt.Fprintf(os.Stderr, "wrk: %s %s would reuse %s\n", warnTok, basename, pathDisp(primary))
-			for _, p := range reusable[1:] {
-				fmt.Fprintf(os.Stderr, "wrk: %s also present: %s\n", warnTok, pathDisp(p))
-			}
-		}
-		// Prompt on stderr; default is skip (Y/empty). No trailing newline before read.
-		fmt.Fprintf(os.Stderr, "wrk: %s %s would reuse %s, skip creating another? [Y/n] ", warnTok, basename, pathDisp(primary))
-		line, err := readStdinLineForPrompt()
+	if !skipPolicyB {
+		reusable, err := findReusableSiblingWorktrees(mainRepo, checkoutRoot, spawnParent)
 		if err != nil {
-			return fmt.Errorf("wrk: read skip confirmation: %w", err)
+			return err
 		}
-		answer := strings.TrimSpace(strings.ToLower(line))
-		switch answer {
-		case "", "y", "yes":
-			absPath, err := filepath.Abs(primary)
+		if len(reusable) > 0 && term.IsTerminal(int(os.Stdin.Fd())) {
+			primary := reusable[0]
+			// Color on stderr only when interactive terminal and NO_COLOR is unset.
+			colorOn := term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == ""
+			warnTok := "warning:"
+			if colorOn {
+				warnTok = colorize("warning:", ansiOrange)
+			}
+			pathDisp := func(p string) string {
+				if colorOn {
+					return colorize(p, ansiGrey)
+				}
+				return p
+			}
+			if len(reusable) > 1 {
+				fmt.Fprintf(os.Stderr, "wrk: %s %s would reuse %s\n", warnTok, basename, pathDisp(primary))
+				for _, p := range reusable[1:] {
+					fmt.Fprintf(os.Stderr, "wrk: %s also present: %s\n", warnTok, pathDisp(p))
+				}
+			}
+			// Prompt on stderr; default is skip (Y/empty). No trailing newline before read.
+			fmt.Fprintf(os.Stderr, "wrk: %s %s would reuse %s, skip creating another? [Y/n] ", warnTok, basename, pathDisp(primary))
+			line, err := readStdinLineForPrompt()
 			if err != nil {
-				return fmt.Errorf("resolve worktree path: %w", err)
+				return fmt.Errorf("wrk: read skip confirmation: %w", err)
 			}
-			fmt.Println(absPath)
-			// Policy B reuse: bring into the reused sibling, then exec there.
-			if err := seedConsumerGoModFromSource(checkoutRoot, absPath, bring); err != nil {
-				return err
+			answer := strings.TrimSpace(strings.ToLower(line))
+			switch answer {
+			case "", "y", "yes":
+				absPath, err := filepath.Abs(primary)
+				if err != nil {
+					return fmt.Errorf("resolve worktree path: %w", err)
+				}
+				fmt.Println(absPath)
+				// Policy B reuse: bring into the reused sibling, then exec there.
+				if err := seedConsumerGoModFromSource(checkoutRoot, absPath, bring); err != nil {
+					return err
+				}
+				if err := applyBringPlan(absPath, bring); err != nil {
+					return err
+				}
+				if err := runExecInDir(absPath, execArgs); err != nil {
+					return err
+				}
+				if forceCd {
+					return forceLandInDir(absPath)
+				}
+				return nil
+			case "n", "no":
+				// Fall through to create as today.
+			default:
+				return fmt.Errorf("wrk: invalid input %q (expected y/n)", strings.TrimSpace(line))
 			}
-			if err := applyBringPlan(absPath, bring); err != nil {
-				return err
-			}
-			if err := runExecInDir(absPath, execArgs); err != nil {
-				return err
-			}
-			if forceCd {
-				return forceLandInDir(absPath)
-			}
-			return nil
-		case "n", "no":
-			// Fall through to create as today.
-		default:
-			return fmt.Errorf("wrk: invalid input %q (expected y/n)", strings.TrimSpace(line))
 		}
 	}
-	// Non-TTY + reusable: create (no refuse). Empty reusable: create with no banner.
+	// Non-TTY + reusable: create (no refuse). Empty reusable / dump parent: create with no banner.
 
 	info, err := os.Stat(absTarget)
 	if err == nil {
@@ -3930,6 +3939,23 @@ func resolveWrkHome() (string, error) {
 		return "", fmt.Errorf("resolve home dir: %w", err)
 	}
 	return filepath.Join(home, ".wrk"), nil
+}
+
+// absCleanPath Abs-normalizes p (macOS /var vs /private/var) then Cleans.
+func absCleanPath(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(p)
+}
+
+// isWrkHomeWorktreesParent reports whether spawnParent is this process's dump
+// directory {wrkHome}/worktrees. Named create under the dump skips Policy B.
+func isWrkHomeWorktreesParent(spawnParent, wrkHome string) bool {
+	if spawnParent == "" || wrkHome == "" {
+		return false
+	}
+	return absCleanPath(spawnParent) == absCleanPath(filepath.Join(wrkHome, "worktrees"))
 }
 
 func resolveWrkDate() string {
