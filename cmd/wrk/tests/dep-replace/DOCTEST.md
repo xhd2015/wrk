@@ -79,6 +79,7 @@ dep-replace/
 │   └── no-stack-consumer              # git stack; zero gated consumers
 ├── dry-run/
 │   ├── no-write
+│   ├── flag-before-dir                # --dep-replace --dry-run <dir>
 │   ├── stack-no-write
 │   ├── multi-dir-stack-no-write
 │   └── bad-second-arg                 # no banner; first dep not a half-plan
@@ -109,6 +110,7 @@ dep-replace/
 | `error/no-consumer-gomod` | No go.mod above workDir (not-git) → non-zero; no banner |
 | `error/no-stack-consumer` | Git stack with zero gated consumers → `replace`/`consumer` error; no banner |
 | `dry-run/no-write` | Dry-run tree (`would: replace`); no go.mod write |
+| `dry-run/flag-before-dir` | `--dep-replace --dry-run <dir>` is dry-run, not `no such dir: --dry-run` |
 | `dry-run/stack-no-write` | Single-target stack tree; zero writes |
 | `dry-run/multi-dir-stack-no-write` | Two `dep` headers; would: replace; zero writes |
 | `dry-run/bad-second-arg` | No banner; `wrk:` + missing dir; first dep not a half-plan |

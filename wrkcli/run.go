@@ -214,7 +214,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var showGraph bool
 	var verify bool
 	var pinLocals bool
-	var depReplacePaths []string
+	var depReplace bool
 	var depUpdate bool
 	var allFlag bool
 	var execArgs []string
@@ -277,7 +277,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--show-graph", &showGraph).
 		Bool("--verify", &verify).
 		Bool("--pin-locals", &pinLocals).
-		StringSlice("--dep-replace", &depReplacePaths).
+		Bool("--dep-replace", &depReplace).
 		Bool("--dep-update", &depUpdate).
 		Bool("--all", &allFlag).
 		Bool("--reinstall-local", &reinstallLocal).
@@ -331,11 +331,10 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		return err
 	}
 
-	// --dep-update is a Bool mode; dep dirs are remaining args (dir mode) or
-	// partner --all (inventory pull). --dep-replace still uses StringSlice +
-	// remaining multi-value sugar. Clear remaining so paths are not treated as
-	// sourceDir/workDir overrides.
-	depReplaceMode := len(depReplacePaths) > 0
+	// --dep-update / --dep-replace are Bool modes; dep dirs are remaining args.
+	// --dep-update may use partner --all instead of dirs. Clear remaining so
+	// paths are not treated as sourceDir/workDir overrides.
+	depReplaceMode := depReplace
 	depUpdateMode := depUpdate
 
 	if allFlag && !depUpdate {
@@ -346,6 +345,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	}
 
 	var depUpdatePaths []string
+	var depReplacePaths []string
 	if depUpdate {
 		if allFlag {
 			if len(remaining) > 0 {
@@ -362,6 +362,9 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if depReplaceMode {
 		depReplacePaths = append(depReplacePaths, remaining...)
 		remaining = nil
+		if len(depReplacePaths) == 0 {
+			return fmt.Errorf("wrk: --dep-replace requires a directory")
+		}
 	}
 
 	// --force-cd and --no-cd are mutually exclusive (hard error before any work).
@@ -1316,7 +1319,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if pinLocals {
 		return runPinLocals(workDir, dryRun, colorFlag)
 	}
-	// --dep-replace: absolute replace into nearest consumer go.mod (no tidy).
+	// --dep-replace: absolute replace on unwind-stack consumers (no tidy).
 	if depReplaceMode {
 		return runDepReplace(workDir, depReplacePaths, dryRun)
 	}
