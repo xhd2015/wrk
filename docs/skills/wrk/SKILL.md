@@ -33,7 +33,7 @@ Fixed stage order (flag order free):
 ```
 
 ```sh
-# finish, sync, tag, push main
+# finish, sync, tag, push main (+ origin/<worktree-branch> when that ref exists)
 wrk --done --sync --tag-next --push
 # full pre→post→tail
 wrk --gen-commit-msg --commit --model=MODEL --done --sync --tag-next --push --reinstall-local
@@ -46,6 +46,7 @@ wrk --tag-next --propagate-tags --dry-run
 - Pre-stage: source worktree; `--dir` invalid when composed.
 - `--propagate-tags`: bump consumer `go.mod` requires to source release tags (with `--tag-next` uses new tags; alone uses existing).
 - `--json` only for bare `--tag-next` (not with primary / `--propagate-tags`).
+- `--push` after `--done` / `--merge-back` publishes main (and tags). If `origin/<worktree-branch>` already exists and its tip is in the local branch, also lease-updates that ref so a standing PR is not left on pre-rebase commits.
 - Default auto-yes on `--done` / `--merge-back` / `--set-task`; `--confirm` for Y/n; `-y` still valid.
 
 # Pull request

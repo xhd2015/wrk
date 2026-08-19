@@ -1658,6 +1658,8 @@ Flags:
   --dry-run                       with --done/--merge-back/--tag-next/--propagate-tags/--sync/--push/--reinstall-local/--unwind/--pin-locals/--dep-replace/--dep-update/--gen-commit-msg/--commit -m: plan only
   --push                          push current checkout branch to upstream/origin;
                                   with --done/--merge-back: push main branch (and tags when with --tag-next);
+                                  also force-with-lease origin/<worktree-branch> when that ref already exists
+                                  and its tip is already in the local branch;
                                   with --tag-next: also push newly created tags (branch + tags);
                                   with --pr: full-push branch tip then run PR path
   -f, --force                     with --push: force-with-lease branch push (tags stay non-force);
@@ -2379,6 +2381,10 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 	if hasCascade {
 		fmt.Println("==> own")
 	}
+	var sameNameSnap sameNameRemoteSnapshot
+	if withPush {
+		sameNameSnap = snapshotSameNameOriginBranch(checkoutRoot)
+	}
 	result, err := worktree.MergeBack(worktree.MergeBackOptions{
 		SourcePath: checkoutRoot,
 		TargetPath: "",
@@ -2406,12 +2412,12 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 	// Dry-run: still print post stages in dry mode; skip exec/land.
 	// Real success: apply post stages then exec/land.
 	if dryRun {
-		if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, forcePush, withPropagateTags, true, colorFlag, noColorFlag); err != nil {
+		if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, forcePush, withPropagateTags, true, colorFlag, noColorFlag, sameNameSnap); err != nil {
 			return err
 		}
 		return runComposeReinstallLocal(result, withReinstallLocal, true, colorFlag)
 	}
-	if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, forcePush, withPropagateTags, false, colorFlag, noColorFlag); err != nil {
+	if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, forcePush, withPropagateTags, false, colorFlag, noColorFlag, sameNameSnap); err != nil {
 		return err
 	}
 	if err := runComposeReinstallLocal(result, withReinstallLocal, false, colorFlag); err != nil {
@@ -2435,6 +2441,11 @@ func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync
 	checkoutRoot, err := requireLinkedWorktree(workDir, "--merge-back")
 	if err != nil {
 		return err
+	}
+
+	var sameNameSnap sameNameRemoteSnapshot
+	if withPush {
+		sameNameSnap = snapshotSameNameOriginBranch(checkoutRoot)
 	}
 
 	// Land core via workops (Remove=false). Sync/tag-next/push compose stays
@@ -2463,7 +2474,7 @@ func runMergeBack(workDir, wrkHome string, confirmFromStdin, assumeYes, withSync
 		return nil
 	}
 	// Post-pipeline same order as runDone (no exec/land). Worktree kept.
-	if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, forcePush, withPropagateTags, dryRun, colorFlag, noColorFlag); err != nil {
+	if err := runComposePostStages(result, checkoutRoot, wrkHome, withSync, withTagNext, withPush, forcePush, withPropagateTags, dryRun, colorFlag, noColorFlag, sameNameSnap); err != nil {
 		return err
 	}
 	return runComposeReinstallLocal(result, withReinstallLocal, dryRun, colorFlag)
@@ -2525,7 +2536,7 @@ func runComposeReinstallLocal(result *worktree.MergeBackResult, withReinstallLoc
 // includes --tag-next and --propagate-tags, planned next tags are threaded into
 // the propagate plan (same as bare --tag-next --propagate-tags --dry-run).
 // Blank line between major stdout stages.
-func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome string, withSync, withTagNext, withPush, forcePush, withPropagateTags, dryRun, colorFlag, noColorFlag bool) error {
+func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome string, withSync, withTagNext, withPush, forcePush, withPropagateTags, dryRun, colorFlag, noColorFlag bool, sameNameSnap sameNameRemoteSnapshot) error {
 	if !withSync && !withTagNext && !withPush && !withPropagateTags {
 		return nil
 	}
@@ -2582,6 +2593,7 @@ func runComposePostStages(result *worktree.MergeBackResult, sourcePath, wrkHome 
 		if err := runPushMain(mainPath, dryRun, forcePush, tags); err != nil {
 			return err
 		}
+		maybeUpdateSameNameOriginBranch(mainPath, sourcePath, result, sameNameSnap, dryRun)
 	}
 	if withPropagateTags {
 		fmt.Println() // blank line before propagate-tags block

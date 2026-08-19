@@ -469,12 +469,7 @@ func ensureOriginHeadForPR(repo, branch string) error {
 func originHeadExists(repo, branch string) (bool, error) {
 	// Prefer pushurl when configured so github.com-shaped fetch URLs with a
 	// local bare pushurl work offline (tests and redirect remotes).
-	remote := "origin"
-	if pushURL, err := gitOutputDir(repo, "config", "--get", "remote.origin.pushurl"); err == nil {
-		if u := strings.TrimSpace(pushURL); u != "" {
-			remote = u
-		}
-	}
+	remote := originPushRemote(repo)
 	// Capture stderr so a failed probe does not leak git "fatal:" onto the CLI.
 	out, _, err := gitOutputDirCapture(repo, "ls-remote", "--heads", remote, branch)
 	if err != nil {
