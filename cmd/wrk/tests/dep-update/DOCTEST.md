@@ -45,7 +45,7 @@ mutation in harness.
 | D6 | Consumer set = `CollectStackInventory(cwd)` when git; else nearest `go.mod`. Scan every `go.mod` under every member `Path`. Pin only modules that **already require** the path. Self never pinned |
 | D7 | Pin does not add new requires; zero matching consumers on the whole stack → `wrk:` error containing `requires`; **no banner** |
 | D8 | One banner per invocation. Deps named once at top (argv order). Body is checkout → module → actions. Tidy once under the module. Dir-mode summary `updated N modules in C checkouts` |
-| D9 | Consumer whose dep is covered by a **same-toplevel local filesystem replace** (intra-module replace) is **skipped**, not pinned. Prints `skip  <dep>  (intra-module replace)` (dry-run: `would: skip …`); no tidy for that module. Summary gains `, skipped S` when S > 0. Mirrors `--all` A4 |
+| D9 | Consumer whose dep is covered by a **same-git-toplevel local filesystem replace** (intra-module replace) is **skipped**, not pinned. A replace target that is absent or resolves to a **different git toplevel** (cross-repo) is **not** intra-module and is pinned. Prints `skip  <dep>  (intra-module replace)` (dry-run: `would: skip …`); no tidy for that module. Summary gains `, skipped S` when S > 0. Mirrors `--all` A4 |
 
 **Locked product rules (`--all`):**
 
@@ -54,7 +54,7 @@ mutation in harness.
 | A1 | Consumer set = **`CollectStackInventory(cwd)`** (not only cwd git toplevel; still not main-repo when cwd is a linked worktree Path) |
 | A2 | Scan all go.mod under every stack member `Path`; mutate **only** those modules |
 | A3 | Inventory read-only (`BuildInventory`); ownership + latest tags from owner main path |
-| A4 | External require → **silent skip** (does **not** increment `skipped S`); same-toplevel + filesystem replace → **skipped** (counts in S; no bump) |
+| A4 | External require → **silent skip** (does **not** increment `skipped S`); same-git-toplevel + filesystem replace → **skipped** (counts in S; no bump). Absent or cross-toplevel replace targets are **not** intra-module |
 | A5 | No tag on owner → `warning:` stderr + skip (counts in S); exit 0 |
 | A6 | Already at latest → **already** count (no per-dep noise) |
 
@@ -78,14 +78,17 @@ editing other projects' go.mod; kool CLI; real network / real SDK download.
   nearest `go.mod`. `--all` still requires a git repo.
 - **Dir mode** — for each dep dir: resolve module + latest tag (`update.Pin`).
   Pin every stack module that already requires that path. Self never pinned.
-  Same-toplevel local filesystem replace (intra-module replace) → **skip**
-  (D9): printed as `skip  <dep>  (intra-module replace)`, no tidy. Then
+  Same-git-toplevel local filesystem replace (intra-module replace) → **skip**
+  (D9): printed as `skip  <dep>  (intra-module replace)`, no tidy. A replace
+  target that is absent or resolves to a different git toplevel (cross-repo) is
+  **not** intra-module and is pinned. Then
   versioned tidy or `skip tidy  (vendor/)` once per affected module with pins.
   Zero requirers on the stack → `wrk:` error containing `requires`; no banner.
 - **`--all` mode** — same stack consumer set; for each require, consult inventory
   ownership and owner tags; Pin when outdated inventory-owned; external require
-  silent (not in `skipped S`); same-checkout filesystem replace + no-tag
-  soft-skips count in `skipped S`; same tidy helper after apply.
+  silent (not in `skipped S`); same-git-toplevel filesystem replace + no-tag
+  soft-skips count in `skipped S`; absent or cross-toplevel replace targets are
+  not intra-module; same tidy helper after apply.
 - **Inventory** — `BuildInventory(WRK_HOME)`: registered projects + sub-modules;
   latest numeric tags from owner on-disk module dir (main path).
 - **withgo tidy** — `ModuleGoLine` + `Run(ver, ["go","mod","tidy"], WithGo, …)`.
@@ -127,6 +130,7 @@ dep-update/
 │   ├── stack-no-write
 │   ├── multi-dir-stack-no-write
 │   ├── skip-intra-local-replace     # would: skip on dep's sub-module
+│   ├── pin-dangling-replace          # would: pin dep whose replace target is absent (not intra-module)
 │   └── bad-second-arg               # no banner; first dep not a half-plan
 ├── apply/                           # dir mode
 │   ├── drop-replace-set-require     # pin + tidy (nearest / not-git)
@@ -140,6 +144,7 @@ dep-update/
 │   ├── stack-skip-non-requirer      # cross-checkout, default quiet
 │   ├── stack-skip-self
 │   ├── skip-intra-local-replace      # dep's own sub-module with replace => ../ skipped
+│   ├── pin-dangling-replace          # dep with absent replace target pinned (not intra-module)
 │   └── multi-dir-stack
 └── all/
     ├── dry-run/
@@ -180,6 +185,7 @@ dep-update/
 | `dry-run/stack-no-write` | Single-target stack tree; go.mod/go.sum unchanged |
 | `dry-run/multi-dir-stack-no-write` | Two `dep` headers; would: pins; no write |
 | `dry-run/skip-intra-local-replace` | `would: skip` on dep's sub-module with intra-module replace; no write |
+| `dry-run/pin-dangling-replace` | `would: pin` dep whose relative replace target is absent; not intra-module |
 | `dry-run/bad-second-arg` | No banner; `wrk:` + missing dir; first dep not a half-plan |
 | `apply/drop-replace-set-require` | Drop replace; require@latest; tree + tidy; go.sum |
 | `apply/nested-module-tag-prefix` | Submodule tag prefix → clean version + tidy |
@@ -193,6 +199,7 @@ dep-update/
 | `apply/stack-skip-self` | Dep’s own go.mod not pinned when dep checkout is on the stack |
 | `apply/multi-dir-stack` | Two dep args; one consumer both pins + one tidy; other requires only first |
 | `apply/skip-intra-local-replace` | Dep's sub-module with intra-module replace `=> ../` skipped; primary pinned |
+| `apply/pin-dangling-replace` | Dep with absent replace target `=> ./external/dep` pinned (not intra-module) |
 | `all/dry-run/bumps-outdated` | `--all` dry-run tree; no argv `dep` list; no write |
 | `all/dry-run/already-up-to-date` | Banner + zero summary `in C checkouts`; no pin tree |
 | `all/dry-run/stack-outdated` | Dry-run tree for other-checkout inventory require; no argv `dep` list |

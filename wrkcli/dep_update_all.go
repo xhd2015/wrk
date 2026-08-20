@@ -217,8 +217,11 @@ func PlanDepUpdateAll(workDir, wrkHome string) (*DepUpdateAllPlan, error) {
 }
 
 // replaceTargetUnderToplevel reports whether a local replace NewPath resolves
-// to the same git checkout as consumerToplevel. Nested independent repos
-// (e.g. ./external/kool) are other stack members, not intra-checkout skips.
+// to the same git checkout as consumerToplevel. Cross-repo targets (a
+// different git toplevel, e.g. ./external/kool) and absent targets are never
+// intra-module, even when physically nested under the consumer toplevel.
+// Non-git consumers fall back to physical nesting, since no git boundary
+// separates the replace target from the consumer.
 func replaceTargetUnderToplevel(consumerModDir, newPath, consumerToplevel string) bool {
 	if newPath == "" {
 		return false
@@ -229,17 +232,21 @@ func replaceTargetUnderToplevel(consumerModDir, newPath, consumerToplevel string
 	}
 	target = storage.NormalizePath(target)
 	top := storage.NormalizePath(consumerToplevel)
-	if worktree.IsInsideWorkTree(target) {
-		targetTop, err := worktree.ShowToplevel(target)
-		if err == nil {
-			return storage.NormalizePath(targetTop) == top
+	if !worktree.IsInsideWorkTree(top) {
+		rel, err := filepath.Rel(top, target)
+		if err != nil {
+			return false
 		}
+		return rel == "." || (rel != "" && !strings.HasPrefix(rel, ".."))
 	}
-	rel, err := filepath.Rel(top, target)
+	if !worktree.IsInsideWorkTree(target) {
+		return false
+	}
+	targetTop, err := worktree.ShowToplevel(target)
 	if err != nil {
 		return false
 	}
-	return rel == "." || (rel != "" && !strings.HasPrefix(rel, ".."))
+	return storage.NormalizePath(targetTop) == top
 }
 
 // runDepUpdateAll implements wrk --dep-update --all [--dry-run].

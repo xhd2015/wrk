@@ -1152,6 +1152,36 @@ func setupDirModeSkipIntraReplace(t *testing.T, req *Request) {
 	req.WantCheckouts = 2
 }
 
+// setupDirModePinDanglingReplace: git consumer requires dep + has a relative
+// filesystem replace dep => ./external/dep whose target is absent (dangling).
+// Before the intra-module fix this was wrongly skipped as intra-module; now it
+// must pin because a non-work-tree target is never same-toplevel.
+func setupDirModePinDanglingReplace(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedRootTaggedDep(t, req.WorkRoot, "dep", modDep, "v0.0.1", "v0.0.2")
+	req.DepDir = dep
+	req.WantVersion = "v0.0.2"
+	req.WantOldVersion = "v0.0.1"
+
+	primary := initStackPrimary(t, req)
+	body := fmt.Sprintf("require %s %s\n\nreplace %s => ./external/dep\n",
+		modDep, "v0.0.1", modDep)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep)
+	gitCommitAll(t, primary, "primary + dangling replace dep")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.WantUpdated = 1
+	req.WantSkipped = 0
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
+}
+
 // setupMultiDirStack: primary requires dep+dep2; kool requires only dep.
 func setupMultiDirStack(t *testing.T, req *Request) {
 	t.Helper()
@@ -1817,6 +1847,7 @@ func ensureDepUpdateHelpersUsed() {
 	_ = setupStackSkipNonRequirerOther
 	_ = setupStackSkipSelf
 	_ = setupDirModeSkipIntraReplace
+	_ = setupDirModePinDanglingReplace
 	_ = setupMultiDirStack
 	_ = setupAllStackOutdated
 	_ = initStackPrimary
