@@ -67,6 +67,7 @@ var wrkModeFlags = map[string]struct{}{
 	"--no-new-terminal":      {},
 	"--open-in-agent":        {},
 	"--no-open-in-agent":     {},
+	"--agent-runner":         {},
 	"--no-config":            {},
 	"--set-config":           {},
 	"--main":                 {},

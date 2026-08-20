@@ -159,6 +159,7 @@ var wrkCompletionFlags = []string{
 	"--no-new-terminal",
 	"--open-in-agent",
 	"--no-open-in-agent",
+	"--agent-runner",
 	"--no-config",
 	"--set-config",
 	"--create",
@@ -689,7 +690,7 @@ func completionContext(words []string, cword int) (kind, prefix string) {
 		switch words[cword-1] {
 		case "--where", "--add", "--rm", "--cd", "-l", "--list", "--status":
 			return "basenames", cur
-		case "-t", "--task", "--set-task":
+		case "-t", "--task", "--set-task", "--agent-runner":
 			return "none", ""
 		}
 		if completingBringValue(words, cword) {

@@ -234,6 +234,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var noNewTerminal bool
 	var openInAgent bool
 	var noOpenInAgent bool
+	var agentRunner *string
 	var noConfig bool
 	var webFlag bool
 	var webDev bool
@@ -304,6 +305,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--no-new-terminal", &noNewTerminal).
 		Bool("--open-in-agent", &openInAgent).
 		Bool("--no-open-in-agent", &noOpenInAgent).
+		String("--agent-runner", &agentRunner).
 		Bool("--no-config", &noConfig).
 		Varargs("--bring", &bringPaths).
 		Bool("--no-dep", &noDep).
@@ -455,6 +457,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		noNewTerminal: noNewTerminal,
 		openInAgent:   openInAgent,
 		noOpenInAgent: noOpenInAgent,
+		agentRunner:   agentRunner,
 	}
 	// Exclusive bring: cwd consumer. Compose: --new / -t / leftover positionals /
 	// create UX flags. --no-config / --exec / --no-cd alone are not compose signals.
@@ -482,6 +485,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			newWindow: newWindow, noNewWindow: noNewWindow,
 			newTerminal: newTerminal, reuseTerminal: reuseTerminal, smartTerminal: smartTerminal,
 			noNewTerminal: noNewTerminal, openInAgent: openInAgent, noOpenInAgent: noOpenInAgent,
+			agentRunner: agentRunner,
 		}, noConfig, noCd, forceCd, len(execArgs) > 0) {
 			ctx.command = "dashboard"
 		}
@@ -497,6 +501,16 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		setInvocationVerbose(false)
 		worktree.GitVerboseLogger = nil
 	}()
+
+	// In create mode, --agent-runner selects the post-create agent-run provider.
+	// It is deliberately distinct from the gen-commit-msg use, which peels and
+	// returns before this parser sees the flag.
+	if agentRunner != nil && (done || mergeBack || list || status || repos || projects || projectsDepGraph ||
+		addPath != nil || removePath != nil || where || reinstallLocal || tagNext || propagateTags ||
+		syncFlag || pushFlag || prFlag || jsonFlag || setTaskDesc != nil || cd || mainFlag || unwind ||
+		showGraph || verify || pinLocals || depReplaceMode || depUpdateMode || webFlag || scanGitRepos) {
+		return fmt.Errorf("wrk: --agent-runner is only valid with create")
+	}
 
 	// --no-cache is only valid with --scan-git-repos.
 	if noCache && !scanGitRepos {
@@ -1701,6 +1715,8 @@ Flags:
   --reuse-terminal                reuse current iTerm2 session when possible
   --smart-terminal                smart iTerm2 window/tab reuse
   --open-in-agent                 launch agent-run after create (iTerm follow-up or current process)
+  --agent-runner RUNNER           with create agent launch: codex→codex-tty, grok→grok-tty;
+                                  accepts codex, codex-tty, grok, or grok-tty
   --no-new-window                 disable window UX for this run
   --no-new-terminal               disable terminal UX for this run
   --no-open-in-agent              disable agent UX for this run

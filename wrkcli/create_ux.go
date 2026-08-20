@@ -44,12 +44,14 @@ type createUXFlags struct {
 	noNewTerminal bool
 	openInAgent   bool
 	noOpenInAgent bool
+	// agentRunner is a one-shot create-agent override. Nil means use config/default.
+	agentRunner *string
 }
 
 func (f createUXFlags) any() bool {
 	return f.newWindow || f.noNewWindow ||
 		f.newTerminal || f.reuseTerminal || f.smartTerminal || f.noNewTerminal ||
-		f.openInAgent || f.noOpenInAgent
+		f.openInAgent || f.noOpenInAgent || f.agentRunner != nil
 }
 
 func (f createUXFlags) validate() error {
@@ -166,6 +168,16 @@ func resolveCreateUX(wrkHome string, flags createUXFlags, applyConfig bool) (cre
 	if flags.openInAgent {
 		plan.agent = true
 	}
+	if flags.agentRunner != nil {
+		if !plan.agent {
+			return createUXPlan{}, fmt.Errorf("wrk: --agent-runner requires agent launch; remove --no-open-in-agent or pass --open-in-agent")
+		}
+		runner, err := normalizeCreateAgentRunner(*flags.agentRunner)
+		if err != nil {
+			return createUXPlan{}, err
+		}
+		plan.runner = runner
+	}
 
 	// Window on implies terminal new when terminal is still off.
 	if plan.window && plan.terminalMode == "" {
@@ -173,6 +185,21 @@ func resolveCreateUX(wrkHome string, flags createUXFlags, applyConfig bool) (cre
 	}
 
 	return plan, nil
+}
+
+// normalizeCreateAgentRunner accepts the compact runner names used by create
+// UX and resolves them to the TTY providers understood by agent-run.
+func normalizeCreateAgentRunner(runner string) (string, error) {
+	switch runner {
+	case "codex":
+		return "codex-tty", nil
+	case "grok":
+		return "grok-tty", nil
+	case "codex-tty", "grok-tty":
+		return runner, nil
+	default:
+		return "", fmt.Errorf("wrk: unsupported create agent runner %q (want codex, codex-tty, grok, or grok-tty)", runner)
+	}
 }
 
 // ensureCreateWindow runs Mission Control Desktop create+activate when plan.window
