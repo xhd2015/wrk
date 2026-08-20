@@ -39,7 +39,7 @@ window on implies terminal new (after flag apply); legacy create.interceptor ign
 - Agent default argv: `agent-run run --dir <abs-worktree> --session-id-from-prompt --no-submit --open --color --agent-runner=grok-tty <prompt>`
   (`--dir` may appear immediately after `run`; space form preferred). Always injects `--color` even if config `create.agent.args` omits it.
   Long prompts (`agentrunapi.PromptFileSpillMinRunes`, 600 runes) and follow-ups that would exceed iTerm write-text SafeMax replace the positional prompt with `--prompt-file=<abs>` (file body is the full prompt).
-- Default prompt template: `/brainstorm ${task}` (empty task → empty substitution).
+- Default prompt template: `/brainstorm ${task}` for grok/grok-tty; `$brainstorm ${task}` for codex/codex-tty (runner-aware; only when not explicitly set in config; empty task → empty substitution).
 - Terminal+agent: agent only as iTerm follow-up command string; outer wrk must **not** exec agent-run.
 - In-process agent: `--dir` is the workspace source of truth; process cwd of agent-run **need not** equal worktree.
 - Parent follow-up after create: when agent and/or terminal UX is active, skip home-gated
@@ -369,6 +369,14 @@ func assertAgentRunNotInvoked(t *testing.T, req *Request) {
 
 func assertAgentRunInvoked(t *testing.T, req *Request, wtPath, task string) []string {
 	t.Helper()
+	return assertAgentRunInvokedWith(t, req, wtPath, task, "grok-tty", "/brainstorm")
+}
+
+// assertAgentRunInvokedWith is the runner/prompt-prefix-parameterized core.
+// runner is the expected --agent-runner value (e.g. "grok-tty", "codex-tty").
+// promptPrefix is the prompt command prefix (e.g. "/brainstorm", "$brainstorm").
+func assertAgentRunInvokedWith(t *testing.T, req *Request, wtPath, task, runner, promptPrefix string) []string {
+	t.Helper()
 	args := readAgentRunArgs(t, req)
 	if len(args) == 0 {
 		t.Fatal("expected outer agent-run invocation")
@@ -386,19 +394,19 @@ func assertAgentRunInvoked(t *testing.T, req *Request, wtPath, task string) []st
 			t.Fatalf("argv missing %q: %v", need, args)
 		}
 	}
-	if !strings.Contains(joined, "grok-tty") {
-		t.Fatalf("argv missing grok-tty runner: %v", args)
+	if !strings.Contains(joined, runner) {
+		t.Fatalf("argv missing %s runner: %v", runner, args)
 	}
 	assertAgentArgvHasDir(t, args, wtPath)
-	wantPrompt := "/brainstorm"
+	wantPrompt := promptPrefix
 	if task != "" {
-		wantPrompt = "/brainstorm " + task
+		wantPrompt = promptPrefix + " " + task
 	}
 	// prompt is last arg (or last non-flag)
 	last := args[len(args)-1]
 	if last != wantPrompt && !strings.HasSuffix(last, wantPrompt) {
-		// allow template empty-task edge: "/brainstorm " with trailing space stripped
-		if !(task == "" && (last == "/brainstorm" || last == "/brainstorm ")) {
+		// allow template empty-task edge: "<prefix> " with trailing space stripped
+		if !(task == "" && (last == promptPrefix || last == promptPrefix+" ")) {
 			t.Fatalf("prompt token: want %q, got last=%q full=%v", wantPrompt, last, args)
 		}
 	}
@@ -692,6 +700,7 @@ func ensureCreateUXHelpersUsed() {
 	_ = parseArgcLenLog
 	_ = assertAgentRunNotInvoked
 	_ = assertAgentRunInvoked
+	_ = assertAgentRunInvokedWith
 	_ = containsArg
 	_ = agentArgvDir
 	_ = uxPathsEqual

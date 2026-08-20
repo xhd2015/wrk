@@ -26,7 +26,20 @@ const (
 
 	defaultAgentRunner         = "grok-tty"
 	defaultAgentPromptTemplate = "/brainstorm ${task}"
+	codexAgentPromptTemplate   = "$brainstorm ${task}"
 )
+
+// defaultPromptTemplate returns the runner-aware default prompt template.
+// codex and codex-tty use $brainstorm (a skill reference, not a slash
+// command); all other runners use /brainstorm. Both "codex" and
+// "codex-tty" are checked because config.runner is stored verbatim
+// (only the --agent-runner CLI flag is normalized to codex-tty).
+func defaultPromptTemplate(runner string) string {
+	if runner == "codex" || runner == "codex-tty" {
+		return codexAgentPromptTemplate
+	}
+	return defaultAgentPromptTemplate
+}
 
 // defaultAgentArgs returns the default agent-run flags before --agent-runner.
 // Includes --color so TTY children (grok-tty/codex-tty) force color env.
@@ -106,7 +119,7 @@ func resolveCreateUX(wrkHome string, flags createUXFlags, applyConfig bool) (cre
 
 	plan := createUXPlan{
 		runner:     defaultAgentRunner,
-		promptTmpl: defaultAgentPromptTemplate,
+		promptTmpl: "", // empty = not explicitly set; resolved after runner is finalized
 		agentArgs:  defaultAgentArgs(),
 	}
 
@@ -182,6 +195,12 @@ func resolveCreateUX(wrkHome string, flags createUXFlags, applyConfig bool) (cre
 	// Window on implies terminal new when terminal is still off.
 	if plan.window && plan.terminalMode == "" {
 		plan.terminalMode = "new"
+	}
+
+	// Apply runner-aware default prompt template only when the user did not
+	// explicitly set prompt_template in config. Runner is finalized above.
+	if plan.promptTmpl == "" {
+		plan.promptTmpl = defaultPromptTemplate(plan.runner)
 	}
 
 	return plan, nil

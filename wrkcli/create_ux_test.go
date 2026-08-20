@@ -56,6 +56,58 @@ func TestResolveCreateUXAgentRunnerRejectsUnsupportedValue(t *testing.T) {
 	}
 }
 
+func TestResolveCreateUXCodexRunnerUsesBrainstormSkill(t *testing.T) {
+	// CLI flag: --agent-runner codex (normalized to codex-tty)
+	plan, err := resolveCreateUX(t.TempDir(), createUXFlags{
+		openInAgent: true,
+		agentRunner: stringPtr("codex"),
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.promptTmpl != codexAgentPromptTemplate {
+		t.Fatalf("promptTmpl=%q want %q", plan.promptTmpl, codexAgentPromptTemplate)
+	}
+}
+
+func TestResolveCreateUXCodexTtyRunnerUsesBrainstormSkill(t *testing.T) {
+	plan, err := resolveCreateUX(t.TempDir(), createUXFlags{
+		openInAgent: true,
+		agentRunner: stringPtr("codex-tty"),
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.promptTmpl != codexAgentPromptTemplate {
+		t.Fatalf("promptTmpl=%q want %q", plan.promptTmpl, codexAgentPromptTemplate)
+	}
+}
+
+func TestResolveCreateUXGrokRunnerKeepsSlashBrainstorm(t *testing.T) {
+	plan, err := resolveCreateUX(t.TempDir(), createUXFlags{
+		openInAgent: true,
+		agentRunner: stringPtr("grok"),
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.promptTmpl != defaultAgentPromptTemplate {
+		t.Fatalf("promptTmpl=%q want %q", plan.promptTmpl, defaultAgentPromptTemplate)
+	}
+}
+
+func TestResolveCreateUXDefaultRunnerUsesSlashBrainstorm(t *testing.T) {
+	plan, err := resolveCreateUX(t.TempDir(), createUXFlags{
+		openInAgent: true,
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.promptTmpl != defaultAgentPromptTemplate {
+		t.Fatalf("promptTmpl=%q want %q", plan.promptTmpl, defaultAgentPromptTemplate)
+	}
+}
+
 func TestCaptureAgentRunnerRejectsNonCreateMode(t *testing.T) {
 	res := Capture(CaptureOpts{Args: []string{"--status", "--agent-runner", "codex"}})
 	if res.ExitCode == 0 || !strings.Contains(res.Stderr, "only valid with create") {
