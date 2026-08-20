@@ -797,8 +797,8 @@ func setupAllNoTagOwner(t *testing.T, req *Request) {
 	writeProjectsJSON(t, req.WrkHome, lib)
 }
 
-// seedHostGoWrapper writes $installDir/<pin>/bin/go that records GOROOT/PATH0
-// then execs the host go so real `go mod tidy` still works. Returns last-run path.
+// seedHostGoWrapper writes $installDir/<pin>/bin/go that records its arguments,
+// GOROOT, and PATH0, then execs the host go so real tidy still works.
 func seedHostGoWrapper(t *testing.T, installDir, pin string) string {
 	t.Helper()
 	hostGo, err := exec.LookPath("go")
@@ -808,15 +808,12 @@ func seedHostGoWrapper(t *testing.T, installDir, pin string) string {
 	dest := filepath.Join(installDir, pin)
 	bin := filepath.Join(dest, "bin", "go")
 	record := filepath.Join(dest, "last-run")
-	script := fmt.Sprintf(`#!/bin/sh
-{
-  printf 'GOROOT=%%s\n' "$GOROOT"
-  IFS=:
-  set -- $PATH
-  printf 'PATH0=%%s\n' "$1"
-} > %q
+script := fmt.Sprintf(`#!/bin/sh
+printf 'ARGS=%%s\n' "$*" > %q
+printf 'GOROOT=%%s\n' "$GOROOT" >> %q
+printf 'PATH0=%%s\n' "${PATH%%:*}" >> %q
 exec %q "$@"
-`, record, hostGo)
+`, record, record, record, hostGo)
 	writeFile(t, bin, script)
 	if err := os.Chmod(bin, 0o755); err != nil {
 		t.Fatalf("chmod go wrapper %s: %v", bin, err)
@@ -1542,7 +1539,7 @@ func assertWouldTidyLine(t *testing.T, stdout, consumerModule string) {
 	found := false
 	for _, line := range strings.Split(stdout, "\n") {
 		trim := strings.TrimSpace(line)
-		if trim == "would: go mod tidy" {
+		if strings.HasPrefix(trim, "would: go mod tidy") {
 			found = true
 			break
 		}

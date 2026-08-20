@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/mod/scan"
@@ -630,11 +632,6 @@ func tidyDepUpdateConsumer(modDir, modulePath string, dryRun bool, resolveOpts w
 		}
 		return nil
 	}
-	if dryRun {
-		fmt.Println("      would: go mod tidy")
-		return nil
-	}
-
 	absDir, err := absAgainstProcessCwd(modDir)
 	if err != nil {
 		return fmt.Errorf("wrk: resolve module dir %s: %w", modDir, err)
@@ -647,24 +644,22 @@ func tidyDepUpdateConsumer(modDir, modulePath string, dryRun bool, resolveOpts w
 	if err != nil {
 		return err
 	}
+	toolchain := planDepUpdateGoToolchain(ver, resolveOpts)
+	if dryRun {
+		printDepUpdateTidyPlan(toolchain)
+		return nil
+	}
 
 	var buf bytes.Buffer
 	execOpts := withgo.ExecOptions{Dir: absDir}
 	if invocationVerbose {
-		logGoCommand([]string{"-C", absDir, "mod", "tidy"})
+		logDepUpdateGoCommand(absDir, toolchain)
 		mw := io.MultiWriter(os.Stderr, &buf)
 		execOpts.Stdout = mw
 		execOpts.Stderr = mw
 	} else {
 		execOpts.Stdout = &buf
 		execOpts.Stderr = &buf
-	}
-	// Sealed test wrappers write last-run then `set -- $PATH` in `{ }`
-	// (current shell), so exec hostgo "$@" becomes hostgo $PATH0…. When
-	// $GOROOT/bin/go is a shebang script, override PATH so that set lands
-	// on `mod tidy`. Real SDK binaries are not scripts; they keep Exec PATH.
-	if dest, rerr := withgo.ResolveGoroot(ver, resolveOpts); rerr == nil && goBinIsScript(dest) {
-		execOpts.ExtraEnv = append(execOpts.ExtraEnv, "PATH=mod"+string(os.PathListSeparator)+"tidy")
 	}
 	if err := withgo.Run(ver, []string{"go", "mod", "tidy"}, resolveOpts, execOpts); err != nil {
 		msg := strings.TrimSpace(buf.String())
@@ -677,12 +672,60 @@ func tidyDepUpdateConsumer(modDir, modulePath string, dryRun bool, resolveOpts w
 	return nil
 }
 
-func goBinIsScript(goroot string) bool {
-	b, err := os.ReadFile(filepath.Join(goroot, "bin", "go"))
-	if err != nil || len(b) < 2 {
-		return false
+type depUpdateGoToolchain struct {
+	goroot   string
+	override bool
+}
+
+// planDepUpdateGoToolchain predicts the same pinned GOROOT that withgo.Run
+// will use, without checking for or downloading the SDK. This lets dry-run
+// remain mutation-free while accurately describing a future tidy command.
+func planDepUpdateGoToolchain(version string, opts withgo.ResolveOptions) depUpdateGoToolchain {
+	goroot := withgo.TargetGoroot(version, opts)
+	defaultGoroot, err := defaultGoGOROOT()
+	return depUpdateGoToolchain{
+		goroot:   goroot,
+		override: err == nil && !sameCleanPath(goroot, defaultGoroot),
 	}
-	return b[0] == '#' && b[1] == '!'
+}
+
+func defaultGoGOROOT() (string, error) {
+	out, err := exec.Command("go", "env", "GOROOT").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func sameCleanPath(a, b string) bool {
+	if a == "" || b == "" {
+		return a == b
+	}
+	if resolved, err := filepath.EvalSymlinks(a); err == nil {
+		a = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(b); err == nil {
+		b = resolved
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+func printDepUpdateTidyPlan(toolchain depUpdateGoToolchain) {
+	if !toolchain.override {
+		fmt.Println("      would: go mod tidy")
+		return
+	}
+	fmt.Printf("      would: go mod tidy  (go=%s; GOROOT=%s)\n", filepath.Base(toolchain.goroot), toolchain.goroot)
+}
+
+func logDepUpdateGoCommand(absDir string, toolchain depUpdateGoToolchain) {
+	if !toolchain.override {
+		logGoCommand([]string{"-C", absDir, "mod", "tidy"})
+		return
+	}
+	ts := time.Now().Format("2006-01-02 15:04:05")
+	goBin := filepath.Join(toolchain.goroot, "bin", "go")
+	fmt.Fprintf(os.Stderr, "[%s] $ GOROOT=%s %s -C %s mod tidy\n", ts, toolchain.goroot, goBin, absDir)
 }
 
 // resolveDepModuleForReplace resolves module path + absolute dep dir without writing.

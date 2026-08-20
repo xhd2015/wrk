@@ -20,7 +20,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = d
 	req.InProcess = true
 	setupVersionedTidy(t, req)
-	req.Args = []string{"--dep-update", req.DepDir}
+	req.Args = []string{"--dep-update", req.DepDir, "-v"}
 	return nil
 }
 ```

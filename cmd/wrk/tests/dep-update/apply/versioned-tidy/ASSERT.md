@@ -15,6 +15,9 @@
 
 ```go
 import (
+	"path/filepath"
+	"strings"
+
 	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
 )
@@ -40,5 +43,11 @@ dep-update: updated 1 modules in 1 checkouts
 	assertRequireVersion(t, req.ConsumerGoMod, modDep, req.WantVersion)
 	assertGoSumExists(t, req.ConsumerModDir)
 	assertVersionedGoUsed(t, req)
+	goRoot := filepath.Join(req.InstallDir, req.WantGoPin)
+	assertContains(t, resp.Stderr, "GOROOT="+goRoot)
+	assertContains(t, resp.Stderr, filepath.Join(goRoot, "bin", "go")+" -C "+req.ConsumerModDir+" mod tidy")
+	if strings.Contains(resp.Stderr, "$ go -C "+req.ConsumerModDir+" mod tidy") {
+		t.Fatalf("verbose output must identify the overridden SDK, got:\n%s", resp.Stderr)
+	}
 }
 ```
