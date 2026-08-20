@@ -336,9 +336,9 @@ func runDepUpdate(workDir string, paths []string, dryRun bool, ctx *invocationCo
 	if err := applyDepUpdateTree(tree, dryRun, withGoFromCtx(ctx)); err != nil {
 		return err
 	}
-	n, c := countDepUpdateTree(tree)
+	n, s, c := countDepUpdateTree(tree)
 	fmt.Println()
-	printDirModeSummary(n, c, dryRun)
+	printDirModeSummary(n, s, c, dryRun)
 	return nil
 }
 
@@ -350,9 +350,17 @@ func printDepUpdateDepHeader(modulePath, version, tag string) {
 	fmt.Printf("dep  %s -> %s\n", modulePath, version)
 }
 
-func printDirModeSummary(modules, checkouts int, dryRun bool) {
+func printDirModeSummary(modules, skipped, checkouts int, dryRun bool) {
 	if dryRun {
+		if skipped > 0 {
+			fmt.Printf("dep-update: would update %d modules, skipped %d in %d checkouts\n", modules, skipped, checkouts)
+			return
+		}
 		fmt.Printf("dep-update: would update %d modules in %d checkouts\n", modules, checkouts)
+		return
+	}
+	if skipped > 0 {
+		fmt.Printf("dep-update: updated %d modules, skipped %d in %d checkouts\n", modules, skipped, checkouts)
 		return
 	}
 	fmt.Printf("dep-update: updated %d modules in %d checkouts\n", modules, checkouts)
@@ -377,12 +385,21 @@ func buildDirModeTree(cwd string, consumers []depUpdateConsumer, deps []dirModeD
 
 	for _, c := range consumers {
 		var pins []depUpdateTreePin
+		var skips []depUpdateTreeSkip
 		for _, dep := range deps {
 			if c.Path == dep.modulePath {
 				continue
 			}
 			old, ok := consumerRequireVersion(c, dep.modulePath)
 			if !ok {
+				continue
+			}
+			if depReplacedIntraCheckout(c, dep.modulePath) {
+				skips = append(skips, depUpdateTreeSkip{
+					ModulePath: dep.modulePath,
+					OldVersion: old,
+					NewVersion: dep.version,
+				})
 				continue
 			}
 			pins = append(pins, depUpdateTreePin{
@@ -392,7 +409,7 @@ func buildDirModeTree(cwd string, consumers []depUpdateConsumer, deps []dirModeD
 				NewVersion: dep.version,
 			})
 		}
-		if len(pins) == 0 {
+		if len(pins) == 0 && len(skips) == 0 {
 			continue
 		}
 		ck := c.Checkout
@@ -415,6 +432,7 @@ func buildDirModeTree(cwd string, consumers []depUpdateConsumer, deps []dirModeD
 		}
 		mi := b.modIdx[c.ModDir]
 		b.modules[mi].Pins = append(b.modules[mi].Pins, pins...)
+		b.modules[mi].Skips = append(b.modules[mi].Skips, skips...)
 	}
 
 	out := make([]depUpdateTreeCheckout, 0, len(order))
@@ -453,10 +471,17 @@ type depUpdateTreePin struct {
 	NewVersion string
 }
 
+type depUpdateTreeSkip struct {
+	ModulePath string
+	OldVersion string
+	NewVersion string
+}
+
 type depUpdateTreeModule struct {
 	Path   string
 	ModDir string
 	Pins   []depUpdateTreePin
+	Skips  []depUpdateTreeSkip
 }
 
 type depUpdateTreeCheckout struct {
@@ -549,6 +574,26 @@ func consumerRequireVersion(c depUpdateConsumer, depPath string) (string, bool) 
 	return "", false
 }
 
+// depReplacedIntraCheckout reports whether consumer c has a local filesystem
+// replace for depPath whose target resolves inside c's own git checkout
+// (intra-module replace). Such consumers already use their own local copy of
+// the dep; dep-update skips pinning them to avoid churning the dep's own
+// worktree go.mod.
+func depReplacedIntraCheckout(c depUpdateConsumer, depPath string) bool {
+	for _, r := range c.Replaces {
+		if r.OldPath != depPath {
+			continue
+		}
+		if !isLocalFilesystemReplace(r.NewPath, r.NewVersion) {
+			continue
+		}
+		if replaceTargetUnderToplevel(c.ModDir, r.NewPath, c.Checkout) {
+			return true
+		}
+	}
+	return false
+}
+
 func printDepUpdateBanner(dryRun bool) {
 	if dryRun {
 		fmt.Println("==== dep-update (dry-run) ====")
@@ -557,13 +602,25 @@ func printDepUpdateBanner(dryRun bool) {
 	fmt.Println("==== dep-update ====")
 }
 
-func countDepUpdateTree(checkouts []depUpdateTreeCheckout) (modules, nCheckouts int) {
+func countDepUpdateTree(checkouts []depUpdateTreeCheckout) (modules, skipped, nCheckouts int) {
 	for _, co := range checkouts {
 		if len(co.Modules) == 0 {
 			continue
 		}
-		nCheckouts++
-		modules += len(co.Modules)
+		coHasContent := false
+		for _, mod := range co.Modules {
+			if len(mod.Pins) > 0 {
+				modules++
+				coHasContent = true
+			}
+			skipped += len(mod.Skips)
+			if len(mod.Skips) > 0 {
+				coHasContent = true
+			}
+		}
+		if coHasContent {
+			nCheckouts++
+		}
 	}
 	return
 }
@@ -588,6 +645,16 @@ func applyDepUpdateTree(checkouts []depUpdateTreeCheckout, dryRun bool, withGo w
 					return fmt.Errorf("wrk: %w", err)
 				}
 				fmt.Printf("      pin  %s  %s -> %s\n", pin.ModulePath, pin.OldVersion, pin.NewVersion)
+			}
+			for _, skip := range mod.Skips {
+				if dryRun {
+					fmt.Printf("      would: skip  %s  (intra-module replace)\n", skip.ModulePath)
+					continue
+				}
+				fmt.Printf("      skip  %s  (intra-module replace)\n", skip.ModulePath)
+			}
+			if len(mod.Pins) == 0 {
+				continue
 			}
 			if err := tidyDepUpdateConsumer(mod.ModDir, mod.Path, dryRun, withGo); err != nil {
 				return err

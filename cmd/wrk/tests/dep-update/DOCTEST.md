@@ -1,7 +1,7 @@
 # wrk --dep-update — dir pin + inventory pull (`--all`)
 
 ## Version
-0.0.2
+0.0.3
 
 Decision tree for **`wrk --dep-update`** in two modes:
 
@@ -45,6 +45,7 @@ mutation in harness.
 | D6 | Consumer set = `CollectStackInventory(cwd)` when git; else nearest `go.mod`. Scan every `go.mod` under every member `Path`. Pin only modules that **already require** the path. Self never pinned |
 | D7 | Pin does not add new requires; zero matching consumers on the whole stack → `wrk:` error containing `requires`; **no banner** |
 | D8 | One banner per invocation. Deps named once at top (argv order). Body is checkout → module → actions. Tidy once under the module. Dir-mode summary `updated N modules in C checkouts` |
+| D9 | Consumer whose dep is covered by a **same-toplevel local filesystem replace** (intra-module replace) is **skipped**, not pinned. Prints `skip  <dep>  (intra-module replace)` (dry-run: `would: skip …`); no tidy for that module. Summary gains `, skipped S` when S > 0. Mirrors `--all` A4 |
 
 **Locked product rules (`--all`):**
 
@@ -77,7 +78,9 @@ editing other projects' go.mod; kool CLI; real network / real SDK download.
   nearest `go.mod`. `--all` still requires a git repo.
 - **Dir mode** — for each dep dir: resolve module + latest tag (`update.Pin`).
   Pin every stack module that already requires that path. Self never pinned.
-  Then versioned tidy or `skip tidy  (vendor/)` once per affected module.
+  Same-toplevel local filesystem replace (intra-module replace) → **skip**
+  (D9): printed as `skip  <dep>  (intra-module replace)`, no tidy. Then
+  versioned tidy or `skip tidy  (vendor/)` once per affected module with pins.
   Zero requirers on the stack → `wrk:` error containing `requires`; no banner.
 - **`--all` mode** — same stack consumer set; for each require, consult inventory
   ownership and owner tags; Pin when outdated inventory-owned; external require
@@ -123,6 +126,7 @@ dep-update/
 │   ├── vendor-skip
 │   ├── stack-no-write
 │   ├── multi-dir-stack-no-write
+│   ├── skip-intra-local-replace     # would: skip on dep's sub-module
 │   └── bad-second-arg               # no banner; first dep not a half-plan
 ├── apply/                           # dir mode
 │   ├── drop-replace-set-require     # pin + tidy (nearest / not-git)
@@ -135,6 +139,7 @@ dep-update/
 │   ├── stack-requirer-other-checkout
 │   ├── stack-skip-non-requirer      # cross-checkout, default quiet
 │   ├── stack-skip-self
+│   ├── skip-intra-local-replace      # dep's own sub-module with replace => ../ skipped
 │   └── multi-dir-stack
 └── all/
     ├── dry-run/
@@ -174,6 +179,7 @@ dep-update/
 | `dry-run/vendor-skip` | Dry-run tree `would: skip tidy  (vendor/)`; no write |
 | `dry-run/stack-no-write` | Single-target stack tree; go.mod/go.sum unchanged |
 | `dry-run/multi-dir-stack-no-write` | Two `dep` headers; would: pins; no write |
+| `dry-run/skip-intra-local-replace` | `would: skip` on dep's sub-module with intra-module replace; no write |
 | `dry-run/bad-second-arg` | No banner; `wrk:` + missing dir; first dep not a half-plan |
 | `apply/drop-replace-set-require` | Drop replace; require@latest; tree + tidy; go.sum |
 | `apply/nested-module-tag-prefix` | Submodule tag prefix → clean version + tidy |
@@ -186,6 +192,7 @@ dep-update/
 | `apply/stack-skip-non-requirer` | Other-checkout module without require unchanged; default quiet |
 | `apply/stack-skip-self` | Dep’s own go.mod not pinned when dep checkout is on the stack |
 | `apply/multi-dir-stack` | Two dep args; one consumer both pins + one tidy; other requires only first |
+| `apply/skip-intra-local-replace` | Dep's sub-module with intra-module replace `=> ../` skipped; primary pinned |
 | `all/dry-run/bumps-outdated` | `--all` dry-run tree; no argv `dep` list; no write |
 | `all/dry-run/already-up-to-date` | Banner + zero summary `in C checkouts`; no pin tree |
 | `all/dry-run/stack-outdated` | Dry-run tree for other-checkout inventory require; no argv `dep` list |
@@ -201,10 +208,11 @@ dep-update/
 # Output contracts (assert targets)
 
 Tokens: `====`, `dep`, `checkout`, `module`, `pin`, `would:`,
-`go mod tidy ok`, `skip tidy`, `(vendor/)`, `->`. Trailing `\n`.
+`go mod tidy ok`, `skip tidy`, `skip`, `(vendor/)`, `(intra-module replace)`, `->`.
+Trailing `\n`.
 Checkout path = `statusDirLine` vs invocation cwd (`.` / `external/kool`).
 No short form for a single target. Default quiet: only modules that change
-(`-v` would list `no require` / `self` / `already <ver>` — optional).
+or are skipped (`-v` would list `no require` / `self` / `already <ver>` — optional).
 
 ## Dir mode
 
@@ -229,9 +237,18 @@ under that module (indent with the tree).
 **Multiple targets:** N `dep` header lines (argv order). Each module lists
 only pins for deps it already requires, then one tidy.
 
+**Intra-module replace skip (D9):** a consumer whose dep is covered by a
+same-toplevel local filesystem replace (intra-module replace) is **skipped**,
+not pinned. Under that module: `skip  <dep>  (intra-module replace)` (dry-run:
+`would: skip  <dep>  (intra-module replace)`). No tidy for skip-only modules.
+When skips exist, the summary gains `, skipped S`:
+`dep-update: updated N modules, skipped S in C checkouts`
+(dry-run: `would update N modules, skipped S in C checkouts`).
+
 **Dry-run:** banner `==== dep-update (dry-run) ====`; `would: pin  …`;
 `would: go mod tidy` or `would: skip tidy  (vendor/)`;
-summary `dep-update: would update N modules in C checkouts`. Zero writes.
+`would: skip  …  (intra-module replace)`;
+summary `dep-update: would update N modules[, skipped S] in C checkouts`. Zero writes.
 
 **Zero requirers (stderr, non-zero):** `wrk:` error containing `requires`.
 **No banner.**

@@ -281,7 +281,7 @@ func runDepUpdateAll(workDir, wrkHome string, dryRun bool, ctx *invocationContex
 	if err := applyDepUpdateTree(tree, dryRun, withGoFromCtx(ctx)); err != nil {
 		return err
 	}
-	_, c := countDepUpdateTree(tree)
+	_, _, c := countDepUpdateTree(tree)
 	fmt.Println()
 	n := len(plan.Actions)
 	if dryRun {

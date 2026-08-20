@@ -93,6 +93,7 @@ const (
 
 	modConsumer = "example.com/consumer"
 	modDep      = "example.com/dep"
+	modDepCmd   = "example.com/dep/cmd"
 	modDep2     = "example.com/dep2"
 
 	modApp      = "example.com/app"
@@ -1107,6 +1108,50 @@ func setupStackSkipSelf(t *testing.T, req *Request) {
 	req.WantCheckouts = 1
 }
 
+// setupDirModeSkipIntraReplace: primary requires dep + replace dep =>
+// ./external/dep (own git repo, on the stack via BFS). Dep has a nested cmd
+// sub-module that requires dep with an intra-module replace => ../.
+// Dir-mode pins primary and skips the cmd sub-module (intra-module replace).
+func setupDirModeSkipIntraReplace(t *testing.T, req *Request) {
+	t.Helper()
+	primary := initStackPrimary(t, req)
+	dep := seedExternalGitModule(t, primary, "dep", modDep, "")
+	writeLibPkg(t, dep, "dep", "Version")
+	// Nested cmd sub-module with intra-module replace of dep => ../.
+	cmdDir := filepath.Join(dep, "cmd")
+	cmdBody := fmt.Sprintf("require %s v0.0.1\n\nreplace %s => ../\n", modDep, modDep)
+	writeGoMod(t, cmdDir, modDepCmd, cmdBody)
+	writeConsumerMainWithImports(t, cmdDir, modDep)
+	gitCommitAll(t, dep, "dep init with cmd sub-module")
+	gitTag(t, dep, "v0.0.1")
+	gitTag(t, dep, "v0.0.2")
+	dep = resolvePath(t, dep)
+	req.DepDir = dep
+	req.WantVersion = "v0.0.2"
+	req.WantOldVersion = "v0.0.1"
+
+	body := writeRequireReplaceBody(modDep, "v0.0.1", "./external/dep")
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep)
+	gitCommitAll(t, primary, "primary replace dep")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.Consumer2ModDir = cmdDir
+	req.Consumer2GoMod = filepath.Join(cmdDir, "go.mod")
+	req.Baseline2GoMod = readFile(t, req.Consumer2GoMod)
+	req.WantConsumer2Module = modDepCmd
+	req.WantCheckout = "."
+	req.WantCheckout2 = checkoutDep
+	req.WantUpdated = 1
+	req.WantSkipped = 1
+	req.WantCheckouts = 2
+}
+
 // setupMultiDirStack: primary requires dep+dep2; kool requires only dep.
 func setupMultiDirStack(t *testing.T, req *Request) {
 	t.Helper()
@@ -1451,6 +1496,36 @@ func assertNoPinFor(t *testing.T, stdout, modulePath string) {
 	}
 }
 
+func assertSkipLine(t *testing.T, stdout, modulePath string) {
+	t.Helper()
+	needle := "skip  " + modulePath + "  (intra-module replace)"
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.TrimSpace(line) == needle || strings.Contains(line, needle) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
+	}
+}
+
+func assertWouldSkipLine(t *testing.T, stdout, modulePath string) {
+	t.Helper()
+	needle := "would: skip  " + modulePath + "  (intra-module replace)"
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.TrimSpace(line) == needle || strings.Contains(line, needle) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing %q; got:\n%s", needle, stdout)
+	}
+}
+
 func assertDepUpdateLine(t *testing.T, stdout, modulePath, version string) {
 	t.Helper()
 	// Dir-mode / --all action line is now pin (old -> new). Old version is
@@ -1622,13 +1697,21 @@ func assertVersionedGoUsed(t *testing.T, req *Request) {
 	}
 }
 
-func assertDirSummary(t *testing.T, stdout string, modules, checkouts int, dryRun bool) {
+func assertDirSummary(t *testing.T, stdout string, modules, skipped, checkouts int, dryRun bool) {
 	t.Helper()
 	var needle string
 	if dryRun {
-		needle = fmt.Sprintf("dep-update: would update %d modules in %d checkouts", modules, checkouts)
+		if skipped > 0 {
+			needle = fmt.Sprintf("dep-update: would update %d modules, skipped %d in %d checkouts", modules, skipped, checkouts)
+		} else {
+			needle = fmt.Sprintf("dep-update: would update %d modules in %d checkouts", modules, checkouts)
+		}
 	} else {
-		needle = fmt.Sprintf("dep-update: updated %d modules in %d checkouts", modules, checkouts)
+		if skipped > 0 {
+			needle = fmt.Sprintf("dep-update: updated %d modules, skipped %d in %d checkouts", modules, skipped, checkouts)
+		} else {
+			needle = fmt.Sprintf("dep-update: updated %d modules in %d checkouts", modules, checkouts)
+		}
 	}
 	if !strings.Contains(stdout, needle) {
 		t.Fatalf("stdout missing summary %q; got:\n%s", needle, stdout)
@@ -1733,6 +1816,7 @@ func ensureDepUpdateHelpersUsed() {
 	_ = setupStackOtherCheckoutRequirer
 	_ = setupStackSkipNonRequirerOther
 	_ = setupStackSkipSelf
+	_ = setupDirModeSkipIntraReplace
 	_ = setupMultiDirStack
 	_ = setupAllStackOutdated
 	_ = initStackPrimary
@@ -1752,6 +1836,8 @@ func ensureDepUpdateHelpersUsed() {
 	_ = assertPinLine
 	_ = assertWouldPinLine
 	_ = assertNoPinFor
+	_ = assertSkipLine
+	_ = assertWouldSkipLine
 	_ = assertDirSummary
 	_ = wantCheckoutsOf
 	_ = checkoutLabelOf

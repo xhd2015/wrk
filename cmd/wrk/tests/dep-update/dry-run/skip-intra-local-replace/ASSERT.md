@@ -5,23 +5,27 @@
 dep  example.com/dep -> v0.0.2
 
   checkout  .
-    module  example.com/consumer
+    module  example.com/app
       would: pin  example.com/dep  v0.0.1 -> v0.0.2
-      would: go mod tidy(?:  \(go=go1\.22\.12; GOROOT=.+\))?
+      would: go mod tidy
+  checkout  external/dep
+    module  example.com/dep/cmd
+      would: skip  example.com/dep  (intra-module replace)
 
-dep-update: would update 1 modules in 1 checkouts
+dep-update: would update 1 modules, skipped 1 in 2 checkouts
 ```
 
 ## Expected
 
 - Exit 0.
-- Dry-run banner + `would: pin` + `would: go mod tidy`.
-- No bare `pin` apply lines.
-- go.mod unchanged (replace still present); no go.sum.
+- Dry-run banner; `would: pin` + `would: go mod tidy` on primary.
+- `would: skip` on cmd sub-module (intra-module replace); no `would: go mod tidy` for cmd.
+- Summary `would update 1 modules, skipped 1 in 2 checkouts`.
+- Both go.mods unchanged; no go.sum.
 
 ## Side Effects
 
-- None: dry-run must not mutate go.mod.
+- Zero writes.
 
 ## Exit Code
 
@@ -44,13 +48,17 @@ version: 3
 dep  example\.com/dep -> v0\.0\.2(?:  \(tag .+\))?
 
   checkout  \.
-    module  example\.com/consumer
+    module  example\.com/app
       would: pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
       would: go mod tidy(?:  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
+  checkout  external/dep
+    module  example\.com/dep/cmd
+      would: skip  example\.com/dep  \(intra-module replace\)
 
-dep-update: would update 1 modules in 1 checkouts
+dep-update: would update 1 modules, skipped 1 in 2 checkouts
 `)
 	assertGoModUnchanged(t, req)
+	assertGoModUnchangedAt(t, req.Consumer2GoMod, req.Baseline2GoMod)
 	assertNoTidyArtifacts(t, req)
 }
 ```

@@ -53,11 +53,11 @@ dep  example\.com/dep2 -> v0\.1\.1(?:  \(tag .+\))?
     module  example\.com/app
       would: pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
       would: pin  example\.com/dep2  v0\.1\.0 -> v0\.1\.1
-      would: go mod tidy
+      would: go mod tidy(?:  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
   checkout  external/kool
     module  example\.com/kool
       would: pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
-      would: go mod tidy
+      would: go mod tidy(?:  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
 
 dep-update: would update 2 modules in 2 checkouts
 `)
