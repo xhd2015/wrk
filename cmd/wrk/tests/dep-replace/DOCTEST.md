@@ -1,7 +1,7 @@
-# wrk --dep-replace — unwind-stack fan-out + CLI tree (absolute, no tidy)
+# wrk --dep-replace — unwind-stack fan-out + CLI tree (absolute + versioned tidy)
 
 ## Version
-0.0.2
+0.0.3
 
 Decision tree for **`wrk --dep-replace <dir>… [--dry-run]`**.
 
@@ -11,35 +11,37 @@ BFS over local filesystem replaces). Scan **every** `go.mod` under every
 member `Path`. Write only if the module already `require`s the dep path **or**
 already has a `replace` for that path. Self (`consumer.Path == dep.Path`)
 never rewritten. **Not git** → today’s walk-up nearest go.mod and **D7**
-(write even with no require). Multi-dir: dry-run **validates every dir
-first**; apply write errors are **fail-fast** (prior writes may remain).
-**No tidy.** Never create go.sum.
+(write even with no require). Multi-dir: **validate every dir first** (any bad
+arg → no banner / no tree / no writes). Apply write errors are **fail-fast**
+(prior writes may remain). After replaces: **versioned `go mod tidy`** via the
+same `tidyDepUpdateConsumer` helper as `--dep-update` (unless `vendor/`).
 
 **Layer:** **L2** — in-process CLI via `wrkcli.Capture` (`req.InProcess=true`).
-No L3 e2e leaves. Parallel-safe: inject Env/Dir via Capture.
+No L3 e2e leaves. Parallel-safe: inject Env/Dir/`WithGo` via Capture.
 
 **Locked product rules:**
 
 | ID | Rule |
 |----|------|
 | D1 | Absolute replace NewPath (not relative; relative is `--pin-locals`) |
-| D2 | **No tidy** (never create go.sum) |
-| D3 | Apply multi-arg **fail-fast** on write errors (prior writes may remain). Dry-run: validate **every** dir first; any bad arg → no banner / no tree |
+| D2 | After replaces: versioned `go mod tidy` (`withgo.ModuleGoLine` + `withgo.Run`) unless `<modDir>/vendor` exists → `skip tidy  (vendor/)`. Never `go mod vendor`. Missing go line → fail |
+| D3 | Multi-arg: validate **every** dir first (resolve errors → no writes). Apply write errors are **fail-fast** (prior writes may remain) |
 | D4 | No `--all` / `--replaced` |
-| D5 | CLI tree (`====`, `dep`, `checkout`, `module`, `replace` / `would: replace`); no kool commit-message line |
+| D5 | CLI tree (`====`, `dep`, `checkout`, `module`, `replace` / `would: replace`, tidy / skip tidy); no kool commit-message line |
 | D6 | Git: `CollectStackInventory(cwd)`. Not git: nearest go.mod from workDir |
 | D7 | Not-git nearest fallback still writes **without** a prior require. Git stack: gated (require **or** existing replace). Self never rewritten |
 | D8 | Zero gated consumers on the whole stack (git) → `wrk:` error containing `replace` or `consumer`; **no banner** |
 
-**Partners:** `--dry-run`, optional `--color` / `--no-color`.
+**Partners:** `--dry-run`, optional `--color` / `--no-color`, `-v`.
 
-**Out of scope:** `--dep-update` (P1 sealed); relative replace (`--pin-locals`);
-tidy; `--all`; commit; kool.
+**Out of scope:** `--dep-update` pin semantics; relative replace (`--pin-locals`);
+`--all`; commit; kool.
 
 # DSN (Domain Specific Notion)
 
 - **wrk --dep-replace** — exclusive top-level mode. One or more dep directory
-  args. Partners: `--dry-run`, color. Does not exec kool. No tidy.
+  args. Partners: `--dry-run`, color, `-v`. Does not exec kool. Shares stack
+  absolute-replace + versioned-tidy core with `--bring`.
 - **Stack consumer set** — `CollectStackInventory(cwd)`: cwd git toplevel +
   nested status repos + BFS over local filesystem replaces (same as
   `--unwind` / `--pin-locals` / `--dep-update`). Scan every `go.mod` under
@@ -50,12 +52,15 @@ tidy; `--all`; commit; kool.
   Zero gated consumers on the stack → `wrk:` error; no banner.
 - **Absolute replace** — `replace <module> => <absDir>` (never `./` / `../`).
 - **CLI tree** — one banner; `dep` headers (argv order); body checkout →
-  module → `replace` / `would: replace`. Checkout label = `statusDirLine`
-  vs invocation cwd (`.` / `external/kool`).
+  module → `replace` / `would: replace` then tidy lines. Checkout label =
+  `statusDirLine` vs invocation cwd (`.` / `external/kool`).
+- **Versioned tidy** — same helper as `--dep-update` (`tidyDepUpdateConsumer`);
+  vendor/ → `skip tidy  (vendor/)`; else `go mod tidy ok` / dry-run
+  `would: go mod tidy`.
 - **Dry-run** — validate every dir arg first (any bad → no banner / no tree);
-  then `would:` replace lines; zero writes.
-- **Apply fail-fast** — write errors stop; earlier successful replaces may
-  already be on disk.
+  then `would:` replace + tidy lines; zero writes.
+- **Apply** — validate every dir first; then write+tidy. Write errors stop;
+  earlier successful replaces may already be on disk.
 - **Exclusive** — XOR with `--dep-update`; exclusive with other primary modes
   (`--pin-locals`, `--done`, `--unwind`, `--bring`, `--list`, …).
 - **Hard errors** — empty paths; missing dir; dep not a go module; no consumer
@@ -88,12 +93,13 @@ dep-replace/
     ├── multi-dir
     ├── nested-module                  # workDir under consumer; walk up
     ├── no-existing-require            # D7 not-git nearest
-    ├── fail-fast-second-missing       # apply: first write may stay
+    ├── fail-fast-second-missing       # validate-first: no partial write
     ├── stack-other-checkout
     ├── stack-skip-self
     ├── stack-skip-non-consumer
     ├── stack-existing-replace         # other checkout gated by existing replace
-    └── multi-dir-stack
+    ├── multi-dir-stack
+    └── vendor-skip                    # replace + skip tidy (vendor/)
 ```
 
 # Test Index
@@ -109,27 +115,29 @@ dep-replace/
 | `error/not-a-module` | Dep dir without go.mod → non-zero |
 | `error/no-consumer-gomod` | No go.mod above workDir (not-git) → non-zero; no banner |
 | `error/no-stack-consumer` | Git stack with zero gated consumers → `replace`/`consumer` error; no banner |
-| `dry-run/no-write` | Dry-run tree (`would: replace`); no go.mod write |
+| `dry-run/no-write` | Dry-run tree (`would: replace` + tidy plan); no go.mod write |
 | `dry-run/flag-before-dir` | `--dep-replace --dry-run <dir>` is dry-run, not `no such dir: --dry-run` |
 | `dry-run/stack-no-write` | Single-target stack tree; zero writes |
 | `dry-run/multi-dir-stack-no-write` | Two `dep` headers; would: replace; zero writes |
 | `dry-run/bad-second-arg` | No banner; `wrk:` + missing dir; first dep not a half-plan |
-| `apply/single-dir` | Not-git nearest: tree + absolute replace; no tidy |
-| `apply/multi-dir` | Two `dep` headers; both replaces; tidy-less; one consumer |
+| `apply/single-dir` | Not-git nearest: tree + absolute replace + versioned tidy |
+| `apply/multi-dir` | Two `dep` headers; both replaces; tidy once; one consumer |
 | `apply/nested-module` | workDir nested; nearest parent go.mod edited |
-| `apply/no-existing-require` | Not-git D7: write without prior require |
-| `apply/fail-fast-second-missing` | Apply: first replace stays; second missing → non-zero |
+| `apply/no-existing-require` | Not-git D7: write without prior require; then tidy |
+| `apply/fail-fast-second-missing` | Missing second arg → no writes; no banner |
 | `apply/stack-other-checkout` | Absolute replace on primary **and** other stack checkout |
 | `apply/stack-skip-self` | Dep’s own go.mod not rewritten |
 | `apply/stack-skip-non-consumer` | Other-checkout with neither require nor replace → untouched |
 | `apply/stack-existing-replace` | Other checkout gated by existing replace (no require) |
 | `apply/multi-dir-stack` | Two dep args; one consumer both replaces; other only first |
+| `apply/vendor-skip` | Replace applied; `skip tidy  (vendor/)`; no go.sum |
 
 # Output contracts (assert targets)
 
-Tokens: `====`, `dep`, `checkout`, `module`, `replace`, `would:`, `=>`.
-Trailing `\n`. Checkout = `statusDirLine` vs invocation cwd (`.` /
-`external/kool`). No tidy lines. No short form for a single target.
+Tokens: `====`, `dep`, `checkout`, `module`, `replace`, `would:`, `=>`,
+`go mod tidy ok`, `skip tidy`, `(vendor/)`. Trailing `\n`. Checkout =
+`statusDirLine` vs invocation cwd (`.` / `external/kool`). No short form for a
+single target.
 
 **Apply success (stdout, trailing `\n`):**
 
@@ -140,15 +148,17 @@ dep  <dep-path> => <abs>
   checkout  .
     module  <consumer>
       replace  <dep-path> => <abs>
+      go mod tidy ok
 
 dep-replace: replaced in N modules in C checkouts
 ```
 
 **Multiple targets:** N `dep` header lines (argv order). Each module lists
-only replaces it is gated to receive.
+only replaces it is gated to receive; tidy once under the module.
 
 **Dry-run:** banner `==== dep-replace (dry-run) ====`; `would: replace  …`;
-summary `dep-replace: would replace in N modules in C checkouts`. Zero writes.
+`would: go mod tidy` (optional GOROOT annotation); summary
+`dep-replace: would replace in N modules in C checkouts`. Zero writes.
 
 **Errors (stderr, non-zero):** `wrk:`; **no banner**. Bad second arg on
 dry-run: `no such dir` (or equivalent); no tree; first dep not a half-plan.
@@ -183,12 +193,13 @@ import (
 	"testing"
 
 	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/withgo"
 	"github.com/xhd2015/wrk/wrkcli"
 )
 
 // Request drives wrk --dep-replace under isolated WorkRoot / WRK_HOME.
-// Root Setup allocates WorkRoot / WrkHome. Leaves seed go.mod fixtures,
-// set RepoDir (virtual cwd), Args, and path fields for asserts.
+// Root Setup allocates WorkRoot / WrkHome / WithGo wrapper. Leaves seed go.mod
+// fixtures, set RepoDir (virtual cwd), Args, and path fields for asserts.
 type Request struct {
 	WorkRoot string
 	WrkHome  string
@@ -198,6 +209,11 @@ type Request struct {
 
 	// InProcess runs via wrkcli.Capture (L2). Prefer true for all leaves.
 	InProcess bool
+
+	// WithGo is injected into Capture for versioned tidy (same as dep-update).
+	InstallDir string
+	WithGo     withgo.ResolveOptions
+	VendorDir  string // apply/vendor-skip
 
 	// Fixture paths / baselines for side-effect asserts.
 	ConsumerModDir string
@@ -235,9 +251,10 @@ func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
 
 	if req.InProcess {
 		res := wrkcli.Capture(wrkcli.CaptureOpts{
-			Args: args,
-			Dir:  dir,
-			Env:  depReplaceEnv(req),
+			Args:   args,
+			Dir:    dir,
+			Env:    depReplaceEnv(req),
+			WithGo: req.WithGo,
 		})
 		return &Response{
 			Stdout:   res.Stdout,

@@ -72,9 +72,10 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 }
 
 // initMultiBringConsumerWithTwoRequires creates consumer requiring dep1+dep2 modules.
-// Same require-only pattern as other bring leaves (no source imports; avoid network tidy).
-// Implementer should replace all brought deps before a final tidy (or re-pin requires)
-// so the second require is not dropped mid-loop.
+// Require-only (no source imports): a single --bring tidy's unused requires away
+// under shared versioned tidy. Multi-bring in one invocation still replaces all
+// deps before tidy. Leaves that pre-bring one dep then multi-bring must re-pin
+// the other require (see reuse-first).
 func initMultiBringConsumerWithTwoRequires(t *testing.T, workRoot string) string {
 	t.Helper()
 	consumer := filepath.Join(workRoot, "consumer")

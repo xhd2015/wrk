@@ -5,7 +5,7 @@
 ```
 consumer + dep
   -> wrk --dep-replace <dep> --dry-run
-  -> ==== dep-replace (dry-run) ====; would: replace; go.mod unchanged; no tidy
+  -> ==== dep-replace (dry-run) ====; would: replace + would: go mod tidy; go.mod unchanged
 ```
 
 ## Steps

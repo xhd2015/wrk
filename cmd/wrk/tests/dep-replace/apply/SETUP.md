@@ -5,8 +5,8 @@
 ```
 consumer + dep module(s)
   -> wrk --dep-replace <dir>…
-  -> ==== dep-replace ====; checkout → module → replace
-  -> go.mod gains absolute replace; no tidy
+  -> ==== dep-replace ====; checkout → module → replace → tidy / skip tidy
+  -> go.mod gains absolute replace; versioned tidy unless vendor/
 ```
 
 ## Steps

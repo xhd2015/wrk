@@ -7,9 +7,11 @@ dep  example.com/dep => <abs>
   checkout  .
     module  example.com/app
       replace  example.com/dep => <abs>
+      go mod tidy ok
   checkout  external/kool
     module  example.com/kool
       replace  example.com/dep => <abs>
+      go mod tidy ok
 
 dep-replace: replaced in 2 modules in 2 checkouts
 ```
@@ -49,14 +51,15 @@ dep  example\.com/dep => __ABS__
   checkout  \.
     module  example\.com/app
       replace  example\.com/dep => __ABS__
+      go mod tidy ok
   checkout  external/kool
     module  example\.com/kool
       replace  example\.com/dep => __ABS__
+      go mod tidy ok
 
 dep-replace: replaced in 2 modules in 2 checkouts
 `)
 	assertAbsoluteReplace(t, req.ConsumerGoMod, modDep, req.DepDir)
 	assertAbsoluteReplace(t, req.Consumer2GoMod, modDep, req.DepDir)
-	assertNoTidyArtifacts(t, req)
 }
 ```

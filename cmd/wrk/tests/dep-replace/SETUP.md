@@ -1,13 +1,13 @@
 # Scenario
 
-**Feature**: wrk --dep-replace stack fan-out + CLI tree (absolute, no tidy)
+**Feature**: wrk --dep-replace stack fan-out + CLI tree (absolute + versioned tidy)
 
 ```
 # isolated WRK_HOME; nearest not-git fallback or CollectStackInventory
 consumer go.mod + dep module dir(s)
   -> wrk --dep-replace <dir>… [--dry-run]
-  -> dry-run: ==== dep-replace (dry-run) ====; would: replace; no write
-  -> apply: ==== dep-replace ====; checkout → module → replace
+  -> dry-run: ==== dep-replace (dry-run) ====; would: replace + would: go mod tidy; no write
+  -> apply: ==== dep-replace ====; checkout → module → replace → go mod tidy ok
   -> git stack: gate require|existing replace; self skipped
   -> not-git nearest: D7 write even with no require
   -> exclusive / empty / missing / not-module / zero gated: wrk: error; no banner
@@ -16,20 +16,21 @@ consumer go.mod + dep module dir(s)
 ## Preconditions
 
 - Nested root: **no inheritance** from `cmd/wrk/tests` monotree (`DOCTEST.md` firewall).
-- Go toolchain on PATH (uses `go mod edit` via product/library).
+- Go toolchain on PATH (uses `go mod edit` + versioned tidy via `withgo`).
 - Per-leaf `t.TempDir()` WorkRoot; `WRK_HOME={WorkRoot}/.wrk`.
-- L2: every leaf sets `req.InProcess = true` (wrkcli.Capture).
+- L2: every leaf sets `req.InProcess = true` (wrkcli.Capture). `Run` passes `CaptureOpts.WithGo`.
+- Root Setup seeds `$InstallDir/go1.22.12/bin/go` host-go wrapper (`go 1.22` pin).
 - Existing nearest leaves stay **non-git** (D7 walk-up fallback). Stack leaves
   init a primary git repo plus an independent `external/kool` (or
   `external/dep`) git repo and a **local filesystem replace** so
   `CollectStackInventory` BFS includes it.
-- Offline-friendly: no network / no GOPROXY (`go mod edit` only; no tidy).
+- Offline-friendly: local `replace` targets; `WithGo.Download=false`.
 
 ## Steps
 
-1. Root `Setup` creates isolated `WorkRoot` / `WrkHome`.
+1. Root `Setup` creates isolated `WorkRoot` / `WrkHome` and seeds the `go1.22.12` wrapper.
 2. Leaves seed consumer + dep go.mod fixtures and set `Args` / `RepoDir` / paths.
-3. Root `Run` invokes wrk via Capture when `InProcess`.
+3. Root `Run` invokes wrk via Capture with `WithGo` when `InProcess`.
 
 ## Context
 
@@ -40,8 +41,10 @@ consumer go.mod + dep module dir(s)
   - `example.com/dep` — primary dep
   - `example.com/dep2` — second dep (multi-dir)
 - **Stdout apply:** `==== dep-replace ====`; `dep` headers; checkout →
-  module → `replace`; `dep-replace: replaced in N modules in C checkouts`
-- **Dry-run:** `==== dep-replace (dry-run) ====`; `would: replace`;
+  module → `replace` + `go mod tidy ok` or `skip tidy  (vendor/)`;
+  `dep-replace: replaced in N modules in C checkouts`
+- **Dry-run:** `==== dep-replace (dry-run) ====`; `would: replace` +
+  `would: go mod tidy` / `would: skip tidy  (vendor/)`;
   `would replace in N modules in C checkouts`
 - **Not-git consumer resolution:** walk up from `RepoDir` to nearest go.mod.
 - **Git consumer set:** `CollectStackInventory(cwd)`.
@@ -51,11 +54,13 @@ consumer go.mod + dep module dir(s)
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/xhd2015/doctest/session"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/withgo"
 	"github.com/xhd2015/gitops/git/git_isolated"
 )
 
@@ -70,6 +75,8 @@ const (
 	modKool      = "example.com/kool"
 	checkoutKool = "external/kool"
 	checkoutDep  = "external/dep"
+
+	pinGo122 = "go1.22.12"
 )
 
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
@@ -85,8 +92,39 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	}
 	req.RepoDir = workRoot
 	req.InProcess = true
+	req.InstallDir = filepath.Join(workRoot, "installed")
+	req.ExtraEnv = append(req.ExtraEnv, "HOME="+workRoot)
+	_ = seedHostGoWrapper(t, req.InstallDir, pinGo122)
+	req.WithGo = withgo.ResolveOptions{
+		InstallDir: req.InstallDir,
+		Download:   false,
+	}
 	ensureDepReplaceHelpersUsed()
 	return nil
+}
+
+// seedHostGoWrapper writes $installDir/<pin>/bin/go that records its arguments,
+// GOROOT, and PATH0, then execs the host go so real tidy still works.
+func seedHostGoWrapper(t *testing.T, installDir, pin string) string {
+	t.Helper()
+	hostGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("look up host go: %v", err)
+	}
+	dest := filepath.Join(installDir, pin)
+	bin := filepath.Join(dest, "bin", "go")
+	record := filepath.Join(dest, "last-run")
+	script := fmt.Sprintf(`#!/bin/sh
+printf 'ARGS=%%s\n' "$*" > %q
+printf 'GOROOT=%%s\n' "$GOROOT" >> %q
+printf 'PATH0=%%s\n' "${PATH%%:*}" >> %q
+exec %q "$@"
+`, record, record, record, hostGo)
+	writeFile(t, bin, script)
+	if err := os.Chmod(bin, 0o755); err != nil {
+		t.Fatalf("chmod go wrapper %s: %v", bin, err)
+	}
+	return record
 }
 
 func mkdirAll(t *testing.T, path string) {
@@ -142,6 +180,16 @@ func writeLibPkg(t *testing.T, dir, pkg, fn string) {
 	t.Helper()
 	writeFile(t, filepath.Join(dir, "pkg.go"),
 		fmt.Sprintf("package %s\n\nfunc %s() string { return %q }\n", pkg, fn, fn))
+}
+
+// setupVendorSkip: nearest consumer with require + empty vendor/ (skip tidy).
+func setupVendorSkip(t *testing.T, req *Request) {
+	t.Helper()
+	setupConsumerWithDep(t, req, true)
+	vendor := filepath.Join(req.ConsumerModDir, "vendor")
+	mkdirAll(t, vendor)
+	req.VendorDir = vendor
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
 }
 
 // setupConsumerWithDep builds:
@@ -692,18 +740,18 @@ func assertWouldDepReplaceLine(t *testing.T, stdout, modulePath, absDir string) 
 
 func assertNoTidyArtifacts(t *testing.T, req *Request) {
 	t.Helper()
-	// D2: no tidy — go.sum should not appear if it did not exist.
+	// Dry-run / vendor-skip: go.sum should not appear if it did not exist.
 	if req.ConsumerModDir == "" {
 		return
 	}
 	sum := filepath.Join(req.ConsumerModDir, "go.sum")
 	if _, err := os.Stat(sum); err == nil {
-		t.Fatalf("go.sum created (tidy must not run): %s", sum)
+		t.Fatalf("go.sum created (tidy must not write): %s", sum)
 	}
 	if req.Consumer2ModDir != "" {
 		sum2 := filepath.Join(req.Consumer2ModDir, "go.sum")
 		if _, err := os.Stat(sum2); err == nil {
-			t.Fatalf("go.sum created on other checkout (tidy must not run): %s", sum2)
+			t.Fatalf("go.sum created on other checkout (tidy must not write): %s", sum2)
 		}
 	}
 }
@@ -827,6 +875,7 @@ func ensureDepReplaceHelpersUsed() {
 	_ = setupConsumerTwoDeps
 	_ = setupNestedConsumerWorkDir
 	_ = setupDepOnly
+	_ = setupVendorSkip
 	_ = setupStackOtherCheckout
 	_ = setupStackSkipNonConsumer
 	_ = setupStackExistingReplace
@@ -838,6 +887,7 @@ func ensureDepReplaceHelpersUsed() {
 	_ = initStackPrimary
 	_ = seedExternalGitModule
 	_ = writeConsumerMainWithImports
+	_ = seedHostGoWrapper
 	_ = assertAbsoluteReplace
 	_ = assertNoReplaceFor
 	_ = assertDepReplaceLine

@@ -1,15 +1,13 @@
 ## Expected
 
-- Non-zero exit (apply fail-fast).
-- First dep replace is applied (sequential fail-fast leaves prior writes).
+- Non-zero exit.
 - Stderr indicates missing second path (`wrk:` + no such dir or equivalent).
-- No success claim for the missing path.
-- No complete success summary. If stdout leaked a first-success line, it must
-  not be the old one-liner `dep-replace example.com/dep =>`.
+- No banner / no success summary (validate every dir before apply).
+- Consumer go.mod unchanged (no partial first replace).
 
 ## Side Effects
 
-- Partial apply of first directory is allowed under D3 fail-fast.
+- None: bad second arg aborts before any replace/tidy.
 
 ## Exit Code
 
@@ -26,8 +24,8 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	_ = d
 	assertErrIsNil(t, err)
 	assertExitNonZero(t, resp)
-	assertAbsoluteReplace(t, req.ConsumerGoMod, modDep, req.DepDir)
-	assertNotContains(t, resp.Stdout, "dep-replace "+modDep+" =>")
+	assertNoBanner(t, resp.Stdout)
+	assertGoModUnchanged(t, req)
 	assertNotContains(t, resp.Stdout, "dep-replace: replaced")
 	se := strings.ToLower(resp.Stderr)
 	if !strings.Contains(se, "no such") &&

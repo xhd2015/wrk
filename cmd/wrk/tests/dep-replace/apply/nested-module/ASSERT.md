@@ -7,6 +7,7 @@ dep  example.com/dep => <abs>
   checkout  ..
     module  example.com/consumer
       replace  example.com/dep => <abs>
+      go mod tidy ok
 
 dep-replace: replaced in 1 modules in 1 checkouts
 ```
@@ -49,6 +50,7 @@ dep  example\.com/dep => __ABS__
   checkout  \.\.
     module  example\.com/consumer
       replace  example\.com/dep => __ABS__
+      go mod tidy ok
 
 dep-replace: replaced in 1 modules in 1 checkouts
 `)
@@ -57,6 +59,5 @@ dep-replace: replaced in 1 modules in 1 checkouts
 	if _, err := os.Stat(nestedGoMod); err == nil {
 		t.Fatalf("must not create go.mod under nested workDir %s", req.RepoDir)
 	}
-	assertNoTidyArtifacts(t, req)
 }
 ```

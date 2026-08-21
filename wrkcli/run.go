@@ -1333,9 +1333,9 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if pinLocals {
 		return runPinLocals(workDir, dryRun, colorFlag)
 	}
-	// --dep-replace: absolute replace on unwind-stack consumers (no tidy).
+	// --dep-replace: absolute replace on unwind-stack consumers + versioned tidy.
 	if depReplaceMode {
-		return runDepReplace(workDir, depReplacePaths, dryRun)
+		return runDepReplace(workDir, depReplacePaths, dryRun, ctx)
 	}
 	// --dep-update: dir-mode fan-out pin + versioned tidy, or --all inventory pull.
 	if depUpdateMode {
@@ -1389,7 +1389,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		return runRepos(workDir)
 	}
 	if exclusiveBring {
-		return runBring(workDir, bringPaths, wrkHome, args, execArgs, noDep)
+		return runBring(workDir, bringPaths, wrkHome, args, execArgs, noDep, ctx)
 	}
 	if list {
 		return runList(workDir)
@@ -1579,7 +1579,12 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		if len(bringPaths) > 1 {
 			printBringPlan(bringPaths, resolved)
 		}
-		bringPlan = &bringApplyPlan{args: bringPaths, resolved: resolved, noDep: noDep}
+		bringPlan = &bringApplyPlan{
+			args:     bringPaths,
+			resolved: resolved,
+			noDep:    noDep,
+			withGo:   withGoFromCtx(ctx),
+		}
 	}
 	return runCreate(workDir, origWd, spawnTarget, task, noCd, forceCd, execArgs, uxPlan, bringPlan)
 }
@@ -1641,7 +1646,7 @@ Flags:
                                   (inventory = unwind stack only; go mod tidy per consumer; soft tidy fails)
   --dep-replace <dir>… [--dry-run]
                                   absolute replace into every gated go.mod on the unwind stack
-                                  (require or existing replace; not-git nearest; no tidy)
+                                  (require or existing replace; not-git nearest; versioned tidy unless vendor/)
   --dep-update <dir>… [--dry-run]
                                   pin latest tag into every existing requirer on the unwind stack
                                   (cwd git + nested/replace BFS; else nearest go.mod); versioned tidy unless vendor/
@@ -2838,7 +2843,7 @@ func mergeBackExternalWorktree(externalPath, wrkHome string, confirmFromStdin, a
 // Non-git consumer cwd: uses abs(cwd) as the external parent, skips
 // ensureGitignoreExternal, and soft-skips replace/tidy with
 // "SKIP local dep replacement: <abs-cwd> is not a git repository" (unless noDep).
-func runBring(workDir string, bringArgs []string, wrkHome string, rawArgs []string, execArgs []string, noDep bool) error {
+func runBring(workDir string, bringArgs []string, wrkHome string, rawArgs []string, execArgs []string, noDep bool, ctx *invocationContext) error {
 	if len(bringArgs) == 0 {
 		return fmt.Errorf("wrk: --bring requires a path")
 	}
@@ -2861,7 +2866,7 @@ func runBring(workDir string, bringArgs []string, wrkHome string, rawArgs []stri
 		printBringPlan(bringArgs, resolved)
 	}
 
-	lastExternal, err := applyBringResolved(workDir, bringArgs, resolved, resolveErrs, noDep)
+	lastExternal, err := applyBringResolved(workDir, bringArgs, resolved, resolveErrs, noDep, withGoFromCtx(ctx))
 	if err != nil {
 		return err
 	}
@@ -2875,6 +2880,7 @@ type bringApplyPlan struct {
 	args     []string
 	resolved []string
 	noDep    bool
+	withGo   withgo.ResolveOptions
 }
 
 func printBringPlan(bringArgs, resolved []string) {
@@ -2897,7 +2903,7 @@ func applyBringPlan(consumer string, bring *bringApplyPlan) error {
 	if bring == nil || len(bring.args) == 0 {
 		return nil
 	}
-	_, err := applyBringResolved(consumer, bring.args, bring.resolved, nil, bring.noDep)
+	_, err := applyBringResolved(consumer, bring.args, bring.resolved, nil, bring.noDep, bring.withGo)
 	return err
 }
 
@@ -2936,12 +2942,12 @@ func seedConsumerGoModFromSource(srcRoot, consumer string, bring *bringApplyPlan
 }
 
 // applyBringResolved materializes each resolved --bring arg left→right into
-// consumer. resolveErrs[i] is returned at that index (exclusive bring defers
-// unknown basenames to the apply loop). Compose callers pass nil resolveErrs
-// after failing closed on any preflight resolve error.
-func applyBringResolved(consumer string, bringArgs, resolved []string, resolveErrs []error, noDep bool) (lastExternal string, err error) {
-	multi := len(bringArgs) > 1
-	tidyAtEnd := make(map[string]struct{})
+// consumer, then applies stack absolute replace + versioned tidy once for all
+// gated deps (shared with --dep-replace). resolveErrs[i] is returned at that
+// index (exclusive bring defers unknown basenames to the apply loop). Compose
+// callers pass nil resolveErrs after failing closed on any preflight resolve error.
+func applyBringResolved(consumer string, bringArgs, resolved []string, resolveErrs []error, noDep bool, withGo withgo.ResolveOptions) (lastExternal string, err error) {
+	var replaceDeps []depReplaceDep
 
 	for i := range bringArgs {
 		if resolveErrs != nil && resolveErrs[i] != nil {
@@ -2953,13 +2959,11 @@ func applyBringResolved(consumer string, bringArgs, resolved []string, resolveEr
 			// returns at the first resolveErrs[i] above before reaching them.
 			return lastExternal, fmt.Errorf("wrk: internal: unresolved --bring path: %s", bringArgs[i])
 		}
-		externalPath, replacedDirs, err := bringOneFromResolved(consumer, depPath, noDep, !multi)
+		externalPath, deps, err := bringOneFromResolved(consumer, depPath, noDep)
 		if err != nil {
 			return lastExternal, err
 		}
-		for _, d := range replacedDirs {
-			tidyAtEnd[d] = struct{}{}
-		}
+		replaceDeps = append(replaceDeps, deps...)
 		// Print each success before attempting the next (fail-fast still shows first path).
 		absPath, err := filepath.Abs(externalPath)
 		if err != nil {
@@ -2969,16 +2973,12 @@ func applyBringResolved(consumer string, bringArgs, resolved []string, resolveEr
 		lastExternal = absPath
 	}
 
-	if multi && !noDep && len(tidyAtEnd) > 0 {
-		dirs := make([]string, 0, len(tidyAtEnd))
-		for d := range tidyAtEnd {
-			dirs = append(dirs, d)
-		}
-		sort.Strings(dirs)
-		for _, d := range dirs {
-			if err := goModTidyForBring(d); err != nil {
-				return lastExternal, err
-			}
+	if !noDep && len(replaceDeps) > 0 {
+		if err := applyStackAbsoluteReplace(consumer, replaceDeps, stackReplaceOpts{
+			Quiet:  true,
+			WithGo: withGo,
+		}); err != nil {
+			return lastExternal, err
 		}
 	}
 	return lastExternal, nil
@@ -3051,11 +3051,11 @@ func preflightResolveBringArgs(bringArgs []string, wrkHome string, rawArgs []str
 }
 
 // bringOneFromResolved materializes one dependency worktree from an already-
-// resolved absolute dep path and optionally applies replaces.
-// When tidyNow is true, runs go mod tidy after each successful replace (single-bring).
-// When tidyNow is false (multi mid-loop), returns consumer dirs that need tidy later.
-// Does not call resolveDirArg — preflight already resolved and confirmed basenames.
-func bringOneFromResolved(workDir, depPath string, noDep, tidyNow bool) (externalPath string, replacedDirs []string, err error) {
+// resolved absolute dep path and, unless noDep, returns gated stack replace
+// targets for the shared applyStackAbsoluteReplace pass. Soft-SKIP notices
+// leave the worktree in place with an empty dep list. Does not call
+// resolveDirArg — preflight already resolved and confirmed basenames.
+func bringOneFromResolved(workDir, depPath string, noDep bool) (externalPath string, deps []depReplaceDep, err error) {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve cwd: %w", err)
@@ -3077,67 +3077,95 @@ func bringOneFromResolved(workDir, depPath string, noDep, tidyNow bool) (externa
 		return "", nil, err
 	}
 
-	// Create external worktree (+ /external gitignore only when consumer is git).
-	externalPath, err = createExternalWorktreeForRepo(consumerTop, depPath)
-	if err != nil {
-		return "", nil, err
-	}
-
 	// --no-dep: worktree only; skip replace + tidy (and analyse/match).
 	if noDep {
+		externalPath, err = createExternalWorktreeForRepo(consumerTop, depPath)
+		if err != nil {
+			return "", nil, err
+		}
 		return externalPath, nil, nil
 	}
 
-	// Non-git consumer: soft-skip replace/tidy without module analyse.
+	// Non-git consumer: still materialize external/, soft-skip replace/tidy.
 	if !insideWorkTree {
+		externalPath, err = createExternalWorktreeForRepo(consumerTop, depPath)
+		if err != nil {
+			return "", nil, err
+		}
 		fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a git repository\n", cwd)
 		return externalPath, nil, nil
 	}
 
-	// Soft-skip replace with notices; worktree already exists.
+	// Analyse stack consumers + dep modules BEFORE creating external/, so a
+	// brand-new external checkout is not mistaken for a stack consumer (which
+	// would collapse "no Go modules" into "not a dependency").
 	depModules, err := scan.Scan(depPath, scan.Options{})
 	if err != nil {
 		return "", nil, fmt.Errorf("scan dep modules: %w", err)
 	}
 	if len(depModules) == 0 {
+		externalPath, err = createExternalWorktreeForRepo(consumerTop, depPath)
+		if err != nil {
+			return "", nil, err
+		}
 		fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a go module\n", depPath)
 		return externalPath, nil, nil
 	}
 
-	consumerModules, err := scan.Scan(consumerTop, scan.Options{})
+	consumers, err := collectDepUpdateConsumers(cwd)
 	if err != nil {
-		return "", nil, fmt.Errorf("scan consumer modules: %w", err)
+		return "", nil, err
 	}
-	if len(consumerModules) == 0 {
+	if len(consumers) == 0 {
+		externalPath, err = createExternalWorktreeForRepo(consumerTop, depPath)
+		if err != nil {
+			return "", nil, err
+		}
 		fmt.Fprintf(os.Stderr, "SKIP local dep replacement: consumer has no Go modules\n")
 		return externalPath, nil, nil
 	}
 
-	matchingConsumerDirs, depModDir := matchDepToConsumerModules(consumerTop, consumerModules, depModules)
-	if len(matchingConsumerDirs) == 0 {
+	planned := bringStackReplaceDeps(consumers, depModules, "") // absDir filled after create
+	if len(planned) == 0 {
+		externalPath, err = createExternalWorktreeForRepo(consumerTop, depPath)
+		if err != nil {
+			return "", nil, err
+		}
 		fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a dependency of any consumer module\n", depPath)
 		return externalPath, nil, nil
 	}
 
-	// The replace must target the directory holding the dep module's go.mod:
-	// the repo root when depModDir is ".", or the sub-module subdir otherwise.
-	replaceDir := externalPath
-	if depModDir != "." {
-		replaceDir = filepath.Join(externalPath, depModDir)
+	externalPath, err = createExternalWorktreeForRepo(consumerTop, depPath)
+	if err != nil {
+		return "", nil, err
 	}
-	for _, m := range matchingConsumerDirs {
-		if _, _, err := replace.ReplaceIn(m.dir, replaceDir); err != nil {
-			return "", nil, err
-		}
-		replacedDirs = append(replacedDirs, m.dir)
-		if tidyNow {
-			if err := goModTidyForBring(m.dir); err != nil {
-				return "", nil, err
-			}
-		}
-	}
+	deps = bringStackReplaceDeps(consumers, depModules, externalPath)
+	return externalPath, deps, nil
+}
 
-	return externalPath, replacedDirs, nil
+// bringStackReplaceDeps maps dep modules that are gated on the unwind stack to
+// absolute replace targets under externalPath (repo root or sub-module dir).
+func bringStackReplaceDeps(consumers []depUpdateConsumer, depModules []scan.Module, externalPath string) []depReplaceDep {
+	var deps []depReplaceDep
+	seen := make(map[string]struct{})
+	for _, dm := range depModules {
+		if dm.Path == "" {
+			continue
+		}
+		if len(gatedReplaceConsumers(consumers, dm.Path, true)) == 0 {
+			continue
+		}
+		if _, ok := seen[dm.Path]; ok {
+			continue
+		}
+		seen[dm.Path] = struct{}{}
+		replaceDir := externalPath
+		if dm.Dir != "" && dm.Dir != "." {
+			replaceDir = filepath.Join(externalPath, dm.Dir)
+		}
+		deps = append(deps, depReplaceDep{modulePath: dm.Path, absDir: replaceDir})
+	}
+	return deps
 }
 
 type consumerMatch struct{ dir string }

@@ -7,6 +7,7 @@ dep  example.com/dep => <abs>
   checkout  .
     module  example.com/consumer
       would: replace  example.com/dep => <abs>
+      would: go mod tidy
 
 dep-replace: would replace in 1 modules in 1 checkouts
 ```
@@ -50,6 +51,7 @@ dep  example\.com/dep => __ABS__
   checkout  \.
     module  example\.com/consumer
       would: replace  example\.com/dep => __ABS__
+      would: go mod tidy(?:  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
 
 dep-replace: would replace in 1 modules in 1 checkouts
 `)

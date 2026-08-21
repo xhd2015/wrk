@@ -45,18 +45,17 @@ func ensureBringVerboseHelpersUsed() {
 }
 
 // assertBringStderrContainsTidyPreLine checks for verbose go mod tidy pre-command log.
-// Expected form (flexible on -C placement): timestamp + "$ go" + "mod tidy", preferably with -C and modDir.
+// Accepts host `$ go -C … mod tidy` or versioned `GOROOT=… …/bin/go -C … mod tidy`
+// (shared tidyDepUpdateConsumer / withgo path).
 func assertBringStderrContainsTidyPreLine(t *testing.T, stderr, modDir string) {
 	t.Helper()
 	if !strings.Contains(stderr, "mod tidy") {
 		t.Fatalf("stderr should contain mod tidy pre-line, got %q", stderr)
 	}
-	if !strings.Contains(stderr, "$ go") {
-		t.Fatalf("stderr should contain $ go tidy pre-line, got %q", stderr)
-	}
-	re := regexp.MustCompile(`\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] \$ go `)
-	if !re.MatchString(stderr) {
-		t.Fatalf("stderr should contain timestamped $ go pre-line, got %q", stderr)
+	reHost := regexp.MustCompile(`\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] \$ go `)
+	reVersioned := regexp.MustCompile(`\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] \$ GOROOT=\S+ \S+/bin/go `)
+	if !reHost.MatchString(stderr) && !reVersioned.MatchString(stderr) {
+		t.Fatalf("stderr should contain timestamped tidy pre-line ($ go or GOROOT=…/bin/go), got %q", stderr)
 	}
 	if modDir != "" {
 		if !strings.Contains(stderr, "-C") {
@@ -76,7 +75,7 @@ func assertBringStderrNoTidyPreLine(t *testing.T, stderr string) {
 		if line == "" {
 			continue
 		}
-		if strings.Contains(line, "$ go") && strings.Contains(line, "mod tidy") {
+		if strings.Contains(line, "mod tidy") && (strings.Contains(line, "$ go") || strings.Contains(line, "GOROOT=")) {
 			t.Fatalf("stderr should not contain tidy pre-line without -v, got %q", stderr)
 		}
 		if strings.Contains(line, "mod tidy") && strings.Contains(line, "$ go") {

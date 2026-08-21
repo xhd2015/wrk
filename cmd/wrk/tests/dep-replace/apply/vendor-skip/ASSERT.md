@@ -7,7 +7,7 @@ dep  example.com/dep => <abs>
   checkout  .
     module  example.com/consumer
       replace  example.com/dep => <abs>
-      go mod tidy ok
+      skip tidy  (vendor/)
 
 dep-replace: replaced in 1 modules in 1 checkouts
 ```
@@ -15,13 +15,13 @@ dep-replace: replaced in 1 modules in 1 checkouts
 ## Expected
 
 - Exit 0.
-- Not-git nearest **D7**: absolute replace written despite no prior require.
-- Apply tree as for single-dir.
-- Baseline had no `require example.com/dep` (fixture guard).
+- Absolute replace applied.
+- `skip tidy  (vendor/)` under the module; no `go mod tidy ok`.
+- No go.sum; vendor/ untouched.
 
 ## Side Effects
 
-- go.mod gains replace only (D7); versioned tidy after replaces.
+- Replace only; tidy skipped because of vendor/.
 
 ## Exit Code
 
@@ -29,7 +29,8 @@ dep-replace: replaced in 1 modules in 1 checkouts
 
 ```go
 import (
-	"strings"
+	"os"
+	"path/filepath"
 
 	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
@@ -39,9 +40,6 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
-	if strings.Contains(req.BaselineGoMod, "require "+modDep) {
-		t.Fatalf("fixture bug: baseline should not require %s", modDep)
-	}
 	assert.Output(t, resp.Stdout, `---
 version: 3
 __ABS__: type=string
@@ -52,10 +50,18 @@ dep  example\.com/dep => __ABS__
   checkout  \.
     module  example\.com/consumer
       replace  example\.com/dep => __ABS__
-      go mod tidy ok
+      skip tidy  \(vendor/\)
 
 dep-replace: replaced in 1 modules in 1 checkouts
 `)
+	assertNotContains(t, resp.Stdout, "go mod tidy ok")
 	assertAbsoluteReplace(t, req.ConsumerGoMod, modDep, req.DepDir)
+	assertNoTidyArtifacts(t, req)
+	if req.VendorDir == "" {
+		t.Fatal("fixture bug: VendorDir unset")
+	}
+	if _, err := os.Stat(filepath.Join(req.VendorDir, "modules.txt")); err == nil {
+		t.Fatalf("vendor/ must not gain modules.txt")
+	}
 }
 ```

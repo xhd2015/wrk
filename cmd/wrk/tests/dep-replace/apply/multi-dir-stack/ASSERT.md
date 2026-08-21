@@ -9,9 +9,11 @@ dep  example.com/dep2 => <abs2>
     module  example.com/app
       replace  example.com/dep => <abs>
       replace  example.com/dep2 => <abs2>
+      go mod tidy ok
   checkout  external/kool
     module  example.com/kool
       replace  example.com/dep => <abs>
+      go mod tidy ok
 
 dep-replace: replaced in 2 modules in 2 checkouts
 ```
@@ -25,7 +27,7 @@ dep-replace: replaced in 2 modules in 2 checkouts
 
 ## Side Effects
 
-- Two modules updated across two checkouts; no tidy.
+- Two modules updated across two checkouts; versioned tidy after replaces.
 
 ## Exit Code
 
@@ -54,9 +56,11 @@ dep  example\.com/dep2 => __ABS2__
     module  example\.com/app
       replace  example\.com/dep => __ABS__
       replace  example\.com/dep2 => __ABS2__
+      go mod tidy ok
   checkout  external/kool
     module  example\.com/kool
       replace  example\.com/dep => __ABS__
+      go mod tidy ok
 
 dep-replace: replaced in 2 modules in 2 checkouts
 `)
@@ -64,6 +68,5 @@ dep-replace: replaced in 2 modules in 2 checkouts
 	assertAbsoluteReplace(t, req.ConsumerGoMod, modDep2, req.Dep2Dir)
 	assertAbsoluteReplace(t, req.Consumer2GoMod, modDep, req.DepDir)
 	assertNoReplaceFor(t, req.Consumer2GoMod, modDep2)
-	assertNoTidyArtifacts(t, req)
 }
 ```

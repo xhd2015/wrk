@@ -12,9 +12,10 @@
 # -v: log major git + go mod tidy pre-line; stream worktree add + tidy child to stderr
 consumer (git or plain non-git) + dep path -> wrk --bring <dep> [--no-dep] [-v]
   -> external worktree under {parent}/external/
-  -> optional replace+tidy on module match (skipped with --no-dep or non-git)
+  -> optional stack-wide replace+versioned tidy on module match (skipped with --no-dep or non-git)
+  -> consumer scope = unwind stack (CollectStackInventory), shared with --dep-replace
   -> SKIP local dep replacement: <reason> on stderr when soft-fail (not with --no-dep)
-  -> stdout: <external-abs>\n
+  -> stdout: <external-abs>\n (replace/tidy silent)
 ```
 
 ## Preconditions

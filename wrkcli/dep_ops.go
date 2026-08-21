@@ -22,11 +22,43 @@ import (
 // runDepReplace implements wrk --dep-replace <dir>… [--dry-run].
 // Git: every go.mod on CollectStackInventory, gated by existing require or
 // replace (self never rewritten). Not git: nearest go.mod, D7 write even
-// without require. No tidy. Dry-run validates every dir before any banner.
-// Apply is fail-fast: a later bad arg leaves prior writes.
-func runDepReplace(workDir string, paths []string, dryRun bool) error {
+// without require. After replaces: versioned tidy via tidyDepUpdateConsumer
+// (same as --dep-update; vendor/ skips). Dry-run validates every dir before
+// any banner. Apply is fail-fast: a later bad arg leaves prior writes.
+func runDepReplace(workDir string, paths []string, dryRun bool, ctx *invocationContext) error {
 	if len(paths) == 0 {
 		return fmt.Errorf("wrk: --dep-replace requires a directory")
+	}
+	deps := make([]depReplaceDep, 0, len(paths))
+	for _, p := range paths {
+		dep, err := resolveDepReplaceArg(p)
+		if err != nil {
+			return err
+		}
+		deps = append(deps, dep)
+	}
+	return applyStackAbsoluteReplace(workDir, deps, stackReplaceOpts{
+		DryRun: dryRun,
+		Quiet:  false,
+		WithGo: withGoFromCtx(ctx),
+	})
+}
+
+// stackReplaceOpts controls applyStackAbsoluteReplace reporting and tidy.
+type stackReplaceOpts struct {
+	DryRun bool
+	Quiet  bool // bring: no banner/tree/tidy lines
+	WithGo withgo.ResolveOptions
+}
+
+// applyStackAbsoluteReplace is the shared absolute-replace + versioned-tidy
+// core for --dep-replace and --bring. Consumer set = collectDepUpdateConsumers
+// (unwind stack when git; nearest go.mod otherwise). Git writes are gated by
+// require or existing replace; self never rewritten. Zero gated consumers on
+// git → hard error. Tidy uses tidyDepUpdateConsumer once per affected module.
+func applyStackAbsoluteReplace(workDir string, deps []depReplaceDep, opts stackReplaceOpts) error {
+	if len(deps) == 0 {
+		return fmt.Errorf("wrk: no deps to replace")
 	}
 	cwd, err := absAgainstProcessCwd(workDir)
 	if err != nil {
@@ -39,47 +71,11 @@ func runDepReplace(workDir string, paths []string, dryRun bool) error {
 	if err != nil {
 		return err
 	}
-
-	if dryRun {
-		deps := make([]depReplaceDep, 0, len(paths))
-		for _, p := range paths {
-			dep, err := resolveDepReplaceArg(p)
-			if err != nil {
-				return err
-			}
-			deps = append(deps, dep)
-		}
-		tree, err := buildDepReplaceTree(cwd, consumers, deps, git)
-		if err != nil {
-			return err
-		}
-		printDepReplaceReport(tree, deps, true)
-		return nil
-	}
-
-	deps := make([]depReplaceDep, 0, len(paths))
-	for _, p := range paths {
-		dep, err := resolveDepReplaceArg(p)
-		if err != nil {
-			return err
-		}
-		targets := gatedReplaceConsumers(consumers, dep.modulePath, git)
-		if git && len(targets) == 0 {
-			return fmt.Errorf("wrk: no stack consumer to replace %s", dep.modulePath)
-		}
-		for _, c := range targets {
-			if _, _, err := replace.ReplaceIn(c.ModDir, dep.absDir); err != nil {
-				return fmt.Errorf("wrk: %w", err)
-			}
-		}
-		deps = append(deps, dep)
-	}
 	tree, err := buildDepReplaceTree(cwd, consumers, deps, git)
 	if err != nil {
 		return err
 	}
-	printDepReplaceReport(tree, deps, false)
-	return nil
+	return applyDepReplaceTree(tree, deps, opts)
 }
 
 type depReplaceDep struct {
@@ -223,36 +219,64 @@ func countDepReplaceTree(checkouts []depReplaceCheckout) (modules, nCheckouts in
 	return
 }
 
-func printDepReplaceReport(tree []depReplaceCheckout, deps []depReplaceDep, dryRun bool) {
-	if dryRun {
-		fmt.Println("==== dep-replace (dry-run) ====")
-	} else {
-		fmt.Println("==== dep-replace ====")
+// applyDepReplaceTree writes (or plans) absolute replaces then versioned tidy
+// once per affected module. Quiet suppresses all stdout (bring).
+func applyDepReplaceTree(tree []depReplaceCheckout, deps []depReplaceDep, opts stackReplaceOpts) error {
+	dryRun := opts.DryRun
+	quiet := opts.Quiet
+	if !quiet {
+		if dryRun {
+			fmt.Println("==== dep-replace (dry-run) ====")
+		} else {
+			fmt.Println("==== dep-replace ====")
+		}
+		for _, dep := range deps {
+			fmt.Printf("dep  %s => %s\n", dep.modulePath, dep.absDir)
+		}
+		fmt.Println()
 	}
-	for _, dep := range deps {
-		fmt.Printf("dep  %s => %s\n", dep.modulePath, dep.absDir)
-	}
-	fmt.Println()
 	for _, co := range tree {
-		fmt.Printf("  checkout  %s\n", co.Label)
+		if !quiet {
+			fmt.Printf("  checkout  %s\n", co.Label)
+		}
 		for _, mod := range co.Modules {
-			fmt.Printf("    module  %s\n", mod.Path)
+			if !quiet {
+				fmt.Printf("    module  %s\n", mod.Path)
+			}
 			for _, act := range mod.Replaces {
+				if !dryRun {
+					if _, _, err := replace.ReplaceIn(mod.ModDir, act.absDir); err != nil {
+						return fmt.Errorf("wrk: %w", err)
+					}
+				}
+				if quiet {
+					continue
+				}
 				if dryRun {
 					fmt.Printf("      would: replace  %s => %s\n", act.modulePath, act.absDir)
 					continue
 				}
 				fmt.Printf("      replace  %s => %s\n", act.modulePath, act.absDir)
 			}
+			if len(mod.Replaces) == 0 {
+				continue
+			}
+			if err := tidyDepUpdateConsumer(mod.ModDir, mod.Path, dryRun, quiet, opts.WithGo); err != nil {
+				return err
+			}
 		}
+	}
+	if quiet {
+		return nil
 	}
 	n, c := countDepReplaceTree(tree)
 	fmt.Println()
 	if dryRun {
 		fmt.Printf("dep-replace: would replace in %d modules in %d checkouts\n", n, c)
-		return
+		return nil
 	}
 	fmt.Printf("dep-replace: replaced in %d modules in %d checkouts\n", n, c)
+	return nil
 }
 
 // runDepUpdate implements wrk --dep-update <dir>… [--dry-run] (dir mode).
@@ -656,7 +680,7 @@ func applyDepUpdateTree(checkouts []depUpdateTreeCheckout, dryRun bool, withGo w
 			if len(mod.Pins) == 0 {
 				continue
 			}
-			if err := tidyDepUpdateConsumer(mod.ModDir, mod.Path, dryRun, withGo); err != nil {
+			if err := tidyDepUpdateConsumer(mod.ModDir, mod.Path, dryRun, false, withGo); err != nil {
 				return err
 			}
 		}
@@ -686,16 +710,19 @@ func resolveDepUpdateWithGo(opts withgo.ResolveOptions) (withgo.ResolveOptions, 
 	return opts, nil
 }
 
-// tidyDepUpdateConsumer is the dep-update-only tidy helper (dir-mode and --all).
-// vendor/ directory → skip tidy (never go mod vendor). Else versioned
-// withgo.ModuleGoLine + withgo.Run. Does not use goModTidy (bring/pin-locals/unwind).
-func tidyDepUpdateConsumer(modDir, modulePath string, dryRun bool, resolveOpts withgo.ResolveOptions) error {
+// tidyDepUpdateConsumer is the shared versioned tidy helper for --dep-update,
+// --dep-replace, and --bring. vendor/ directory → skip tidy (never go mod
+// vendor). Else versioned withgo.ModuleGoLine + withgo.Run. Quiet suppresses
+// tree lines (bring). Does not use goModTidy (pin-locals/unwind).
+func tidyDepUpdateConsumer(modDir, modulePath string, dryRun, quiet bool, resolveOpts withgo.ResolveOptions) error {
 	vendor := filepath.Join(modDir, "vendor")
 	if fi, err := os.Stat(vendor); err == nil && fi.IsDir() {
-		if dryRun {
-			fmt.Println("      would: skip tidy  (vendor/)")
-		} else {
-			fmt.Println("      skip tidy  (vendor/)")
+		if !quiet {
+			if dryRun {
+				fmt.Println("      would: skip tidy  (vendor/)")
+			} else {
+				fmt.Println("      skip tidy  (vendor/)")
+			}
 		}
 		return nil
 	}
@@ -713,7 +740,9 @@ func tidyDepUpdateConsumer(modDir, modulePath string, dryRun bool, resolveOpts w
 	}
 	toolchain := planDepUpdateGoToolchain(ver, resolveOpts)
 	if dryRun {
-		printDepUpdateTidyPlan(toolchain)
+		if !quiet {
+			printDepUpdateTidyPlan(toolchain)
+		}
 		return nil
 	}
 
@@ -735,7 +764,9 @@ func tidyDepUpdateConsumer(modDir, modulePath string, dryRun bool, resolveOpts w
 		}
 		return fmt.Errorf("wrk: go mod tidy in %s: %w", absDir, err)
 	}
-	fmt.Println("      go mod tidy ok")
+	if !quiet {
+		fmt.Println("      go mod tidy ok")
+	}
 	return nil
 }
 

@@ -30,6 +30,8 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	if first != want1 {
 		t.Fatalf("precondition --bring mydep1: expected %q, got %q", want1, first)
 	}
+	// Precondition tidy drops unused dep2 require; re-pin so multi-bring can match.
+	runBringGo(t, consumer, "mod", "edit", "-require="+multiBringDep2Module+"@v0.0.0")
 
 	req.RepoDir = consumer
 	req.ConsumerTop = consumer

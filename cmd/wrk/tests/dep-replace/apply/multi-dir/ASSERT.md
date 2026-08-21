@@ -9,6 +9,7 @@ dep  example.com/dep2 => <abs2>
     module  example.com/consumer
       replace  example.com/dep => <abs>
       replace  example.com/dep2 => <abs2>
+      go mod tidy ok
 
 dep-replace: replaced in 1 modules in 1 checkouts
 ```
@@ -16,7 +17,7 @@ dep-replace: replaced in 1 modules in 1 checkouts
 ## Expected
 
 - Exit 0.
-- Two argv `dep` headers (argv order); one consumer; both replaces; no tidy.
+- Two argv `dep` headers (argv order); one consumer; both replaces; versioned tidy after replaces.
 - go.mod has absolute replaces for both modules.
 
 ## Side Effects
@@ -50,11 +51,11 @@ dep  example\.com/dep2 => __ABS2__
     module  example\.com/consumer
       replace  example\.com/dep => __ABS__
       replace  example\.com/dep2 => __ABS2__
+      go mod tidy ok
 
 dep-replace: replaced in 1 modules in 1 checkouts
 `)
 	assertAbsoluteReplace(t, req.ConsumerGoMod, modDep, req.DepDir)
 	assertAbsoluteReplace(t, req.ConsumerGoMod, modDep2, req.Dep2Dir)
-	assertNoTidyArtifacts(t, req)
 }
 ```

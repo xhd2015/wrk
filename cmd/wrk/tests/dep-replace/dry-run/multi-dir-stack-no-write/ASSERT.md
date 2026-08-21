@@ -9,9 +9,11 @@ dep  example.com/dep2 => <abs2>
     module  example.com/app
       would: replace  example.com/dep => <abs>
       would: replace  example.com/dep2 => <abs2>
+      would: go mod tidy
   checkout  external/kool
     module  example.com/kool
       would: replace  example.com/dep => <abs>
+      would: go mod tidy
 
 dep-replace: would replace in 2 modules in 2 checkouts
 ```
@@ -53,9 +55,11 @@ dep  example\.com/dep2 => __ABS2__
     module  example\.com/app
       would: replace  example\.com/dep => __ABS__
       would: replace  example\.com/dep2 => __ABS2__
+      would: go mod tidy(?:  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
   checkout  external/kool
     module  example\.com/kool
       would: replace  example\.com/dep => __ABS__
+      would: go mod tidy(?:  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
 
 dep-replace: would replace in 2 modules in 2 checkouts
 `)

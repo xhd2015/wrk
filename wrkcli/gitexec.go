@@ -73,42 +73,6 @@ func goModTidy(dir string) error {
 	return nil
 }
 
-// goModTidyForBring runs go mod tidy but re-adds any require directives that
-// tidy dropped (common with require-only fixtures / no source imports yet).
-// This keeps other planned deps visible so a subsequent --bring can still match
-// them, without skipping tidy entirely (verbose pre-line still fires).
-func goModTidyForBring(dir string) error {
-	before, err := listGoModRequires(dir)
-	if err != nil {
-		// Fall back to plain tidy if we cannot snapshot.
-		return goModTidy(dir)
-	}
-	if err := goModTidy(dir); err != nil {
-		return err
-	}
-	after, err := listGoModRequires(dir)
-	if err != nil {
-		return nil
-	}
-	still := make(map[string]struct{}, len(after))
-	for _, r := range after {
-		still[r.path] = struct{}{}
-	}
-	for _, r := range before {
-		if _, ok := still[r.path]; ok {
-			continue
-		}
-		ver := r.version
-		if ver == "" {
-			ver = "v0.0.0"
-		}
-		if err := goModEditRequire(dir, r.path, ver); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 type goModRequire struct {
 	path, version string
 }
@@ -137,16 +101,6 @@ func listGoModRequires(dir string) ([]goModRequire, error) {
 		reqs = append(reqs, goModRequire{path: r.Path, version: r.Version})
 	}
 	return reqs, nil
-}
-
-func goModEditRequire(dir, path, version string) error {
-	arg := "-require=" + path + "@" + version
-	cmd := exec.Command("go", "mod", "edit", arg)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("go mod edit %s: %w\n%s", arg, err, out)
-	}
-	return nil
 }
 
 func isMajorGitCommand(args []string) bool {

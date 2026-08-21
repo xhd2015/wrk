@@ -1,13 +1,12 @@
 # Scenario
 
-**Feature**: multi-arg fail-fast stops on second missing dir; first replace may remain (D3)
+**Feature**: multi-arg apply validates every dir first; missing second aborts with no writes
 
 ```
 consumer + good dep; second path missing
   -> wrk --dep-replace <good> <missing>
-  -> non-zero
-  -> first dep absolute replace present
-  -> no replace for second
+  -> non-zero; no banner
+  -> consumer go.mod unchanged (no partial replace)
 ```
 
 ## Steps
