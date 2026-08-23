@@ -4,7 +4,7 @@
 
 ```
 saved/mydep in projects.json (module example.com/dep)
-consumer requires dep, no ./mydep -> wrk --bring mydep -> external/mydep-main-{date}
+consumer requires dep, no ./mydep -> wrk --bring mydep -> external/mydep
 ```
 
 ## Steps

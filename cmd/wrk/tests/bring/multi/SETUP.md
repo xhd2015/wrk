@@ -13,7 +13,7 @@
 # P2 preflight-ambiguous: multi ambiguous basenames Select one-by-one;
 #   after all resolves succeed, stderr "will bring:" plan (multi-only)
 consumer + dep1 + dep2 -> wrk --bring <dep1> <dep2>
-  -> external/{basename}-main-{date} per dep
+  -> external/{basename} per dep
   -> replace/tidy best-effort per dep (skipped with --no-dep)
 ```
 

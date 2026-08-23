@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Stdout (trimmed) equals `{consumerTop}/external/mydep-main-{WRK_DATE}`.
+- Stdout (trimmed) equals `{consumerTop}/external/mydep`.
 - External path exists as a linked git worktree owned by the **dep** main repo.
 - Branch in the dep repo is `main-{WRK_DATE}`.
 - Consumer `go.mod` is **byte-identical** to pre-run snapshot (no new replace).

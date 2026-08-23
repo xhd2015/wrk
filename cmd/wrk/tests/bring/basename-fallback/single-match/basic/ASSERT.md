@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Stdout (trimmed) equals `{consumerTop}/external/mydep-main-{WRK_DATE}`.
+- Stdout (trimmed) equals `{consumerTop}/external/mydep`.
 - External path exists as a linked git worktree owned by the **saved** dep repo.
 - Consumer `go.mod` has `replace example.com/dep => <external path>`.
 - Consumer `.gitignore` contains `/external`.

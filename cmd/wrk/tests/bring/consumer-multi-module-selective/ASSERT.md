@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Stdout (trimmed) equals `{consumerTop}/external/mydep-main-{WRK_DATE}`.
+- Stdout (trimmed) equals `{consumerTop}/external/mydep`.
 - `go-pkgs/go.mod` has `replace example.com/dep => <external path>`.
 - `tools/go.mod` has NO replace for dep.
 

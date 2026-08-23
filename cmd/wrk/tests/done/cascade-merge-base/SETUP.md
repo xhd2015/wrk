@@ -13,7 +13,7 @@ consumer wt + external/dep wt -> wrk --done -> cascade removes dep wt (no merge-
 
 1. Create consumer main repo on `main` with `go.mod` requiring `example.com/dep`.
 2. `wrk` creates the consumer linked worktree.
-3. `wrk --bring <depRepo>` spawns `external/mydep-main-{date}` (a worktree of the
+3. `wrk --bring <depRepo>` spawns `external/mydep` (a worktree of the
    consumer repo whose branch is a fetched dep commit).
 4. Drop the consumer's `replace => ./external/...` so the local-replace guard is
    NOT the thing under test — the cascade is the only moving part.

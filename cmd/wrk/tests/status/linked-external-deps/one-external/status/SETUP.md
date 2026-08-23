@@ -3,10 +3,10 @@
 **Feature**: `wrk --status` from linked consumer lists consumer + external dep worktree
 
 ```
-consumerWt + external/mydep-main-{date}
+consumerWt + external/mydep
   + incomplete warm index
   -> wrk --status
-  -> Dir: .  and  Dir: external/mydep-main-{date}
+  -> Dir: .  and  Dir: external/mydep
 ```
 
 ## Steps

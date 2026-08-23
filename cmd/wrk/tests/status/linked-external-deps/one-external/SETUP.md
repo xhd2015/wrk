@@ -3,7 +3,7 @@
 **Feature**: linked consumer + one `./external/*` dep worktree of another main
 
 ```
-consumerWt + external/mydep-main-{date} (linked of dep main)
+consumerWt + external/mydep (linked of dep main)
   -> incomplete warm index (consumer only)
   -> wrk --status / --repos from consumerWt
   -> consumer + external must both appear
@@ -32,7 +32,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.DepPath = depMain
 
 	// Bring-shaped name under external/; branch owns dep history.
-	relName := "mydep-main-" + wrkDate
+	relName := "mydep"
 	depBranch := branchName("main", wrkDate, 0)
 	extDir := addExternalDepWorktree(t, consumerWt, depMain, relName, depBranch)
 	req.ExternalWtDir = extDir

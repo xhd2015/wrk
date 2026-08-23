@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Stdout is the lex-smallest external path (`…/mydep-main-{date}`, not `…-1`).
+- Stdout is the lex-smallest external path (`…/mydep`, not `…-1`).
 - Still exactly **two** entries under `external/` (no third collision dir).
 - Stderr multi-reuse warning mentions count `2` and `reusing` the smallest path.
 - Stderr also lists the other path (`also present:` + second abs path).

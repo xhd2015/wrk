@@ -12,7 +12,7 @@ consumer wt + external wt + deps/foo wt -> wrk --done -> both removed, consumer 
 
 1. Create consumer main repo with `go.mod` requiring `example.com/dep`.
 2. `wrk` creates the consumer linked worktree.
-3. `wrk --bring <depRepo>` spawns `external/mydep-main-{date}`.
+3. `wrk --bring <depRepo>` spawns `external/mydep`.
 4. Create a second dep main repo and run `git worktree add` into `{consumerWt}/deps/foo`.
 5. Drop the consumer's `replace => ./external/...` so the local-replace guard does not block.
 6. Run `wrk --done` from the consumer worktree.

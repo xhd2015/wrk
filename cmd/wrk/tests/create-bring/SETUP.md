@@ -136,7 +136,7 @@ func initCreateBringDep(t *testing.T, workRoot, name, modulePath string) string 
 }
 
 func createBringExternalPath(consumerTop, depBasename string) string {
-	return filepath.Join(consumerTop, "external", fmt.Sprintf("%s-main-%s", depBasename, wrkDate))
+	return filepath.Join(consumerTop, "external", depBasename)
 }
 
 func createBringDefaultWT(req *Request) string {

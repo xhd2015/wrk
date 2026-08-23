@@ -4,7 +4,7 @@
 
 ```
 # consumer requires dep -> wrk --bring dep-repo
-#   -> external/mydep-main-{date} + replace + /external gitignore
+#   -> external/mydep + replace + /external gitignore
 #   -> stdout abs path; no SKIP on stderr
 consumer (go.mod require example.com/dep) + mydep (module example.com/dep)
   -> wrk --bring <dep> -> success with replace

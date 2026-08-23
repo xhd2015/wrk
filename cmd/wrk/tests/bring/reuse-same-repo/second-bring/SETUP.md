@@ -3,12 +3,12 @@
 **Feature**: second `wrk --bring` of the same required dep reuses the first external worktree
 
 ```
-# first --bring creates external/mydep-main-{date} + replace
+# first --bring creates external/mydep + replace
 # second --bring same dep -> same stdout path; reuse warning; no -1 dir
 consumer (require dep) + mydep -> wrk --bring mydep (1st)
-  -> external/mydep-main-{date}
+  -> external/mydep
 consumer -> wrk --bring mydep (2nd)
-  -> reuse external/mydep-main-{date}
+  -> reuse external/mydep
   -> stderr reuse warning
 ```
 

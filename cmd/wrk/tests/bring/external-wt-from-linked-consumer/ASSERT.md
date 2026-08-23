@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Stdout (trimmed) equals `{consumerWt}/external/mydep-main-{WRK_DATE}` where
+- Stdout (trimmed) equals `{consumerWt}/external/mydep` where
   `consumerWt` is the linked consumer worktree.
 - External path exists as a linked git worktree.
 - **The external worktree's `.git` gitdir resolves to the DEP's main repo**

@@ -4,7 +4,7 @@
 
 ```
 # consumer requires example.com/dep/sub; dep repo root has no go.mod, sub/ has go.mod
-# wrk --bring <dep-root> -> external/mydep-main-{date} worktree + replace => <external>/sub + tidy + gitignore
+# wrk --bring <dep-root> -> external/mydep worktree + replace => <external>/sub + tidy + gitignore
 ```
 
 ## Preconditions

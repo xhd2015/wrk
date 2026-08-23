@@ -4,7 +4,7 @@
 
 ```
 # plain non-git cwd + dep git repo -> wrk --bring
-#   -> exit 0; external under {abs(cwd)}/external/{basename}-{token}-{date}
+#   -> exit 0; external under {abs(cwd)}/external/{basename}[-N]
 #   -> soft-skip replace; do not write .gitignore
 #   -> SKIP local dep replacement: <abs-cwd> is not a git repository
 # --no-dep: still worktree under external/; no SKIP replace line

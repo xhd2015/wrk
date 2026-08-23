@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Stdout (exact path + `\n`) equals the **first** external path (`…/external/mydep-main-{WRK_DATE}`).
+- Stdout (exact path + `\n`) equals the **first** external path (`…/external/mydep`).
 - Only **one** entry under `{consumerTop}/external/` (no `…-1` collision dir).
 - First external path still exists as a linked worktree of the dep main.
 - Branch remains `main-{WRK_DATE}` on the dep (no new `main-{date}-1` from the second bring).

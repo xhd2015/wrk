@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Stdout (trimmed) equals `{consumerTop}/external/mydep-main-{WRK_DATE}`.
+- Stdout (trimmed) equals `{consumerTop}/external/mydep`.
 - External path exists as a linked git worktree.
 - Consumer `go.mod` has `replace example.com/dep/b => <external>/b`.
 - Consumer `go.mod` has NO replace for `example.com/dep/a`.

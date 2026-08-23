@@ -2,7 +2,7 @@
 
 ```text
 .
-external/mydep-main-2026-06-30
+external/mydep
 ```
 
 ## Expected

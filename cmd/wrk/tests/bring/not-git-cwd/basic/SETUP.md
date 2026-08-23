@@ -4,7 +4,7 @@
 
 ```
 # plain dir + abs dep path -> wrk --bring <dep>
-#   -> exit 0; {plain}/external/mydep-main-{date}
+#   -> exit 0; {plain}/external/mydep
 #   -> SKIP … is not a git repository; no .gitignore
 plain (no .git) + mydep (module example.com/dep)
   -> wrk --bring <abs-dep>

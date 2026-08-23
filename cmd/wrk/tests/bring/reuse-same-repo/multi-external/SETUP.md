@@ -5,8 +5,8 @@
 ```
 # legacy: two external WTs of mydep under consumer/external/
 # --bring reuses lex-smallest abs path; stderr: count + also present
-consumer/external/mydep-main-{date}
-consumer/external/mydep-main-{date}-1
+consumer/external/mydep
+consumer/external/mydep-1
   -> wrk --bring mydep
   -> stdout = lex-smallest path
   -> stderr multi reuse + also present

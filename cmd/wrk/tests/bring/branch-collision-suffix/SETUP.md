@@ -3,9 +3,9 @@
 **Feature**: external dep preferred branch pre-exists → joint path+branch `-1` (P2 collision; always new branch)
 
 ```
-# dep main has refs/heads/main-{date}; path external/mydep-main-{date} free
+# dep main has refs/heads/main-{date}; path external/mydep free
 consumer --bring mydep
-  -> path external/mydep-main-{date}-1
+  -> path external/mydep-1
   -> branch main-{date}-1 (no mydep- basename; -b new branch)
 ```
 

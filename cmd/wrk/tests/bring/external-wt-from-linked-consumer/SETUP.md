@@ -4,7 +4,7 @@
 
 ```
 # wrk <consumer-main>         -> consumer linked worktree at ~/.wrk/worktrees/consumer-...
-# wrk --bring <dep> (from there) -> external/mydep-main-{date}
+# wrk --bring <dep> (from there) -> external/mydep
 # external .git gitdir must be <dep-main>/.git/worktrees/..., NOT <consumer-main>/.git/worktrees/...
 ```
 

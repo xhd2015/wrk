@@ -62,7 +62,8 @@ func initExecDepRepo(t *testing.T, workRoot, name string) string {
 }
 
 func execExternalWorktreePath(consumerTop, depBasename, token string, suffix int) string {
-	name := fmt.Sprintf("%s-%s-%s", depBasename, token, wrkDate)
+	_ = token // branch token; path is basename-only
+	name := depBasename
 	if suffix > 0 {
 		name = fmt.Sprintf("%s-%d", name, suffix)
 	}

@@ -4,7 +4,7 @@
 
 ```
 consumer + mydep -> wrk --bring mydep --exec pwd
-  -> external = {consumer}/external/mydep-main-2026-06-30
+  -> external = {consumer}/external/mydep
   -> stdout: external\nexternal\n
 ```
 

@@ -4,7 +4,7 @@
 
 ```
 # bring mydep1 then bring mydep2 (distinct main repos / module paths)
-# each gets its own external/{basename}-main-{date}; no reuse warning for dep2
+# each gets its own external/{basename}; no reuse warning for dep2
 consumer (require dep1+dep2)
   -> wrk --bring mydep1 -> external/mydep1-…
   -> wrk --bring mydep2 -> external/mydep2-… (new; not mydep1 path)

@@ -2,8 +2,8 @@
 
 - Exit code 0.
 - Stdout (trimmed) equals `{consumerTop}/external/mydep-1`.
-- Branch in dep repo is `main-{WRK_DATE}-1` (no dep basename; preferred `main-{date}` was taken).
-- Prefixed legacy-style branch `mydep-main-{date}` / `mydep-main-{date}-1` must not be required.
+- Plain occupied `{consumerTop}/external/mydep` remains (no Policy A reuse).
+- Branch in dep repo is `main-{WRK_DATE}-1` (joint path+branch `-N`).
 
 ## Exit Code
 
@@ -11,6 +11,8 @@
 
 ```go
 import (
+	"path/filepath"
+
 	"github.com/xhd2015/doctest/session"
 )
 
@@ -22,7 +24,8 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	}
 
 	blockedPath := bringExternalWorktreePath(req.ConsumerTop, "mydep", "main", 0)
-	assertFileNotExists(t, blockedPath)
+	assertFileExists(t, blockedPath)
+	assertFileExists(t, filepath.Join(blockedPath, "not-a-worktree"))
 
 	wantPath := bringExternalWorktreePath(req.ConsumerTop, "mydep", "main", 1)
 	req.ExternalWtDir = wantPath
@@ -32,9 +35,10 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertWorktreeListContains(t, req.DepPath, wantPath)
 
 	wantBranch := branchName("main", wrkDate, 1)
-	assertBranchExists(t, req.DepPath, branchName("main", wrkDate, 0))
+	assertBranchNotExists(t, req.DepPath, branchName("main", wrkDate, 0))
 	assertBranchExists(t, req.DepPath, wantBranch)
-	assertBranchNotExists(t, req.DepPath, "mydep-"+branchName("main", wrkDate, 1))
 	assertBranchCheckedOutInWorktree(t, wantPath, wantBranch)
+	assertNotContains(t, resp.Stderr, "already exists under external/")
+	assertNotContains(t, resp.Stderr, "reusing")
 }
 ```

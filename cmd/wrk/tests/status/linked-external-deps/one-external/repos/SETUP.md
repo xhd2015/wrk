@@ -5,7 +5,7 @@
 ```
 same fixture as one-external/status
   -> wrk --repos from consumerWt
-  -> .\nexternal/mydep-main-{date}\n
+  -> .\nexternal/mydep\n
 ```
 
 ## Steps

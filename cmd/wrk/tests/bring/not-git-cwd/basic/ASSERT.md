@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0 (soft skip — not a hard failure).
-- Stdout (trimmed) equals `{plain}/external/mydep-main-{WRK_DATE}`.
+- Stdout (trimmed) equals `{plain}/external/mydep`.
 - External path exists as a linked git worktree owned by the **dep** main repo.
 - Branch in the dep repo is `main-{WRK_DATE}`.
 - **No** `.gitignore` under the plain cwd (ensureGitignoreExternal skipped).

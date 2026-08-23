@@ -3,7 +3,7 @@
 **Feature**: wrk --bring always materializes external dep worktree; Go replace is best-effort
 
 ```
-# sole external-dep worktree mode: external/{basename}-{token}-{date} under parent; branch {token}-{date}[-N] on dep repo
+# sole external-dep worktree mode: external/{basename}[-N] under parent; branch {token}-{date}[-N] on dep repo
 # parent = git toplevel when cwd is git; parent = abs(cwd) when cwd is plain non-git
 # soft SKIP (exit 0) when not a go module / no modules / not a dep / non-git cwd
 # git consumer: worktree + /external gitignore + abs path when worktree succeeds
@@ -167,7 +167,8 @@ func runBringGo(t *testing.T, dir string, args ...string) {
 }
 
 func bringExternalWorktreePath(consumerTop, depBasename, token string, suffix int) string {
-	name := fmt.Sprintf("%s-%s-%s", depBasename, token, wrkDate)
+	_ = token // branch token; path is basename-only
+	name := depBasename
 	if suffix > 0 {
 		name = fmt.Sprintf("%s-%d", name, suffix)
 	}

@@ -11,7 +11,7 @@ consumer wt -> wrk --bring -> external wt + replace in go.mod -> wrk --done -> d
 
 1. Create consumer main repo with go.mod requiring `example.com/dep`.
 2. Run `wrk` to create consumer linked worktree.
-3. Run `wrk --bring` from consumer wt to spawn `external/mydep-main-{date}`.
+3. Run `wrk --bring` from consumer wt to spawn `external/mydep`.
 4. Run `wrk --done` from consumer wt (replace still present).
 
 ```go

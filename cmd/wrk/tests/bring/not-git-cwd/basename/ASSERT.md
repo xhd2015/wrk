@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Stdout equals `{plain}/external/mydep-main-{WRK_DATE}` (basename resolves via projects).
+- Stdout equals `{plain}/external/mydep` (basename resolves via projects).
 - External worktree exists and is owned by the **saved** dep repo.
 - **No** `.gitignore` under the plain cwd.
 - Stderr contains `SKIP local dep replacement` and `is not a git repository`.

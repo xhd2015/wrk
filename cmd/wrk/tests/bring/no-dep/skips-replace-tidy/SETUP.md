@@ -4,7 +4,7 @@
 
 ```
 # consumer requires dep -> wrk --bring <dep> --no-dep
-#   -> external/mydep-main-{date} + /external gitignore
+#   -> external/mydep + /external gitignore
 #   -> go.mod unchanged (no replace); no tidy side effects
 consumer (require example.com/dep) + mydep
   -> wrk --bring <dep> --no-dep -> stdout abs path; go.mod byte-identical

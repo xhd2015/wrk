@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Stdout (trimmed) equals `{consumerTop}/external/mydep-main-{WRK_DATE}`.
+- Stdout (trimmed) equals `{consumerTop}/external/mydep`.
 - External path exists as a linked git worktree.
 - Consumer sub-module `go-pkgs/go.mod` has `replace example.com/dep => <external path>`.
 - Consumer repo root has NO `go.mod` but the dep operation still succeeds via scanning.

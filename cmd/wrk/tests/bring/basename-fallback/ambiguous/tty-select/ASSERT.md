@@ -13,7 +13,7 @@ Select [1-2]:
 - Stderr shows the candidate listing and **exactly one** `Select [1-2]:` (preflight resolve-once; apply must not re-prompt).
 - Stderr contains **exactly one** `Multiple projects match "mydep":` block.
 - Stdin is a single line `2\n` — sufficient for success (no second read).
-- Stdout (trimmed) equals `{consumerTop}/external/mydep-main-{WRK_DATE}` (one external path line only).
+- Stdout (trimmed) equals `{consumerTop}/external/mydep` (one external path line only).
 - External worktree created from the **selected** saved dep (`zzz/mydep`, index 2).
 - No external worktree registered under the unselected dep repo.
 

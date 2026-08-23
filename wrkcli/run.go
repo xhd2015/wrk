@@ -3671,10 +3671,12 @@ func findGoModDir(cwd, top string) (string, error) {
 }
 
 func externalCandidateNames(consumerTop, basename, pathToken, date string, suffix int) (path, branch string) {
-	// Path keeps dep basename; branch is {token}-{date}[-N] with no dep basename
-	// prefix (P2). Distinct deps live in separate git repos so same branch name
-	// across deps is fine; within one dep, joint path+branch -N via blocked loop.
-	name := fmt.Sprintf("%s-%s-%s", basename, pathToken, date)
+	// Path is dep basename only (no token/date); branch is {token}-{date}[-N]
+	// with no dep basename prefix. Distinct deps live in separate git repos so
+	// same branch name across deps is fine; within one dep, joint path+branch
+	// -N via blocked loop (external/{basename}[-N]). Policy A reuses any live
+	// same-repo worktree under external/ before this naming runs.
+	name := basename
 	branch = pathToken + "-" + date
 	if suffix > 0 {
 		name = fmt.Sprintf("%s-%d", name, suffix)
