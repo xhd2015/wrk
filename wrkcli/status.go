@@ -421,7 +421,7 @@ func projectBlockUsesColor(colorEnabled bool, counts status.WrkCounts, remoteRel
 	if !colorEnabled {
 		return false
 	}
-	if counts.Added != 0 || counts.Changed != 0 || counts.Renamed != 0 || counts.Deleted != 0 {
+	if counts.Staged != 0 || counts.Changed != 0 || counts.Renamed != 0 || counts.Deleted != 0 || counts.Untracked != 0 {
 		return true
 	}
 	if dirtyWorktrees > 0 {
@@ -442,10 +442,10 @@ func statusBlockUsesColor(colorEnabled bool, counts status.WrkCounts, hasMaster 
 	if !colorEnabled {
 		return false
 	}
-	if counts.Added != 0 || counts.Changed != 0 || counts.Renamed != 0 || counts.Deleted != 0 {
+	if counts.Staged != 0 || counts.Changed != 0 || counts.Renamed != 0 || counts.Deleted != 0 || counts.Untracked != 0 {
 		return true
 	}
-	if counts.Added == 0 && counts.Changed == 0 && counts.Renamed == 0 && counts.Deleted == 0 {
+	if counts.Staged == 0 && counts.Changed == 0 && counts.Renamed == 0 && counts.Deleted == 0 && counts.Untracked == 0 {
 		return true
 	}
 	if hasMaster {
@@ -586,15 +586,15 @@ func gitFetchUpstreamQuietNoOptionalLocks(repoPath, upstream string) error {
 }
 
 // formatWrkStatus renders the wrk-owned Status: value (no ANSI).
-// clean when all four buckets are zero; otherwise
-// dirty (N added, N changed, N renamed, N deleted) with all buckets always present.
-// Parse remains via go-pkgs/gitops (status.ParsePorcelainWrk / ParseChangeCounts).
+// clean when all five buckets are zero; otherwise
+// dirty (N staged, N changed, N renamed, N deleted, N untracked) with all buckets always present.
+// Parse remains via go-pkgs status.ParsePorcelainWrk.
 func formatWrkStatus(counts status.WrkCounts) string {
-	if counts.Added+counts.Changed+counts.Renamed+counts.Deleted == 0 {
+	if counts.Staged+counts.Changed+counts.Renamed+counts.Deleted+counts.Untracked == 0 {
 		return "clean"
 	}
-	return fmt.Sprintf("dirty (%d added, %d changed, %d renamed, %d deleted)",
-		counts.Added, counts.Changed, counts.Renamed, counts.Deleted)
+	return fmt.Sprintf("dirty (%d staged, %d changed, %d renamed, %d deleted, %d untracked)",
+		counts.Staged, counts.Changed, counts.Renamed, counts.Deleted, counts.Untracked)
 }
 
 func formatStatusCounts(counts status.WrkCounts, colorEnabled bool, greenClean bool) string {
@@ -640,8 +640,11 @@ func colorizeStatusSegments(inner string) string {
 
 func formatStatusCountSegment(n int, kind string) string {
 	s := fmt.Sprintf("%d %s", n, kind)
-	if n > 0 {
-		return colorize(s, ansiRed)
+	if n <= 0 {
+		return colorize(s, ansiGrey)
 	}
-	return colorize(s, ansiGrey)
+	if kind == "staged" {
+		return colorize(s, ansiGreen)
+	}
+	return colorize(s, ansiRed)
 }

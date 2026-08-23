@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- Primary out-of-tree block has `Status: dirty (0 added, 1 changed, 0 renamed, 0 deleted)`.
+- Primary out-of-tree block has `Status: dirty (0 staged, 1 changed, 0 renamed, 0 deleted, 0 untracked)`.
 - Primary `Dir` follows `statusDirLine(main, wt)` (relative when ≤2 leading `..`).
 - No `---- external ----` header.
 - Stderr is empty.

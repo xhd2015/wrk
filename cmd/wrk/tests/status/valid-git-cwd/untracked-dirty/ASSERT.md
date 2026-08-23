@@ -4,7 +4,7 @@
 Dir:          .
 Branch:       main
 Commit:       <short hash>  untracked dirty base
-Status:       dirty (1 added, 0 changed, 0 renamed, 0 deleted)
+Status:       dirty (0 staged, 0 changed, 0 renamed, 0 deleted, 1 untracked)
 Remote:       (no upstream)
 ```
 
@@ -12,7 +12,7 @@ Remote:       (no upstream)
 
 - Exit code 0.
 - Stdout reports the root checkout as `.`.
-- Status is dirty with one **added** entry from the untracked file (`??` maps to wrk `added`).
+- Status is dirty with one **untracked** entry from the untracked file (`??` maps to wrk `untracked`).
 - Zero changed, renamed, and deleted.
 - Stderr is empty.
 
@@ -41,6 +41,6 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if got := statusOutputBlockCount(resp.Stdout); got != 1 {
 		t.Fatalf("expected 1 status block, got %d:\n%s", got, resp.Stdout)
 	}
-	assert.Output(t, resp.Stdout, statusBlockTemplate(t, req.MainRepo, ".", "dirty (1 added, 0 changed, 0 renamed, 0 deleted)"))
+	assert.Output(t, resp.Stdout, statusBlockTemplate(t, req.MainRepo, ".", "dirty (0 staged, 0 changed, 0 renamed, 0 deleted, 1 untracked)"))
 }
 ```

@@ -1,10 +1,10 @@
 # wrk --status — Status line format wording (`clean` / `dirty (… added…)`)
 
 ## Version
-0.0.2
+0.0.3
 
 Focused regression tree for the **Status:** field wording owned by wrk
-(`clean` vs `dirty (N added, N changed, N renamed, N deleted)`). Not a full
+(`clean` vs `dirty (N staged, N changed, N renamed, N deleted, N untracked)`). Not a full
 `--status` layout suite — only the format contract for clean and dirty porcelain
 fixtures via L2 `wrk --status`.
 
@@ -15,10 +15,10 @@ fixtures via L2 `wrk --status`.
 - **wrk CLI** — `wrk --status` from a git checkout root prints one status block.
 - **Status format (wrk-owned)** — value is exactly `clean` when porcelain is
   empty; otherwise
-  `dirty (<added> added, <changed> changed, <renamed> renamed, <deleted> deleted)`
-  (all four buckets always present; no ANSI in this tree).
-- **Wrk taxonomy** — porcelain `??` untracked counts as **added** (same as
-  index `A` / `wrk --projects`).
+  `dirty (<staged> staged, <changed> changed, <renamed> renamed, <deleted> deleted, <untracked> untracked)`
+  (all five buckets always present; no ANSI in this tree).
+- **Wrk taxonomy** — porcelain `??` → **untracked**; index `A`/`AM` → **staged**
+  (path-once; `AM` does not also count as changed); `M`/default → **changed**.
 - **Main-repo block** — from checkout root: `Dir: .`, `Branch`, `Commit`,
   `Status`, `Remote: (no upstream)` (no upstream in fixtures).
 - **WRK_HOME** — isolated per leaf at `{WorkRoot}/.wrk`.
@@ -29,7 +29,9 @@ fixtures via L2 `wrk --status`.
 ```
 status-format/
 ├── clean/                 # empty porcelain → Status: clean
-└── dirty-added/           # one ?? untracked → dirty (1 added, 0 changed, 0 renamed, 0 deleted)
+├── dirty-untracked/       # one ?? → dirty (… 1 untracked)
+├── dirty-staged-added/    # staged A → dirty (1 staged, … 0 untracked)
+└── dirty-am/              # AM path-once → 1 staged, 0 changed
 ```
 
 ## Test Case Index
@@ -37,7 +39,9 @@ status-format/
 | # | Leaf | Description |
 |---|------|-------------|
 | 1 | clean | Clean committed checkout → `Status: clean` |
-| 2 | dirty-added | Untracked file → `Status: dirty (1 added, 0 changed, 0 renamed, 0 deleted)` |
+| 2 | dirty-untracked | Untracked file → `… 1 untracked` |
+| 3 | dirty-staged-added | Staged new file → `1 added … 0 untracked` |
+| 4 | dirty-am | Staged-new then edited → `1 staged, 0 changed …` |
 
 ## How to Run
 
@@ -45,7 +49,9 @@ status-format/
 doctest vet ./cmd/wrk/tests/status-format
 doctest test ./cmd/wrk/tests/status-format
 doctest test ./cmd/wrk/tests/status-format/clean
-doctest test ./cmd/wrk/tests/status-format/dirty-added
+doctest test ./cmd/wrk/tests/status-format/dirty-untracked
+doctest test ./cmd/wrk/tests/status-format/dirty-staged-added
+doctest test ./cmd/wrk/tests/status-format/dirty-am
 ```
 
 ```go

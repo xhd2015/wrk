@@ -4,14 +4,14 @@
 Dir:          .
 Branch:       main
 Commit:       <short hash>  add dirty fixtures
-Status:       dirty (1 added, 1 changed, 1 renamed, 1 deleted)
+Status:       dirty (2 staged, 1 changed, 0 renamed, 1 deleted, 0 untracked)
 ```
 
 ## Expected
 
 - Exit code 0.
 - Stdout reports the root checkout as `.`.
-- Status is dirty with one added, one changed, one renamed, and one deleted entry.
+- Status is dirty with two staged (new+rename), one changed, zero renamed, one deleted entry.
 - Stderr is empty.
 
 ## Side Effects
@@ -36,6 +36,6 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if resp.Stderr != "" {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
-	assert.Output(t, resp.Stdout, statusBlockTemplate(t, req.MainRepo, ".", "dirty (1 added, 1 changed, 1 renamed, 1 deleted)"))
+	assert.Output(t, resp.Stdout, statusBlockTemplate(t, req.MainRepo, ".", "dirty (2 staged, 1 changed, 0 renamed, 1 deleted, 0 untracked)"))
 }
 ```

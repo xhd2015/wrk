@@ -476,7 +476,7 @@ func statusCommitLine(t *testing.T, repoDir string) string {
 }
 
 type porcelainCounts struct {
-	added, changed, renamed, deleted int
+	staged, changed, renamed, deleted, untracked int
 }
 
 func gitStatusCounts(t *testing.T, repoPath string) porcelainCounts {
@@ -487,17 +487,23 @@ func gitStatusCounts(t *testing.T, repoPath string) porcelainCounts {
 		if line == "" {
 			continue
 		}
+		if strings.HasPrefix(line, "??") {
+			counts.untracked++
+			continue
+		}
 		if len(line) < 2 {
 			counts.changed++
 			continue
 		}
 		x, y := line[0], line[1]
+		if x != ' ' && x != '?' {
+			counts.staged++
+			continue
+		}
 		switch {
-		case x == 'R' || y == 'R':
+		case y == 'R':
 			counts.renamed++
-		case x == 'A' || y == 'A':
-			counts.added++
-		case x == 'D' || y == 'D':
+		case y == 'D':
 			counts.deleted++
 		default:
 			counts.changed++
@@ -507,11 +513,11 @@ func gitStatusCounts(t *testing.T, repoPath string) porcelainCounts {
 }
 
 func formatStatusLine(counts porcelainCounts) string {
-	if counts.added == 0 && counts.changed == 0 && counts.renamed == 0 && counts.deleted == 0 {
+	if counts.staged == 0 && counts.changed == 0 && counts.renamed == 0 && counts.deleted == 0 && counts.untracked == 0 {
 		return "clean"
 	}
-	return fmt.Sprintf("dirty (%d added, %d changed, %d renamed, %d deleted)",
-		counts.added, counts.changed, counts.renamed, counts.deleted)
+	return fmt.Sprintf("dirty (%d staged, %d changed, %d renamed, %d deleted, %d untracked)",
+		counts.staged, counts.changed, counts.renamed, counts.deleted, counts.untracked)
 }
 
 func statusLineForRepo(t *testing.T, repoPath string) string {

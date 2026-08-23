@@ -1,7 +1,7 @@
 ## Expected
 
 - Exit code 0.
-- `Status:` value uses granular coloring when `--color` is set: red for `dirty` and non-zero count segments, grey (`#90`) for zero-count segments.
+- `Status:` value uses granular coloring when `--color` is set: red for `dirty`, green for non-zero `staged`, red for other non-zero count segments, grey (`#90`) for zero-count segments.
 - Other fields (including `Worktrees:`) are not erroneously colored.
 - Stderr is empty.
 
@@ -34,7 +34,7 @@ version: 3
 %s
 %s
 %s
-Status:       <ansi-color red>dirty</ansi-color> \(<ansi-color red>1 added</ansi-color>, <ansi-color #90>0 changed</ansi-color>, <ansi-color #90>0 renamed</ansi-color>, <ansi-color #90>0 deleted</ansi-color>\)
+Status:       <ansi-color red>dirty</ansi-color> \(<ansi-color green>1 staged</ansi-color>, <ansi-color #90>0 changed</ansi-color>, <ansi-color #90>0 renamed</ansi-color>, <ansi-color #90>0 deleted</ansi-color>, <ansi-color #90>0 untracked</ansi-color>\)
 %s
 Worktrees:    0 total, 0 dirty
 `, colorProjectDirLine(t, req.MainRepo), colorStatusBranchLine(t, req.MainRepo), colorStatusCommitLine(t, req.MainRepo), remote)

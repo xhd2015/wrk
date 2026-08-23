@@ -1,10 +1,10 @@
 # Scenario
 
-**Bug**: wrk --status must count untracked (`??`) files as dirty `added`, not report clean
+**Bug**: wrk --status must count untracked (`??`) files as dirty `untracked`, not report clean
 
 ```
 # clean committed checkout + one untracked file (not staged)
-myrepo + ?? new.txt -> wrk --status -> dirty (1 added, 0 changed, 0 renamed, 0 deleted)
+myrepo + ?? new.txt -> wrk --status -> dirty (0 staged, 0 changed, 0 renamed, 0 deleted, 1 untracked)
 ```
 
 ## Steps

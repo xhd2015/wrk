@@ -3,7 +3,7 @@
 **Feature**: --color highlights dirty status with granular red/grey segments
 
 ```
-dirty main repo (1 added, 1 changed) -> wrk --status --color -> red dirty + non-zero counts, grey zeros
+dirty main repo (1 staged, 1 changed) -> wrk --status --color -> red dirty + non-zero counts, grey zeros
 ```
 
 ## Steps

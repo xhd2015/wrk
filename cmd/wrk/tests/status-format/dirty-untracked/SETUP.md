@@ -1,10 +1,10 @@
 # Scenario
 
-**Feature**: wrk --status prints dirty wording with untracked as `added`
+**Feature**: wrk --status prints dirty wording with untracked as `untracked`
 
 ```
 # clean committed checkout + one untracked file (not staged)
-myrepo + ?? new.txt -> wrk --status -> dirty (1 added, 0 changed, 0 renamed, 0 deleted)
+myrepo + ?? new.txt -> wrk --status -> dirty (0 staged, 0 changed, 0 renamed, 0 deleted, 1 untracked)
 ```
 
 ## Steps

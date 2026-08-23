@@ -6,8 +6,8 @@
 # clean checkout root
 clean myrepo -> wrk --status -> Status: clean
 
-# untracked file maps to wrk "added" bucket
-myrepo + ?? new.txt -> wrk --status -> dirty (1 added, 0 changed, 0 renamed, 0 deleted)
+# untracked file maps to wrk "untracked" bucket
+myrepo + ?? new.txt -> wrk --status -> dirty (0 staged, 0 changed, 0 renamed, 0 deleted, 1 untracked)
 ```
 
 ## Preconditions
@@ -25,8 +25,8 @@ myrepo + ?? new.txt -> wrk --status -> dirty (1 added, 0 changed, 0 renamed, 0 d
 ## Context
 
 - Asserts pin the full stdout block; the load-bearing line is `Status: …`.
-- Dirty wording always includes all four buckets (zeros when empty).
-- Porcelain `??` counts as **added**.
+- Dirty wording always includes all five buckets (zeros when empty).
+- Porcelain `??` counts as **untracked**; `A`/`AM` as **staged** (path-once).
 - Layer: **L2 in-process CLI** — not binary e2e.
 - Stdout uses `assert.Output` v3 full-match templates (trailing `\n` required).
 

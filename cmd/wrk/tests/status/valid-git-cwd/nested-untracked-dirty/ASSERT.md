@@ -12,7 +12,7 @@ Remote:       (no upstream)
 Dir:          tools/child
 Branch:       main
 Commit:       <child short hash>  child status repo
-Status:       dirty (1 added, 0 changed, 0 renamed, 0 deleted)
+Status:       dirty (0 staged, 0 changed, 0 renamed, 0 deleted, 1 untracked)
 ```
 
 ## Expected
@@ -20,7 +20,7 @@ Status:       dirty (1 added, 0 changed, 0 renamed, 0 deleted)
 - Exit code 0.
 - Primary root block as `.` with `Status: clean` and Remote.
 - Plain header `---- external ----` then nested `tools/child` block.
-- Nested block status is dirty with one **added** entry from the untracked file.
+- Nested block status is dirty with one **untracked** entry from the untracked file.
 - Stderr is empty.
 
 ## Side Effects
@@ -53,7 +53,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 			statusRootBlockPlain(t, req.MainRepo, "clean", statusNoUpstreamRemote()),
 		},
 		[]string{
-			statusBlockPlain(t, req.DepPath, "tools/child", "dirty (1 added, 0 changed, 0 renamed, 0 deleted)"),
+			statusBlockPlain(t, req.DepPath, "tools/child", "dirty (0 staged, 0 changed, 0 renamed, 0 deleted, 1 untracked)"),
 		},
 	))
 }

@@ -1,11 +1,11 @@
 # Scenario
 
-**Bug**: wrk --status on a nested independent checkout with only untracked files reports dirty added, while a clean root stays clean
+**Bug**: wrk --status on a nested independent checkout with only untracked files reports dirty untracked, while a clean root stays clean
 
 ```
 # root clean; nested independent git tools/child has only ?? untracked
 myrepo (clean) + myrepo/tools/child + ?? new.txt -> wrk --status
-  -> Dir "." clean; Dir "tools/child" dirty (1 added, 0 changed, 0 renamed, 0 deleted)
+  -> Dir "." clean; Dir "tools/child" dirty (0 staged, 0 changed, 0 renamed, 0 deleted, 1 untracked)
 ```
 
 ## Steps

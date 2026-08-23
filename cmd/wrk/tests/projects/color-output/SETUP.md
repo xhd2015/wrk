@@ -246,7 +246,7 @@ func colorLinkedWorktreeSummary(t *testing.T, mainRepo string) string {
 		if err != nil {
 			t.Fatalf("git status counts %q: %v", entry.Path, err)
 		}
-		if counts.added == 0 && counts.changed == 0 && counts.renamed == 0 && counts.deleted == 0 {
+		if counts.staged == 0 && counts.changed == 0 && counts.renamed == 0 && counts.deleted == 0 && counts.untracked == 0 {
 			clean++
 		} else {
 			dirty++
@@ -256,7 +256,7 @@ func colorLinkedWorktreeSummary(t *testing.T, mainRepo string) string {
 }
 
 type colorPorcelainCounts struct {
-	added, changed, renamed, deleted int
+	staged, changed, renamed, deleted, untracked int
 }
 
 func colorGitStatusCounts(t *testing.T, repoPath string) (colorPorcelainCounts, error) {
@@ -268,7 +268,7 @@ func colorGitStatusCounts(t *testing.T, repoPath string) (colorPorcelainCounts, 
 			continue
 		}
 		if strings.HasPrefix(line, "??") {
-			counts.added++
+			counts.untracked++
 			continue
 		}
 		if len(line) < 2 {
@@ -276,12 +276,14 @@ func colorGitStatusCounts(t *testing.T, repoPath string) (colorPorcelainCounts, 
 			continue
 		}
 		x, y := line[0], line[1]
+		if x != ' ' && x != '?' {
+			counts.staged++
+			continue
+		}
 		switch {
-		case x == 'R' || y == 'R':
+		case y == 'R':
 			counts.renamed++
-		case x == 'A' || y == 'A':
-			counts.added++
-		case x == 'D' || y == 'D':
+		case y == 'D':
 			counts.deleted++
 		default:
 			counts.changed++
@@ -303,18 +305,22 @@ func dirtyColorWorktree(t *testing.T, wtDir, filename, content string) {
 }
 
 func colorDirtyStatusSegment(n int, kind string) string {
-	if n > 0 {
-		return fmt.Sprintf("<ansi-color red>%d %s</ansi-color>", n, kind)
+	if n <= 0 {
+		return fmt.Sprintf("<ansi-color #90>%d %s</ansi-color>", n, kind)
 	}
-	return fmt.Sprintf("<ansi-color #90>%d %s</ansi-color>", n, kind)
+	if kind == "staged" {
+		return fmt.Sprintf("<ansi-color green>%d %s</ansi-color>", n, kind)
+	}
+	return fmt.Sprintf("<ansi-color red>%d %s</ansi-color>", n, kind)
 }
 
-func colorFormatDirtyStatusCounts(added, changed, renamed, deleted int) string {
-	return fmt.Sprintf("<ansi-color red>dirty</ansi-color> (%s, %s, %s, %s)",
-		colorDirtyStatusSegment(added, "added"),
+func colorFormatDirtyStatusCounts(staged, changed, renamed, deleted, untracked int) string {
+	return fmt.Sprintf("<ansi-color red>dirty</ansi-color> (%s, %s, %s, %s, %s)",
+		colorDirtyStatusSegment(staged, "staged"),
 		colorDirtyStatusSegment(changed, "changed"),
 		colorDirtyStatusSegment(renamed, "renamed"),
 		colorDirtyStatusSegment(deleted, "deleted"),
+		colorDirtyStatusSegment(untracked, "untracked"),
 	)
 }
 

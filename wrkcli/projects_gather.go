@@ -140,7 +140,7 @@ func startRemoteCompareAsync(mainRepoPath string, fetchCh chan fetchAsyncResult,
 			return
 		}
 		c := counts()
-		isClean := c.Added == 0 && c.Changed == 0 && c.Renamed == 0 && c.Deleted == 0
+		isClean := c.Staged == 0 && c.Changed == 0 && c.Renamed == 0 && c.Deleted == 0 && c.Untracked == 0
 		remoteColor := colorEnabled && isClean
 
 		var (

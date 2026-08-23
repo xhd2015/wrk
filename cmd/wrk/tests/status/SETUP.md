@@ -29,7 +29,7 @@ wrk --status + other mode -> error (mutually exclusive)
 ## Context
 
 - Successful status output is a sequence of blocks containing `Dir`, `Branch`, `Commit`, and `Status` lines.
-- `Status` is `clean` or `dirty (N added, N changed, N renamed, N deleted)`; porcelain `??` untracked counts as **added** (same wrk taxonomy as `--projects`).
+- `Status` is `clean` or `dirty (N staged, N changed, N renamed, N deleted, N untracked)`; porcelain `??` counts as **untracked** (same wrk taxonomy as `--projects`).
 - Every `Dir:` value uses **invocation cwd** (process work directory when wrk started):
   `filepath.Rel(normalize(cwd), normalize(repoPath))`; on Rel failure, or when the
   cleaned relative path has **more than two** leading `..` segments, print the

@@ -26,7 +26,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		t.Fatalf("expected 1 status block, got %d:\n%s", got, resp.Stdout)
 	}
 
-	status := colorStatusFormatDirtyCounts(1, 1, 0, 0)
+	status := colorStatusFormatDirtyCounts(1, 1, 0, 0, 0)
 	block := colorStatusBlockTemplate(t, req.MainRepo, ".", status, "")
 	assert.Output(t, resp.Stdout, block)
 }

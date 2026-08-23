@@ -1,10 +1,10 @@
 # Scenario
 
-**Feature**: wrk --status reports deterministic added, changed, renamed, and deleted counts
+**Feature**: wrk --status reports deterministic staged, changed, renamed, and deleted counts
 
 ```
 # checkout has one porcelain entry in each status class
-dirty myrepo -> wrk --status -> dirty (1 added, 1 changed, 1 renamed, 1 deleted)
+dirty myrepo -> wrk --status -> dirty (2 staged, 1 changed, 0 renamed, 1 deleted, 0 untracked)
 ```
 
 ## Steps

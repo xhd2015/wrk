@@ -275,7 +275,7 @@ func linkedWorktreeSummary(t *testing.T, mainRepo string) string {
 		if err != nil {
 			t.Fatalf("git status counts %q: %v", entry.Path, err)
 		}
-		if counts.added == 0 && counts.changed == 0 && counts.renamed == 0 && counts.deleted == 0 {
+		if counts.staged == 0 && counts.changed == 0 && counts.renamed == 0 && counts.deleted == 0 && counts.untracked == 0 {
 			clean++
 		} else {
 			dirty++
@@ -285,7 +285,7 @@ func linkedWorktreeSummary(t *testing.T, mainRepo string) string {
 }
 
 type porcelainCounts struct {
-	added, changed, renamed, deleted int
+	staged, changed, renamed, deleted, untracked int
 }
 
 func gitStatusCountsForRepo(t *testing.T, repoPath string) (porcelainCounts, error) {
@@ -297,7 +297,7 @@ func gitStatusCountsForRepo(t *testing.T, repoPath string) (porcelainCounts, err
 			continue
 		}
 		if strings.HasPrefix(line, "??") {
-			counts.added++
+			counts.untracked++
 			continue
 		}
 		if len(line) < 2 {
@@ -305,12 +305,14 @@ func gitStatusCountsForRepo(t *testing.T, repoPath string) (porcelainCounts, err
 			continue
 		}
 		x, y := line[0], line[1]
+		if x != ' ' && x != '?' {
+			counts.staged++
+			continue
+		}
 		switch {
-		case x == 'R' || y == 'R':
+		case y == 'R':
 			counts.renamed++
-		case x == 'A' || y == 'A':
-			counts.added++
-		case x == 'D' || y == 'D':
+		case y == 'D':
 			counts.deleted++
 		default:
 			counts.changed++

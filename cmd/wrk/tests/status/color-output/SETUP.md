@@ -164,18 +164,22 @@ func colorStatusMasterFieldColored(t *testing.T, mainRepo, mainBranch, wtBranch 
 }
 
 func colorStatusDirtySegment(n int, kind string) string {
-	if n > 0 {
-		return fmt.Sprintf("<ansi-color red>%d %s</ansi-color>", n, kind)
+	if n <= 0 {
+		return fmt.Sprintf("<ansi-color #90>%d %s</ansi-color>", n, kind)
 	}
-	return fmt.Sprintf("<ansi-color #90>%d %s</ansi-color>", n, kind)
+	if kind == "staged" {
+		return fmt.Sprintf("<ansi-color green>%d %s</ansi-color>", n, kind)
+	}
+	return fmt.Sprintf("<ansi-color red>%d %s</ansi-color>", n, kind)
 }
 
-func colorStatusFormatDirtyCounts(added, changed, renamed, deleted int) string {
-	return fmt.Sprintf("<ansi-color red>dirty</ansi-color> (%s, %s, %s, %s)",
-		colorStatusDirtySegment(added, "added"),
+func colorStatusFormatDirtyCounts(staged, changed, renamed, deleted, untracked int) string {
+	return fmt.Sprintf("<ansi-color red>dirty</ansi-color> (%s, %s, %s, %s, %s)",
+		colorStatusDirtySegment(staged, "staged"),
 		colorStatusDirtySegment(changed, "changed"),
 		colorStatusDirtySegment(renamed, "renamed"),
 		colorStatusDirtySegment(deleted, "deleted"),
+		colorStatusDirtySegment(untracked, "untracked"),
 	)
 }
 

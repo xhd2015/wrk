@@ -9,7 +9,7 @@ main repo with 2 modified tracked files -> wrk --projects --color -> grey zero s
 ## Steps
 
 1. Create tracked git repo `{WorkRoot}/partial-dirty`.
-2. Commit two tracked files, then modify both (0 added, 2 changed).
+2. Commit two tracked files, then modify both (0 staged, 2 changed).
 3. Record and run `wrk --projects --color`.
 
 ```go
