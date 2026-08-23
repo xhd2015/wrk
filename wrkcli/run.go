@@ -3627,6 +3627,11 @@ func ensureGitignoreExternal(top string) error {
 // Under the default lenient guard, intra-repo replaces only warn (printed to
 // stderr) and --done proceeds; extra-repo replaces block. When noInModuleReplace
 // is set, every local replace blocks (fully strict).
+//
+// Classification uses show-toplevel identity (see isWrkIntraRepoReplace), not
+// replace.ReplaceIssue.IsIntraRepo: the library also treats any path under the
+// checkout tree (including ./external) as "intra", which would wrongly tolerate
+// bring replaces after cascade.
 func blockIfLocalReplace(top string, noInModuleReplace bool) error {
 	issues, err := replace.CheckLocalReplaces(top)
 	if err != nil {
@@ -3634,7 +3639,7 @@ func blockIfLocalReplace(top string, noInModuleReplace bool) error {
 	}
 
 	for _, issue := range issues {
-		hasExtra := !issue.IsIntraRepo
+		hasExtra := !isWrkIntraRepoReplace(top, issue)
 
 		if hasExtra || noInModuleReplace {
 			var b strings.Builder
@@ -3649,6 +3654,26 @@ func blockIfLocalReplace(top string, noInModuleReplace bool) error {
 		fmt.Fprintln(os.Stderr, "local filesystem replace (intra-repo) - tolerated, remove before pushing:")
 	}
 	return nil
+}
+
+// isWrkIntraRepoReplace reports whether issue.NewPath is an existing directory
+// whose git toplevel matches consumerTop (wrk --done lenient-warn policy).
+func isWrkIntraRepoReplace(consumerTop string, issue replace.ReplaceIssue) bool {
+	modDir := filepath.Dir(issue.GoModPath)
+	target := issue.NewPath
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(modDir, target)
+	}
+	target = filepath.Clean(target)
+	info, err := os.Stat(target)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	targetTop, err := worktree.ShowToplevel(target)
+	if err != nil {
+		return false
+	}
+	return sameDirPath(targetTop, consumerTop)
 }
 
 func findGoModDir(cwd, top string) (string, error) {
