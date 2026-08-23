@@ -126,7 +126,24 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.RepoDir = workRoot
 	req.InProcess = true
 	req.InstallDir = filepath.Join(workRoot, "installed")
-	req.ExtraEnv = append(req.ExtraEnv, "HOME="+workRoot)
+	goPath := filepath.Join(workRoot, "go")
+	modCache := filepath.Join(goPath, "pkg", "mod")
+	req.ExtraEnv = append(req.ExtraEnv,
+		"HOME="+workRoot,
+		"GOPATH="+goPath,
+		"GOMODCACHE="+modCache,
+	)
+	// go fills the module cache with read-only files; unlock before t.TempDir cleanup
+	// or CI fails with "unlinkat … permission denied" after an otherwise green leaf.
+	t.Cleanup(func() {
+		_ = filepath.Walk(goPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info == nil {
+				return nil
+			}
+			_ = os.Chmod(path, info.Mode()|0o200)
+			return nil
+		})
+	})
 	_ = seedHostGoWrapper(t, req.InstallDir, pinGo122)
 	req.WithGo = withgo.ResolveOptions{
 		InstallDir: req.InstallDir,
@@ -487,19 +504,16 @@ func writeModuleZip(zipPath, modulePath, version, srcDir string) error {
 			return err
 		}
 		if info.IsDir() {
-			base := filepath.Base(path)
-			if path != srcDir && (base == ".git" || base == "sub" || base == "packages") {
-				// packages/ skipped only when walking nested multi-module owners
-				// that publish a single root module zip; nested-module leaf
-				// publishes packages/dep via a dedicated srcDir.
-				if base == ".git" {
-					return filepath.SkipDir
-				}
-				if base == "sub" {
-					return filepath.SkipDir
-				}
+			if path == srcDir {
+				return nil
 			}
-			if path != srcDir && base == ".git" {
+			base := filepath.Base(path)
+			// Skip VCS and known nested-module trees; also any dir with its own
+			// go.mod (e.g. cmd/) so the parent module zip stays unzip-valid.
+			if base == ".git" || base == "sub" || base == "packages" {
+				return filepath.SkipDir
+			}
+			if _, statErr := os.Stat(filepath.Join(path, "go.mod")); statErr == nil {
 				return filepath.SkipDir
 			}
 			return nil
