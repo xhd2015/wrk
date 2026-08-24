@@ -1,15 +1,17 @@
 # wrk --reinstall-local — CLI dry-run + execute + multi + --main compose (P6)
 
 ## Version
-0.0.9
+0.0.10
 
 Decision tree for **Phase 2** CLI dry-run surface, **Phase 3** execute path,
 **Phase 4** hardening (events.jsonl), **Phase 3 multi-module dry-run**,
 **Phase 4 product compose** (`--main --reinstall-local`), **Phase 5
 multi-module execute**, **Phase 6** events with `--main` (args include
-`--main`), and **nearest-go.mod re-root** for packages under a nested
-`go.mod` (agent-pro `cmd/go.mod` pattern). Builds and runs the real `wrk`
-binary (session fixture cache), with **GOBIN** isolation for bin-dir filtering.
+`--main`), **nearest-go.mod re-root** for packages under a nested
+`go.mod` (agent-pro `cmd/go.mod` pattern), and **named exclusive**
+`--reinstall-local name…` (select bins; skip binDir gate; reject names with
+`--done`/pipeline). Builds and runs the real `wrk` binary (session fixture
+cache), with **GOBIN** isolation for bin-dir filtering.
 
 Depends on P1 pure API `wrkcli.PlanLocalReinstalls` / multi
 `PlanLocalReinstallsFromWorkDir` (under `cmd/wrk/tests/reinstall-local/`).
@@ -258,6 +260,13 @@ reinstall-local-cli/
 │       └── with-list/               # MC2: --main --reinstall-local --list → exclusive
 ├── mutual-exclusion/
 │   └── with-list/                   # C4-orig: --reinstall-local --list → exclusive
+├── named/                           # exclusive --reinstall-local name… (binDir gate off)
+│   ├── dry-run/
+│   │   ├── force-absent-bin/        # name not in GOBIN → would: install (not skip)
+│   │   └── select-one/              # two bins; name keeps only the requested one
+│   └── error/
+│       ├── unknown-name/            # missing candidate → non-zero
+│       └── with-done/               # names + --done → exclusive-names error
 ├── dry-run-host/
 │   └── bare-dry-run/                # C5: bare --dry-run mentions --reinstall-local
 ├── error/

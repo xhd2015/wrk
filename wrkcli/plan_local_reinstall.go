@@ -633,13 +633,14 @@ type ReinstallExecStats struct {
 // useMain=false scans the worktree toplevel (or walk-up); useMain=true
 // (from --main) scans the main repository of this checkout.
 // colorFlag forces ANSI on diagnostic prefixes when true.
-func runReinstallLocal(workDir string, dryRun bool, useMain bool, colorFlag bool) error {
-	_, err := runReinstallLocalEx(workDir, dryRun, useMain, colorFlag, false)
+// names, when non-empty, selects only those bins and forces install (no binDir gate).
+func runReinstallLocal(workDir string, dryRun bool, useMain bool, colorFlag bool, names []string) error {
+	_, err := runReinstallLocalEx(workDir, dryRun, useMain, colorFlag, false, names)
 	return err
 }
 
 // runReinstallLocalEx is runReinstallLocal with NoColor and returned execute stats.
-func runReinstallLocalEx(workDir string, dryRun bool, useMain bool, colorFlag, noColor bool) (ReinstallExecStats, error) {
+func runReinstallLocalEx(workDir string, dryRun bool, useMain bool, colorFlag, noColor bool, names []string) (ReinstallExecStats, error) {
 	var empty ReinstallExecStats
 	binDir, err := resolveLocalReinstallBinDir()
 	if err != nil {
@@ -649,12 +650,146 @@ func runReinstallLocalEx(workDir string, dryRun bool, useMain bool, colorFlag, n
 	if err != nil {
 		return empty, err
 	}
+	if len(names) > 0 {
+		plan, err = filterNamedReinstallPlan(plan, names)
+		if err != nil {
+			return empty, err
+		}
+	}
 	diagColor := reinstallDiagColorEnabled(colorFlag)
 	stdoutColor := resolveStdoutColor(colorFlag, noColor)
 	if dryRun {
 		return empty, printMultiLocalReinstallDryRun(plan, diagColor)
 	}
 	return executeMultiLocalReinstalls(plan, diagColor, stdoutColor)
+}
+
+// filterNamedReinstallPlan keeps only the requested bin names from a multi plan.
+// Each surviving item is forced to ActionInstall (named mode skips the binDir gate).
+// Missing names, empty names, and the same name claimed by multiple modules are errors.
+func filterNamedReinstallPlan(plan *MultiLocalReinstallPlan, names []string) (*MultiLocalReinstallPlan, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("nil reinstall plan")
+	}
+	ordered, err := dedupeReinstallNames(names)
+	if err != nil {
+		return nil, err
+	}
+
+	type hit struct {
+		modIdx  int
+		itemIdx int
+	}
+	byName := make(map[string][]hit)
+	for mi, mod := range plan.Modules {
+		for ii, it := range mod.Items {
+			byName[it.BinName] = append(byName[it.BinName], hit{modIdx: mi, itemIdx: ii})
+		}
+	}
+
+	// modIdx -> selected items (forced install), preserving request order within module.
+	selected := make([][]PlanItem, len(plan.Modules))
+	diagKeep := make([]map[string]struct{}, len(plan.Modules))
+	for i := range diagKeep {
+		diagKeep[i] = make(map[string]struct{})
+	}
+
+	for _, name := range ordered {
+		hits := byName[name]
+		if len(hits) == 0 {
+			// Prefer ambiguous diagnostic wording when the bin was omitted for that reason.
+			if paths, ok := namedAmbiguousPaths(plan, name); ok {
+				return nil, fmt.Errorf("wrk: --reinstall-local: bin %q is ambiguous (%s)", name, strings.Join(paths, ", "))
+			}
+			return nil, fmt.Errorf("wrk: --reinstall-local: no install candidate for %q", name)
+		}
+		if len(hits) > 1 {
+			a := plan.Modules[hits[0].modIdx]
+			b := plan.Modules[hits[1].modIdx]
+			return nil, fmt.Errorf(
+				"wrk: --reinstall-local: bin %q claimed by multiple modules: %s (%s) and %s (%s)",
+				name, a.ModuleRoot, a.ModuleName, b.ModuleRoot, b.ModuleName,
+			)
+		}
+		h := hits[0]
+		it := plan.Modules[h.modIdx].Items[h.itemIdx]
+		it.Action = ActionInstall
+		selected[h.modIdx] = append(selected[h.modIdx], it)
+		diagKeep[h.modIdx][name] = struct{}{}
+	}
+
+	outMods := make([]ModuleReinstallPlan, 0, len(plan.Modules))
+	for mi, mod := range plan.Modules {
+		items := selected[mi]
+		if len(items) == 0 {
+			continue
+		}
+		var diags []ReinstallDiagnostic
+		for _, d := range mod.Diagnostics {
+			if _, ok := diagKeep[mi][d.BinName]; ok {
+				diags = append(diags, d)
+			}
+		}
+		outMods = append(outMods, ModuleReinstallPlan{
+			ModuleRoot:  mod.ModuleRoot,
+			ModulePath:  mod.ModulePath,
+			ModuleName:  mod.ModuleName,
+			RelDir:      mod.RelDir,
+			Items:       items,
+			Diagnostics: diags,
+		})
+	}
+	return &MultiLocalReinstallPlan{
+		BinDir:  plan.BinDir,
+		Modules: outMods,
+	}, nil
+}
+
+func dedupeReinstallNames(names []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(names))
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if n == "" {
+			return nil, fmt.Errorf("wrk: --reinstall-local: empty name")
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		out = append(out, n)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("wrk: --reinstall-local: empty name list")
+	}
+	return out, nil
+}
+
+// namedAmbiguousPaths returns sorted paths from ambiguous-* diagnostics for bin, if any.
+func namedAmbiguousPaths(plan *MultiLocalReinstallPlan, bin string) ([]string, bool) {
+	var paths []string
+	seen := make(map[string]struct{})
+	for _, mod := range plan.Modules {
+		for _, d := range mod.Diagnostics {
+			if d.BinName != bin {
+				continue
+			}
+			if d.Kind != DiagKindAmbiguousCmd && d.Kind != DiagKindAmbiguousScript {
+				continue
+			}
+			for _, p := range d.Paths {
+				if _, ok := seen[p]; ok {
+					continue
+				}
+				seen[p] = struct{}{}
+				paths = append(paths, p)
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return nil, false
+	}
+	sort.Strings(paths)
+	return paths, true
 }
 
 // reinstallDiagColorEnabled reports whether diagnostic prefix tokens should use ANSI.

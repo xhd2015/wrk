@@ -1270,7 +1270,7 @@ func dirtyDroppableReplaceTargetLabels(members []StackMember, nodes []UnwindGrap
 // modules is not an error for a successful unwind, matching the compose tail.
 // Returns the reinstalled binary count for the summary rollup.
 func runUnwindReinstallLocal(mainPath string, colorFlag, noColor bool) (int, error) {
-	st, err := runReinstallLocalEx(mainPath, false, true, colorFlag, noColor)
+	st, err := runReinstallLocalEx(mainPath, false, true, colorFlag, noColor, nil)
 	if err == nil {
 		return st.Reinstalled, nil
 	}

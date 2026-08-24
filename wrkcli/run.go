@@ -192,7 +192,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var noInModuleReplace bool
 	var bringPaths []string
 	var noDep bool
-	var reinstallLocal bool
+	var reinstallLocalNames *[]string
 	var tagNext bool
 	var propagateTags bool
 	var syncFlag bool
@@ -281,7 +281,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--dep-replace", &depReplace).
 		Bool("--dep-update", &depUpdate).
 		Bool("--all", &allFlag).
-		Bool("--reinstall-local", &reinstallLocal).
+		Varargs("--reinstall-local", &reinstallLocalNames).
 		Bool("--tag-next", &tagNext).
 		Bool("--propagate-tags", &propagateTags).
 		Bool("--sync", &syncFlag).
@@ -307,7 +307,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--no-open-in-agent", &noOpenInAgent).
 		String("--agent-runner", &agentRunner).
 		Bool("--no-config", &noConfig).
-		Varargs("--bring", &bringPaths).
+		Varargs("--bring", &bringPaths, lessflags.WithMinimum(1)).
 		Bool("--no-dep", &noDep).
 		String("-t,--task", &taskDesc).
 		String("--set-task", &setTaskDesc).
@@ -331,6 +331,12 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			return fmt.Errorf("unknown flag: %s", strings.TrimPrefix(msg, "unrecognized flag: "))
 		}
 		return err
+	}
+
+	reinstallLocal := reinstallLocalNames != nil
+	var reinstallNames []string
+	if reinstallLocalNames != nil {
+		reinstallNames = *reinstallLocalNames
 	}
 
 	// --dep-update / --dep-replace are Bool modes; dep dirs are remaining args.
@@ -1039,7 +1045,14 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	}
 	// --reinstall-local may compose with pipeline stages (activeRoot model) and with
 	// --main / --done / --merge-back. Still exclusive with list/status/repos and similar.
+	// Explicit names are only valid on the exclusive reinstall path (not pipeline/compose).
 	if reinstallLocal {
+		if len(reinstallNames) > 0 {
+			if done || mergeBack || tagNext || propagateTags || syncFlag || pushFlag ||
+				genCommitMsg || manualCommit || hasExec || unwind {
+				return fmt.Errorf("wrk: --reinstall-local names are only valid when --reinstall-local is the exclusive command")
+			}
+		}
 		otherMode := list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || bringMode ||
 			cd || taskFlagSet || setTaskFlagSet ||
@@ -1347,7 +1360,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	// Bare / --main --reinstall-local before bare --main so compose does not open a nested shell.
 	// Multi-stage reinstall is handled by activeRoot pipeline below.
 	if reinstallLocal && !done && !mergeBack && !genCommitMsg && !manualCommit && !syncFlag && !tagNext && !pushFlag && !propagateTags && !hasExec {
-		_, err := runReinstallLocalEx(workDir, dryRun, mainFlag, colorFlag, noColorFlag)
+		_, err := runReinstallLocalEx(workDir, dryRun, mainFlag, colorFlag, noColorFlag, reinstallNames)
 		return err
 	}
 	// --cd: resolve target (or with --main, main repo of cwd) then jump.
@@ -1674,8 +1687,9 @@ Flags:
                                    with pipeline stages: run activeRoot as main, no nested shell)
   --bring p1 p2                   spawn one or more dep worktrees under ./external (repeatable); with create, apply inside the new worktree
   --no-dep                        with --bring: worktree only; skip replace and tidy
-  --reinstall-local [--dry-run]   reinstall local module binaries already in GOBIN/GOPATH/bin
-                                  (with --main: scan main repository modules for this checkout;
+  --reinstall-local [name...]     reinstall local module binaries already in GOBIN/GOPATH/bin
+                                  (with names: install only those bins, exclusive path; skip binDir gate;
+                                   with --main: scan main repository modules for this checkout;
                                    also: after successful --done / --merge-back, scan main tip)
   --tag-next [--dry-run] [--push] [--json]  plan/apply per-scope release tags
                                   (also: after successful --done / --merge-back; --json only bare)
@@ -2330,7 +2344,7 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 	if withReinstallLocal {
 		blankBefore()
 		// Scan modules under activeRoot (already the checkout root).
-		if err := runReinstallLocal(activeRoot, dryRun, false, colorFlag); err != nil {
+		if err := runReinstallLocal(activeRoot, dryRun, false, colorFlag, nil); err != nil {
 			return err
 		}
 		printed = true
@@ -2542,7 +2556,7 @@ func runComposeReinstallLocal(result *worktree.MergeBackResult, withReinstallLoc
 	}
 	fmt.Println() // blank line before reinstall stage
 	// Scan main tip after merge (useMain equivalent from main path).
-	err := runReinstallLocal(mainPath, dryRun, true, colorFlag)
+	err := runReinstallLocal(mainPath, dryRun, true, colorFlag, nil)
 	if err == nil {
 		return nil
 	}
