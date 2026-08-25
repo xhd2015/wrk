@@ -13,6 +13,7 @@
   -> pin inventory-owned outdated requires on every stack checkout; same tidy helper
   -> skip external / same-checkout filesystem replace; warn no-tag
   -> no dirs / exclusive / bare --all / zero requirers: wrk: error; no banner
+# soft: broken nested checkout under stack -> warning: skipping nested checkout <path>; continue
 ```
 
 ## Preconditions
@@ -1196,6 +1197,39 @@ func setupDirModePinDanglingReplace(t *testing.T, req *Request) {
 	req.WantCheckout = "."
 }
 
+// setupSoftSkipBrokenNested: git consumer requiring dep, plus a nested checkout
+// whose .git points at a nonexistent gitdir (sandbox/broken-wt). CollectStackInventory
+// must soft-skip it with a path-qualified warning and still pin the consumer.
+func setupSoftSkipBrokenNested(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedRootTaggedDep(t, req.WorkRoot, "dep", modDep, "v0.0.1", "v0.0.2")
+	req.DepDir = dep
+	req.WantVersion = "v0.0.2"
+	req.WantOldVersion = "v0.0.1"
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+	req.WantCheckout = "."
+	req.WantBrokenNested = "sandbox/broken-wt"
+
+	primary := initStackPrimary(t, req)
+	broken := filepath.Join(primary, "sandbox", "broken-wt")
+	mkdirAll(t, broken)
+	writeFile(t, filepath.Join(broken, ".git"),
+		"gitdir: /nonexistent/xgo/.git/worktrees/xgo-dev\n")
+
+	body := writeRequireReplaceBody(modDep, "v0.0.1", dep)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep)
+	gitCommitAll(t, primary, "primary + broken nested checkout")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+}
+
 // setupMultiDirStack: primary requires dep+dep2; kool requires only dep.
 func setupMultiDirStack(t *testing.T, req *Request) {
 	t.Helper()
@@ -1862,6 +1896,7 @@ func ensureDepUpdateHelpersUsed() {
 	_ = setupStackSkipSelf
 	_ = setupDirModeSkipIntraReplace
 	_ = setupDirModePinDanglingReplace
+	_ = setupSoftSkipBrokenNested
 	_ = setupMultiDirStack
 	_ = setupAllStackOutdated
 	_ = initStackPrimary

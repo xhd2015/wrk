@@ -75,10 +75,11 @@ func runDepReplaceUndo(workDir string, paths []string, dryRun bool, ctx *invocat
 		}
 	}
 
-	consumers, err := collectDepUpdateConsumers(cwd)
+	consumers, warnings, err := collectDepUpdateConsumers(cwd)
 	if err != nil {
 		return err
 	}
+	printStderrWarnings(warnings)
 
 	tree, err := buildDepReplaceUndoTree(cwd, consumers, filter)
 	if err != nil {
@@ -305,10 +306,11 @@ func applyStackAbsoluteReplace(workDir string, deps []depReplaceDep, opts stackR
 	cwd = storage.NormalizePath(cwd)
 	git := worktree.IsInsideWorkTree(cwd)
 
-	consumers, err := collectDepUpdateConsumers(cwd)
+	consumers, warnings, err := collectDepUpdateConsumers(cwd)
 	if err != nil {
 		return err
 	}
+	printStderrWarnings(warnings)
 	tree, err := buildDepReplaceTree(cwd, consumers, deps, git)
 	if err != nil {
 		return err
@@ -565,7 +567,7 @@ func runDepUpdate(workDir string, paths []string, dryRun bool, ctx *invocationCo
 	}
 	cwd = storage.NormalizePath(cwd)
 
-	consumers, err := collectDepUpdateConsumers(cwd)
+	consumers, warnings, err := collectDepUpdateConsumers(cwd)
 	if err != nil {
 		return err
 	}
@@ -622,6 +624,7 @@ func runDepUpdate(workDir string, paths []string, dryRun bool, ctx *invocationCo
 
 	tree := buildDirModeTree(cwd, consumers, deps)
 
+	printStderrWarnings(warnings)
 	printDepUpdateBanner(dryRun)
 	for _, dep := range deps {
 		printDepUpdateDepHeader(dep.modulePath, dep.version, dep.tag)
@@ -786,15 +789,17 @@ type depUpdateTreeCheckout struct {
 
 // collectDepUpdateConsumers is the dir-mode / --all consumer set: every go.mod
 // under every CollectStackInventory member Path. Not git → nearest go.mod.
-func collectDepUpdateConsumers(cwd string) ([]depUpdateConsumer, error) {
+// Soft stack warnings (e.g. skipped broken nested checkouts) are returned for
+// the caller to print on stderr.
+func collectDepUpdateConsumers(cwd string) ([]depUpdateConsumer, []string, error) {
 	cwd = storage.NormalizePath(cwd)
 	if worktree.IsInsideWorkTree(cwd) {
 		inv, err := CollectStackInventory(cwd)
 		if err != nil {
 			if strings.HasPrefix(err.Error(), "wrk:") {
-				return nil, err
+				return nil, nil, err
 			}
-			return nil, fmt.Errorf("wrk: %w", err)
+			return nil, nil, fmt.Errorf("wrk: %w", err)
 		}
 		var out []depUpdateConsumer
 		seen := make(map[string]struct{})
@@ -802,7 +807,7 @@ func collectDepUpdateConsumers(cwd string) ([]depUpdateConsumer, error) {
 			checkout := storage.NormalizePath(mem.Path)
 			mods, err := scanDepUpdateCheckout(checkout)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			for _, c := range mods {
 				if _, ok := seen[c.ModDir]; ok {
@@ -813,21 +818,35 @@ func collectDepUpdateConsumers(cwd string) ([]depUpdateConsumer, error) {
 				out = append(out, c)
 			}
 		}
-		return out, nil
+		return out, append([]string(nil), inv.Warnings...), nil
 	}
 	modDir, err := findModuleRootWalking(cwd)
 	if err != nil {
-		return nil, fmt.Errorf("wrk: %w", err)
+		return nil, nil, fmt.Errorf("wrk: %w", err)
 	}
 	modDir = storage.NormalizePath(modDir)
 	mods, err := scanDepUpdateCheckout(modDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for i := range mods {
 		mods[i].Checkout = modDir
 	}
-	return mods, nil
+	return mods, nil, nil
+}
+
+// printStderrWarnings writes warning: lines to stderr (yellow when color on).
+func printStderrWarnings(warnings []string) {
+	for _, w := range warnings {
+		line := strings.TrimSpace(w)
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "warning:") && !strings.HasPrefix(line, "Warning:") {
+			line = "warning: " + line
+		}
+		fmt.Fprintln(os.Stderr, FormatStderrWarning(line))
+	}
 }
 
 func scanDepUpdateCheckout(root string) ([]depUpdateConsumer, error) {

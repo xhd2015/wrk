@@ -85,7 +85,7 @@ type UnwindPlan struct {
 type StackInventory struct {
 	Members        []StackMember
 	SyntheticEdges []RepoEdge // C→D when follow maps consumer C into dep checkout D
-	Warnings       []string   // lines with warning: prefix (missing/non-git targets)
+	Warnings       []string   // warning: lines (missing/non-git replaces; skipped broken nested checkouts)
 }
 
 // BuildStackInventory discovers the checkout stack under workDir: primary git
@@ -120,9 +120,14 @@ func CollectStackInventory(workDir string) (StackInventory, error) {
 		return empty, err
 	}
 
+	rootNorm := storage.NormalizePath(checkoutRoot)
+
 	// Seed: primary checkout + nested independent repos under it.
+	// Nested repos that cannot run git status (broken gitdir, …) are omitted
+	// up front so expandStackViaLocalReplaces does not walk their trees.
 	seed := make([]string, 0, len(repos)+1)
 	seedSeen := make(map[string]struct{}, len(repos)+1)
+	var warnings []string
 	addSeed := func(p string) {
 		n := storage.NormalizePath(p)
 		if _, ok := seedSeen[n]; ok {
@@ -133,16 +138,26 @@ func CollectStackInventory(workDir string) (StackInventory, error) {
 	}
 	addSeed(checkoutRoot)
 	for _, r := range repos {
+		pNorm := storage.NormalizePath(r.Path)
+		if pNorm == rootNorm {
+			continue
+		}
+		if _, err := stackCheckoutDirty(pNorm); err != nil {
+			warnings = append(warnings, formatSkipNestedCheckoutWarning(rootNorm, pNorm, err))
+			continue
+		}
 		addSeed(r.Path)
 	}
 
-	paths, pathEdges, warnings, err := expandStackViaLocalReplaces(seed)
+	paths, pathEdges, expandWarnings, err := expandStackViaLocalReplaces(seed)
 	if err != nil {
 		return empty, err
 	}
+	warnings = append(warnings, expandWarnings...)
 
 	members := make([]StackMember, 0, len(paths))
 	for _, p := range paths {
+		pNorm := storage.NormalizePath(p)
 		mainRepo, err := worktree.ResolveMainRepo(p)
 		if err != nil {
 			// Fall back to path itself when main cannot be resolved.
@@ -152,10 +167,16 @@ func CollectStackInventory(workDir string) (StackInventory, error) {
 		label := filepath.Base(mainRepo)
 		dirty, err := stackCheckoutDirty(p)
 		if err != nil {
-			return empty, err
+			// Primary checkout must be a usable git worktree.
+			if pNorm == rootNorm {
+				return empty, fmt.Errorf("checkout %s: %w", pNorm, err)
+			}
+			// Defense in depth: nested/BFS paths that became unusable later.
+			warnings = append(warnings, formatSkipNestedCheckoutWarning(rootNorm, pNorm, err))
+			continue
 		}
 		members = append(members, StackMember{
-			Path:     storage.NormalizePath(p),
+			Path:     pNorm,
 			MainRepo: mainRepo,
 			Label:    label,
 			Dirty:    dirty,
@@ -333,21 +354,42 @@ func mergeRepoEdges(a, b []RepoEdge) []RepoEdge {
 }
 
 // stackCheckoutDirty reports whether the checkout has uncommitted changes
-// (including untracked files). Matches worktree.IsClean porcelain semantics.
+// (including untracked files). Uses IsCleanWrk so git stderr is captured (no
+// leaked "fatal:" lines) and porcelain untracked counts as dirty.
 func stackCheckoutDirty(path string) (bool, error) {
-	err := worktree.IsClean(path)
+	ok, err := worktree.IsCleanWrk(path)
+	if err != nil {
+		return false, err
+	}
+	return !ok, nil
+}
+
+// formatSkipNestedCheckoutWarning builds a soft-skip line for a nested checkout
+// that cannot run git status (broken gitdir, etc.).
+func formatSkipNestedCheckoutWarning(root, path string, err error) string {
+	return fmt.Sprintf("warning: skipping nested checkout %s: %s",
+		statusDirLine(root, path), compactStackCheckoutErr(err))
+}
+
+// compactStackCheckoutErr shortens git status failures for warning text.
+func compactStackCheckoutErr(err error) string {
 	if err == nil {
-		return false, nil
+		return ""
 	}
-	// IsClean returns a descriptive error for dirty; other failures are hard errors.
-	if strings.Contains(err.Error(), "uncommitted changes") {
-		return true, nil
+	msg := err.Error()
+	if i := strings.Index(msg, "fatal: "); i >= 0 {
+		return strings.TrimSpace(msg[i+len("fatal: "):])
 	}
-	// Also treat generic non-clean as dirty when git status ran.
-	if strings.Contains(err.Error(), "worktree") {
-		return true, nil
+	msg = strings.TrimPrefix(msg, "git status: ")
+	// IsCleanWrk: "git status --porcelain in <dir>: <reason>"
+	if strings.HasPrefix(msg, "git status") {
+		if j := strings.LastIndex(msg, ": "); j >= 0 {
+			if rest := strings.TrimSpace(msg[j+2:]); rest != "" {
+				return rest
+			}
+		}
 	}
-	return false, err
+	return msg
 }
 
 // BuildRepoDAG contracts module require/replace edges among stack-owned modules

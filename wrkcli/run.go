@@ -3148,10 +3148,11 @@ func bringOneFromResolved(workDir, depPath string, noDep bool) (externalPath str
 		return externalPath, nil, nil
 	}
 
-	consumers, err := collectDepUpdateConsumers(cwd)
+	consumers, warnings, err := collectDepUpdateConsumers(cwd)
 	if err != nil {
 		return "", nil, err
 	}
+	printStderrWarnings(warnings)
 	if len(consumers) == 0 {
 		externalPath, err = createExternalWorktreeForRepo(consumerTop, depPath)
 		if err != nil {

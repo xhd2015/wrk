@@ -42,7 +42,7 @@ mutation in harness.
 | D3 | Multi-arg **fail-fast** |
 | D4 | Dir mode does not use inventory / `--all` |
 | D5 | Structured CLI tree (`====`, `dep`, `checkout`, `module`, `pin` / `would: pin`, tidy / skip tidy); no kool commit-message line; wrk does **not** exec kool |
-| D6 | Consumer set = `CollectStackInventory(cwd)` when git; else nearest `go.mod`. Scan every `go.mod` under every member `Path`. Pin only modules that **already require** the path. Self never pinned |
+| D6 | Consumer set = `CollectStackInventory(cwd)` when git; else nearest `go.mod`. Scan every `go.mod` under every member `Path`. Pin only modules that **already require** the path. Self never pinned. Nested discovered checkouts that cannot run `git status` are **soft-skipped** (`warning: skipping nested checkout <path>: …` on stderr) and omitted from the stack; primary checkout failure stays hard |
 | D7 | Pin does not add new requires; zero matching consumers on the whole stack → `wrk:` error containing `requires`; **no banner** |
 | D8 | One banner per invocation. Deps named once at top (argv order). Body is checkout → module → actions. Tidy once under the module. Dir-mode summary `updated N modules in C checkouts` |
 | D9 | Consumer whose dep is covered by a **same-git-toplevel local filesystem replace** (intra-module replace) is **skipped**, not pinned. A replace target that is absent or resolves to a **different git toplevel** (cross-repo) is **not** intra-module and is pinned. Prints `skip  <dep>  (intra-module replace)` (dry-run: `would: skip …`); no tidy for that module. Summary gains `, skipped S` when S > 0. Mirrors `--all` A4 |
@@ -300,7 +300,9 @@ no-tag soft-skips only. External (non-inventory) requires are silent and do
 **not** increment S.
 
 **Warnings (stderr, exit 0):** `warning:` prefix — no-tag soft skips / missing
-registry paths.
+registry paths; broken nested checkouts discovered under the stack root
+(`warning: skipping nested checkout <rel-path>: <reason>`) — omitted from the
+consumer set; command continues (exit 0).
 
 **Errors (stderr, non-zero):** `wrk:` / `Error:` style consistent with existing
 dep-update rejects. **No banner.**
@@ -374,6 +376,7 @@ type Request struct {
 	WantOldVersion2    string
 	WantCheckout       string // statusDirLine vs cwd; default "."
 	WantCheckout2      string // other stack checkout, e.g. external/kool
+	WantBrokenNested   string // relative nested broken checkout skipped with warning
 	WantConsumerModule string // e.g. example.com/app for module lines
 	ProxyRoot          string
 

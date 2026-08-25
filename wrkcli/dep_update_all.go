@@ -68,6 +68,7 @@ func PlanDepUpdateAll(workDir, wrkHome string) (*DepUpdateAllPlan, error) {
 	}
 
 	plan := &DepUpdateAllPlan{}
+	plan.Warnings = append(plan.Warnings, stack.Warnings...)
 	for _, p := range inv.SkippedPaths {
 		plan.Warnings = append(plan.Warnings,
 			fmt.Sprintf("warning: project path does not exist: %s", p))
@@ -129,7 +130,7 @@ func PlanDepUpdateAll(workDir, wrkHome string) (*DepUpdateAllPlan, error) {
 		return info
 	}
 
-	consumers, err := collectDepUpdateConsumers(cwd)
+	consumers, _, err := collectDepUpdateConsumers(cwd)
 	if err != nil {
 		return nil, err
 	}
