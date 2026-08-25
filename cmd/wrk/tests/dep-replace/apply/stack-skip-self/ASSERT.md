@@ -4,24 +4,19 @@
 ==== dep-replace ====
 dep  example.com/dep => <abs>
 
-  checkout  .
-    module  example.com/app
-      replace  example.com/dep => <abs>
-      go mod tidy ok
-
-dep-replace: replaced in 1 modules in 1 checkouts
+dep-replace: replaced in 0 modules in 0 checkouts
 ```
 
 ## Expected
 
 - Exit 0.
-- Primary consumer rewritten (absolute replace).
+- Primary keeps relative `replace => ./external/dep` (already equivalent to absDir).
 - Dep’s own go.mod unchanged (self never rewritten).
-- Default quiet: no `module  example.com/dep` consumer block.
+- No consumer module blocks (nothing to write).
 
 ## Side Effects
 
-- Only the gated requirer is mutated.
+- No go.mod mutation.
 
 ## Exit Code
 
@@ -44,15 +39,11 @@ __ABS__: type=string
 ==== dep-replace ====
 dep  example\.com/dep => __ABS__
 
-  checkout  \.
-    module  example\.com/app
-      replace  example\.com/dep => __ABS__
-      go mod tidy ok
-
-dep-replace: replaced in 1 modules in 1 checkouts
+dep-replace: replaced in 0 modules in 0 checkouts
 `)
+	assertNotContains(t, resp.Stdout, "module  "+modApp)
 	assertNotContains(t, resp.Stdout, "module  "+modDep)
-	assertAbsoluteReplace(t, req.ConsumerGoMod, modDep, req.DepDir)
+	assertGoModUnchanged(t, req)
 	assertGoModUnchangedAt(t, req.Consumer2GoMod, req.Baseline2GoMod)
 }
 ```

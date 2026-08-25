@@ -6,16 +6,19 @@
 Decision tree for **`wrk --dep-replace <dir>… [--dry-run]`** and
 **`wrk --dep-replace --undo [<dir>…] [--dry-run]`**.
 
-Adds (or rewrites) an **absolute** `replace module => absDir`. Consumer set =
-**`CollectStackInventory(cwd)`** (cwd git toplevel + nested status repos +
-BFS over local filesystem replaces). Scan **every** `go.mod` under every
-member `Path`. Write only if the module already `require`s the dep path **or**
-already has a `replace` for that path. Self (`consumer.Path == dep.Path`)
-never rewritten. **Not git** → today’s walk-up nearest go.mod and **D7**
-(write even with no require). Multi-dir: **validate every dir first** (any bad
-arg → no banner / no tree / no writes). Apply write errors are **fail-fast**
-(prior writes may remain). After replaces: **versioned `go mod tidy`** via the
-same `tidyDepUpdateConsumer` helper as `--dep-update` (unless `vendor/`).
+Adds (or rewrites) an **absolute** `replace module => absDir` when needed.
+Consumer set = **`CollectStackInventory(cwd)`** (cwd git toplevel + nested
+status repos + BFS over local filesystem replaces). Scan **every** `go.mod`
+under every member `Path`. Write only if the module already `require`s the dep
+path **or** already has a `replace` for that path. Self (`consumer.Path ==
+dep.Path`) never rewritten. When an existing local filesystem replace already
+resolves to the intended absDir (relative or absolute), leave that go.mod
+alone (no write, no tidy). **Not git** → today’s walk-up nearest go.mod and
+**D7** (write even with no require). Multi-dir: **validate every dir first**
+(any bad arg → no banner / no tree / no writes). Apply write errors are
+**fail-fast** (prior writes may remain). After replaces: **versioned `go
+mod tidy`** via the same `tidyDepUpdateConsumer` helper as `--dep-update`
+(unless `vendor/`).
 
 **`--undo`:** require git HEAD. For each stack consumer, drop replace
 `OldPath`s present in the working-tree `go.mod` but **absent from HEAD’s
@@ -39,6 +42,7 @@ No L3 e2e leaves. Parallel-safe: inject Env/Dir/`WithGo` via Capture.
 | D6 | Git: `CollectStackInventory(cwd)`. Not git: nearest go.mod from workDir |
 | D7 | Not-git nearest fallback still writes **without** a prior require. Git stack: gated (require **or** existing replace). Self never rewritten |
 | D8 | Zero gated consumers on the whole stack (git) → `wrk:` error containing `replace` or `consumer`; **no banner** |
+| D9 | Existing local filesystem replace whose New already resolves to absDir → skip write + tidy for that module (prefer keeping relative form). Gated-but-all-equivalent → success, `replaced in 0` |
 | R1 | `--undo` only with `--dep-replace`; bare `--dep-replace` still needs a dir **or** `--undo` |
 | R2 | Undo requires git HEAD (not-git → hard error; no banner) |
 | R3 | Drop only WT OldPaths absent from HEAD go.mod; never wholesale `go.mod` restore; never re-add HEAD NewPath for existing OldPaths |
@@ -64,7 +68,12 @@ No L3 e2e leaves. Parallel-safe: inject Env/Dir/`WithGo` via Capture.
 - **Gate (git)** — write absolute replace only if the module already requires
   the dep path **or** already has a replace for that path. Self never rewritten.
   Zero gated consumers on the stack → `wrk:` error; no banner.
-- **Absolute replace** — `replace <module> => <absDir>` (never `./` / `../`).
+- **Equivalence skip (D9)** — if an existing local filesystem replace for the
+  dep already resolves to absDir, omit that module from the write/tidy set
+  (keep relative New when present).
+- **Absolute replace** — when writing, `replace <module> => <absDir>` (not
+  `./` / `../`). Equivalent relative/abs forms already pointing at absDir are
+  preserved.
 - **CLI tree** — one banner; `dep` headers (argv order); body checkout →
   module → `replace` / `would: replace` then tidy lines. Checkout label =
   `statusDirLine` vs invocation cwd (`.` / `external/kool`).
@@ -112,6 +121,7 @@ dep-replace/
 │   ├── stack-skip-self
 │   ├── stack-skip-non-consumer
 │   ├── stack-existing-replace         # other checkout gated by existing replace
+│   ├── preserve-equivalent-relative   # nested cmd keeps => ../
 │   ├── multi-dir-stack
 │   └── vendor-skip                    # replace + skip tidy (vendor/)
 └── undo/
@@ -151,9 +161,10 @@ dep-replace/
 | `apply/no-existing-require` | Not-git D7: write without prior require; then tidy |
 | `apply/fail-fast-second-missing` | Missing second arg → no writes; no banner |
 | `apply/stack-other-checkout` | Absolute replace on primary **and** other stack checkout |
-| `apply/stack-skip-self` | Dep’s own go.mod not rewritten |
+| `apply/stack-skip-self` | Self skip + equivalent relative on primary preserved (`replaced in 0`) |
 | `apply/stack-skip-non-consumer` | Other-checkout with neither require nor replace → untouched |
 | `apply/stack-existing-replace` | Other checkout gated by existing replace (no require) |
+| `apply/preserve-equivalent-relative` | Nested `dep/cmd` keeps `=> ../`; primary still gets abs replace |
 | `apply/multi-dir-stack` | Two dep args; one consumer both replaces; other only first |
 | `apply/vendor-skip` | Replace applied; `skip tidy  (vendor/)`; no go.sum |
 | `undo/help/mentions-undo` | Root help mentions `--undo` |

@@ -1,11 +1,11 @@
 # Scenario
 
-**Feature**: dep’s own go.mod is not rewritten when the dep checkout is on the stack
+**Feature**: dep’s own go.mod is not rewritten; equivalent relative replace on the consumer is preserved
 
 ```
 # primary requires dep; replace dep => ./external/dep (own git)
 cwd=primary -> wrk --dep-replace <external/dep>
-  -> replace on example.com/app only
+  -> primary already => ./external/dep (≡ absDir): leave relative alone
   -> example.com/dep go.mod unchanged (self)
 ```
 

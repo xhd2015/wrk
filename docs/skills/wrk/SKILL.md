@@ -101,7 +101,7 @@ wrk --bring p1 p2
 wrk src --bring p1 p2
 # worktree only; skip replace/tidy
 wrk --bring <path> --no-dep
-# absolute replace on stack consumers + versioned tidy (no worktree create)
+# absolute replace on stack consumers + versioned tidy (skip when replace already ≡ target)
 wrk --dep-replace <dir>…
 # drop replaces introduced since HEAD (undo uncommitted --bring / --dep-replace)
 wrk --dep-replace --undo

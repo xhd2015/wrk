@@ -1670,7 +1670,7 @@ Flags:
   --pin-locals [--dry-run]        add/normalize relative replace for already-required stack deps
                                   (inventory = unwind stack only; go mod tidy per consumer; soft tidy fails)
   --dep-replace <dir>… [--dry-run]
-                                  absolute replace into every gated go.mod on the unwind stack
+                                  absolute replace into gated go.mods on the unwind stack (skip when replace already ≡ target)
                                   (require or existing replace; not-git nearest; versioned tidy unless vendor/)
   --dep-replace --undo [<dir>…] [--dry-run]
                                   drop replaces introduced since HEAD (WT OldPath absent from HEAD go.mod);

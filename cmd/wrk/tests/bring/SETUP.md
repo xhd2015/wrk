@@ -14,6 +14,7 @@ consumer (git or plain non-git) + dep path -> wrk --bring <dep> [--no-dep] [-v]
   -> external worktree under {parent}/external/
   -> optional stack-wide replace+versioned tidy on module match (skipped with --no-dep or non-git)
   -> consumer scope = unwind stack (CollectStackInventory), shared with --dep-replace
+  -> existing replace already ≡ target absDir: leave go.mod alone (prefer relative)
   -> SKIP local dep replacement: <reason> on stderr when soft-fail (not with --no-dep)
   -> stdout: <external-abs>\n (replace/tidy silent)
 ```

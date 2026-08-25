@@ -288,8 +288,12 @@ type stackReplaceOpts struct {
 // applyStackAbsoluteReplace is the shared absolute-replace + versioned-tidy
 // core for --dep-replace and --bring. Consumer set = collectDepUpdateConsumers
 // (unwind stack when git; nearest go.mod otherwise). Git writes are gated by
-// require or existing replace; self never rewritten. Zero gated consumers on
-// git → hard error. Tidy uses tidyDepUpdateConsumer once per affected module.
+// require or existing replace; self never rewritten. When an existing local
+// filesystem replace already resolves to the intended absDir (relative or
+// absolute), that module is left untouched (no write, no tidy). Zero gated
+// consumers on git → hard error; gated-but-all-equivalent → success no-op.
+// Tidy uses tidyDepUpdateConsumer once per module that actually received a
+// replace write.
 func applyStackAbsoluteReplace(workDir string, deps []depReplaceDep, opts stackReplaceOpts) error {
 	if len(deps) == 0 {
 		return fmt.Errorf("wrk: no deps to replace")
@@ -374,6 +378,32 @@ func gatedReplaceConsumers(consumers []depUpdateConsumer, depPath string, git bo
 	return out
 }
 
+// consumerReplaceAlreadyEquivalent reports whether c already has a local
+// filesystem replace for depPath whose New resolves to the same directory as
+// absDir. Relative and absolute New forms both count; prefer leaving them alone.
+func consumerReplaceAlreadyEquivalent(c depUpdateConsumer, depPath, absDir string) bool {
+	want := storage.NormalizePath(absDir)
+	if want == "" {
+		return false
+	}
+	for _, r := range c.Replaces {
+		if r.OldPath != depPath {
+			continue
+		}
+		if !isLocalFilesystemReplace(r.NewPath, r.NewVersion) {
+			continue
+		}
+		resolved, err := resolveLocalReplacePath(c.ModDir, r.NewPath)
+		if err != nil {
+			continue
+		}
+		if storage.NormalizePath(resolved) == want {
+			return true
+		}
+	}
+	return false
+}
+
 func buildDepReplaceTree(cwd string, consumers []depUpdateConsumer, deps []depReplaceDep, git bool) ([]depReplaceCheckout, error) {
 	type builder struct {
 		path    string
@@ -383,11 +413,16 @@ func buildDepReplaceTree(cwd string, consumers []depUpdateConsumer, deps []depRe
 	}
 	var order []string
 	byCheckout := make(map[string]*builder)
+	gatedAny := false
 
 	for _, c := range consumers {
 		var acts []depReplaceAction
 		for _, dep := range deps {
 			if !consumerReplaceGated(c, dep.modulePath, git) {
+				continue
+			}
+			gatedAny = true
+			if consumerReplaceAlreadyEquivalent(c, dep.modulePath, dep.absDir) {
 				continue
 			}
 			acts = append(acts, depReplaceAction{
@@ -429,15 +464,12 @@ func buildDepReplaceTree(cwd string, consumers []depUpdateConsumer, deps []depRe
 			Modules: b.modules,
 		})
 	}
-	if git {
-		n, _ := countDepReplaceTree(out)
-		if n == 0 {
-			path := ""
-			if len(deps) > 0 {
-				path = deps[0].modulePath
-			}
-			return nil, fmt.Errorf("wrk: no stack consumer to replace %s", path)
+	if git && !gatedAny {
+		path := ""
+		if len(deps) > 0 {
+			path = deps[0].modulePath
 		}
+		return nil, fmt.Errorf("wrk: no stack consumer to replace %s", path)
 	}
 	return out, nil
 }
@@ -504,7 +536,11 @@ func applyDepReplaceTree(tree []depReplaceCheckout, deps []depReplaceDep, opts s
 		return nil
 	}
 	n, c := countDepReplaceTree(tree)
-	fmt.Println()
+	// Blank before summary only when a checkout body was printed; empty tree
+	// already has the blank after the dep headers.
+	if len(tree) > 0 {
+		fmt.Println()
+	}
 	if dryRun {
 		fmt.Printf("dep-replace: would replace in %d modules in %d checkouts\n", n, c)
 		return nil
