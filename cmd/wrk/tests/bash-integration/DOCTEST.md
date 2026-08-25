@@ -1,11 +1,11 @@
 # wrk bash integration Test Cases
 
 ## Version
-0.0.2
+0.0.3
 
 Decision tree covering `wrk --bash-integration`: print completion script, install/uninstall
-lifecycle (dual bash profiles), read-only status, hidden `--complete` callback, and mutual
-exclusion with normal wrk commands.
+lifecycle (dual bash profiles), read-only status, dedicated `-h`/`--help` usage, hidden
+`--complete` callback, and mutual exclusion with normal wrk commands.
 
 # DSN (Domain Specific Notion)
 
@@ -21,6 +21,9 @@ exclusion with normal wrk commands.
   `$WRK_HOME` when set.
 - **projects.json** — basename completion reads unique sorted `filepath.Base(path)` entries;
   prefix-filtered candidates returned one per stdout line.
+- **Dedicated help** — `wrk --bash-integration -h|--help` prints usage (not the script);
+  help short-circuits before print/install/uninstall/status (any order with action flags).
+  Root `wrk --help` points at this page. Hidden `--complete` is omitted from usage.
 - **--complete callback** — `wrk --bash-integration --complete -- <words...> <cword>`; hidden
   from main help; drives bash `complete -o default -F _wrk wrk`.
 - **path-like cur** — current word starting with `/`, `./`, or `../`. Go `Complete` returns no
@@ -35,6 +38,14 @@ exclusion with normal wrk commands.
 
 ```
 bash-integration/
+├── help/                            # dedicated -h/--help (not script dump)
+│   ├── alone/                       # --bash-integration -h|--help
+│   │   ├── long/                    # --help
+│   │   └── short/                   # -h
+│   ├── with-install/                # help + --install never mutates
+│   │   ├── after-action/            # --install --help
+│   │   └── help-before/             # --help --install
+│   └── root-help/                   # wrk --help points at bash-integration
 ├── print-script/basic/              # script: path-like yield + complete -o default
 ├── install/
 │   ├── fresh/                       # writes bash.sh + dual profile markers

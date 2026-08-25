@@ -14,6 +14,36 @@ import (
 // a different git main than the land dest, auto-cd is suppressed.
 const followupForeignRepoMaxLevels = 3
 
+// followupChannelOpen reports whether WRK_FOLLOWUP_FILE is set for in-place follow-up.
+func followupChannelOpen() bool {
+	return strings.TrimSpace(os.Getenv("WRK_FOLLOWUP_FILE")) != ""
+}
+
+// writeFollowupLine appends a single non-empty line to WRK_FOLLOWUP_FILE when the
+// channel is set. Rejects embedded newlines. No-op when the env is unset/empty.
+func writeFollowupLine(line string) error {
+	outPath := strings.TrimSpace(os.Getenv("WRK_FOLLOWUP_FILE"))
+	if outPath == "" {
+		return nil
+	}
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return nil
+	}
+	if strings.ContainsAny(line, "\n\r") {
+		return fmt.Errorf("follow-up line contains newline")
+	}
+	f, err := os.OpenFile(outPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open follow-up file: %w", err)
+	}
+	defer f.Close()
+	if _, err := fmt.Fprintf(f, "%s\n", line); err != nil {
+		return fmt.Errorf("write follow-up: %w", err)
+	}
+	return nil
+}
+
 // writeFollowupCD appends a single "cd /absolute/path" line to WRK_FOLLOWUP_FILE
 // when the channel is set and follow-ups are not disabled via --no-cd.
 // No-op when the env is unset/empty or disabled is true.
@@ -21,8 +51,7 @@ func writeFollowupCD(disabled bool, absPath string) error {
 	if disabled {
 		return nil
 	}
-	outPath := strings.TrimSpace(os.Getenv("WRK_FOLLOWUP_FILE"))
-	if outPath == "" {
+	if !followupChannelOpen() {
 		return nil
 	}
 	absPath = strings.TrimSpace(absPath)
@@ -36,15 +65,7 @@ func writeFollowupCD(disabled bool, absPath string) error {
 		}
 		absPath = resolved
 	}
-	f, err := os.OpenFile(outPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open follow-up file: %w", err)
-	}
-	defer f.Close()
-	if _, err := fmt.Fprintf(f, "cd %s\n", absPath); err != nil {
-		return fmt.Errorf("write follow-up: %w", err)
-	}
-	return nil
+	return writeFollowupLine("cd " + absPath)
 }
 
 // shouldWriteHomeGatedFollowup reports whether a create follow-up cd should be

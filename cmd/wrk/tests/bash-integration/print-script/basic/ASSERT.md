@@ -22,6 +22,7 @@
 ```go
 import (
 	"os"
+	"strings"
 	"testing"
 	"github.com/xhd2015/doctest/session"
 )
@@ -41,6 +42,14 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertContains(t, resp.Stdout, "compopt -o default")
 	assertContains(t, resp.Stdout, "WRK_HOME")
 	assertContains(t, resp.Stdout, "--bash-integration --complete")
+	assertContains(t, resp.Stdout, "agent-run\\ *)")
+	// --here agent-run must not run under `done < followup` (stdin would be the
+	// file, breaking interactive grok-tty). Script reads lines into an array first.
+	assertContains(t, resp.Stdout, "_wrk_lines")
+	assertContains(t, resp.Stdout, "eval \"$_wrk_line\"")
+	if strings.Contains(resp.Stdout, "bash -c \"$_wrk_line\"") || strings.Contains(resp.Stdout, "bash -c '$_wrk_line'") {
+		t.Fatalf("wrapper must not run agent-run via bash -c (breaks TTY); want eval in current shell")
+	}
 	assertNoEventsJSONL(t, resp)
 	if _, statErr := os.Stat(resp.BashShPath); !os.IsNotExist(statErr) {
 		t.Fatalf("print-script must not write bash.sh at %s", resp.BashShPath)

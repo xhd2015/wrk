@@ -233,6 +233,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var reuseTerminal bool
 	var smartTerminal bool
 	var noNewTerminal bool
+	var here bool
 	var openInAgent bool
 	var noOpenInAgent bool
 	var agentRunner *string
@@ -305,6 +306,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--reuse-terminal", &reuseTerminal).
 		Bool("--smart-terminal", &smartTerminal).
 		Bool("--no-new-terminal", &noNewTerminal).
+		Bool("--here", &here).
 		Bool("--open-in-agent", &openInAgent).
 		Bool("--no-open-in-agent", &noOpenInAgent).
 		String("--agent-runner", &agentRunner).
@@ -466,6 +468,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		reuseTerminal: reuseTerminal,
 		smartTerminal: smartTerminal,
 		noNewTerminal: noNewTerminal,
+		here:          here,
 		openInAgent:   openInAgent,
 		noOpenInAgent: noOpenInAgent,
 		agentRunner:   agentRunner,
@@ -495,7 +498,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		if ctx.command == "create" && isDashboardBareEntry(newFlag, taskFlagSet, remaining, createUXFlags{
 			newWindow: newWindow, noNewWindow: noNewWindow,
 			newTerminal: newTerminal, reuseTerminal: reuseTerminal, smartTerminal: smartTerminal,
-			noNewTerminal: noNewTerminal, openInAgent: openInAgent, noOpenInAgent: noOpenInAgent,
+			noNewTerminal: noNewTerminal, here: here, openInAgent: openInAgent, noOpenInAgent: noOpenInAgent,
 			agentRunner: agentRunner,
 		}, noConfig, noCd, forceCd, len(execArgs) > 0) {
 			ctx.command = "dashboard"
@@ -588,7 +591,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			dryRun || pushFlag || prFlag || jsonFlag || taskFlagSet || setTaskFlagSet || fetchFlag || noCd || forceCd ||
 			cd || mainFlag || unwind || confirmFromStdin || forceConfirm || noInModuleReplace || scanGitRepos ||
 			newFlag || newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
-			noNewTerminal || openInAgent || noOpenInAgent || len(execArgs) > 0
+			noNewTerminal || here || openInAgent || noOpenInAgent || len(execArgs) > 0
 		ctx.workDir = origWd
 		if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
 			return err
@@ -614,7 +617,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			setTaskFlagSet || fetchFlag || noCd || forceCd || cd || mainFlag ||
 			confirmFromStdin || forceConfirm || noInModuleReplace || webFlag ||
 			newFlag || newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
-			noNewTerminal || openInAgent || noOpenInAgent || noConfig || len(execArgs) > 0
+			noNewTerminal || here || openInAgent || noOpenInAgent || noConfig || len(execArgs) > 0
 		ctx.workDir = origWd
 		if err := storage.ResetEventsIfDoctest(wrkHome); err != nil {
 			return err
@@ -1750,6 +1753,8 @@ Flags:
                                   accepts codex, codex-tty, grok, or grok-tty
   --no-new-window                 disable window UX for this run
   --no-new-terminal               disable terminal UX for this run
+  --here                          create: no new window/terminal; with agent, prefer shell
+                                  follow-up cd + agent-run in this terminal (else nested shell)
   --no-open-in-agent              disable agent UX for this run
   --no-config                     do not read $WRK_HOME/config.json for this run
   --exec <cmd> [args...]          after success, run command in the mode target directory
@@ -1774,6 +1779,11 @@ Flags:
 Config management:
   wrk --set-config --create [flags]  merge create UX defaults into $WRK_HOME/config.json
   wrk --set-config --show            pretty-print effective config.json
+
+Bash integration:
+  wrk --bash-integration          print bash completion + auto-cd script
+  wrk --bash-integration --install|--uninstall|--status
+  wrk --bash-integration --help   dedicated bash-integration usage
 
 Skill commands:
   wrk skill --list|-l             list available skills (wrk)
@@ -3013,16 +3023,16 @@ func applyBringResolved(consumer string, bringArgs, resolved []string, resolveEr
 // runCreateUXAndBring runs create UX and bring apply concurrently when both
 // are needed. UX failure does not cancel bring; bring failure does not roll
 // back create. Wait for both, then prefer the UX error if both fail.
-func runCreateUXAndBring(path, taskDesc string, ux createUXPlan, bring *bringApplyPlan) error {
+func runCreateUXAndBring(path, taskDesc string, ux createUXPlan, bring *bringApplyPlan, noCd bool) error {
 	if bring == nil || len(bring.args) == 0 {
-		return runCreateUX(path, taskDesc, ux)
+		return runCreateUX(path, taskDesc, ux, noCd)
 	}
 	var uxErr, bringErr error
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		uxErr = runCreateUX(path, taskDesc, ux)
+		uxErr = runCreateUX(path, taskDesc, ux, noCd)
 	}()
 	go func() {
 		defer wg.Done()
@@ -3817,7 +3827,7 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 	if err := seedConsumerGoModFromSource(checkoutRoot, result.Path, bring); err != nil {
 		return err
 	}
-	if err := runCreateUXAndBring(result.Path, taskDesc, ux, bring); err != nil {
+	if err := runCreateUXAndBring(result.Path, taskDesc, ux, bring, noCd); err != nil {
 		return err
 	}
 	if err := runExecInDir(result.Path, execArgs); err != nil {
@@ -3973,7 +3983,7 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 			if err := seedConsumerGoModFromSource(checkoutRoot, absPath, bring); err != nil {
 				return err
 			}
-			if err := runCreateUXAndBring(absPath, taskDesc, ux, bring); err != nil {
+			if err := runCreateUXAndBring(absPath, taskDesc, ux, bring, noCd); err != nil {
 				return err
 			}
 			// Target-dir create skips home-gated auto-cd; --force-cd still lands.
@@ -4031,7 +4041,7 @@ func runCreateTargetDir(origWd, targetDir, checkoutRoot, mainRepo, basename, bra
 		if err := seedConsumerGoModFromSource(checkoutRoot, absPath, bring); err != nil {
 			return err
 		}
-		if err := runCreateUXAndBring(absPath, taskDesc, ux, bring); err != nil {
+		if err := runCreateUXAndBring(absPath, taskDesc, ux, bring, noCd); err != nil {
 			return err
 		}
 		// Target-dir create skips home-gated auto-cd; --force-cd still lands.

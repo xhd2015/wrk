@@ -9,6 +9,7 @@ myrepo -> wrk [UX flags] [-t task]
   -> optional space.CreateAndActivate (window)
   -> optional iterm2.OpenConfig (terminal ± agent follow-up)
   -> optional agent-run in current process (agent without terminal)
+  -> --here + agent: follow-up cd + agent-run, else nested shell fallback
 
 # effective merge
 plain create (no <target-dir>): config create.* + CLI flags; --no-* clears axis
@@ -648,6 +649,84 @@ func assertFollowupCDUX(t *testing.T, req *Request, wantAbs string) {
 	}
 }
 
+// assertFollowupHereUX checks --here follow-up: optional cd line + agent-run line.
+func assertFollowupHereUX(t *testing.T, req *Request, wtPath, task string, wantCD bool) {
+	t.Helper()
+	got := readFollowupFileUX(t, req)
+	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
+	if got == "" || (len(lines) == 1 && lines[0] == "") {
+		t.Fatal("follow-up should not be empty for --here + agent")
+	}
+	var cdLine, agentLine string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "cd "):
+			cdLine = line
+		case strings.HasPrefix(line, "agent-run "):
+			agentLine = line
+		default:
+			t.Fatalf("unexpected follow-up line %q; full=%q", line, got)
+		}
+	}
+	if wantCD {
+		if cdLine == "" {
+			t.Fatalf("expected cd line in follow-up; got %q", got)
+		}
+		candidates := []string{filepath.Clean(wtPath)}
+		if r, err := filepath.EvalSymlinks(wtPath); err == nil {
+			candidates = append(candidates, r)
+		}
+		matched := false
+		for _, c := range candidates {
+			if cdLine == "cd "+c {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Fatalf("cd line=%q want cd <worktree> (candidates %v)", cdLine, candidates)
+		}
+	} else if cdLine != "" {
+		t.Fatalf("--no-cd should omit cd line; got %q", got)
+	}
+	if agentLine == "" {
+		t.Fatalf("expected agent-run line in follow-up; got %q", got)
+	}
+	if !strings.Contains(agentLine, "--dir") {
+		t.Fatalf("agent-run follow-up missing --dir: %q", agentLine)
+	}
+	if !strings.Contains(agentLine, "grok-tty") {
+		t.Fatalf("agent-run follow-up missing grok-tty: %q", agentLine)
+	}
+	if !strings.Contains(agentLine, "--color") {
+		t.Fatalf("agent-run follow-up missing --color: %q", agentLine)
+	}
+	needles := []string{wtPath}
+	if resolved, err := filepath.EvalSymlinks(wtPath); err == nil {
+		needles = append(needles, resolved)
+	}
+	foundWT := false
+	for _, n := range needles {
+		if n != "" && (strings.Contains(agentLine, n) || strings.Contains(agentLine, shellSafeQuoteUX(n))) {
+			foundWT = true
+			break
+		}
+	}
+	if !foundWT {
+		t.Fatalf("agent-run follow-up missing worktree path %q: %q", wtPath, agentLine)
+	}
+	if task != "" && !strings.Contains(agentLine, task) && !strings.Contains(agentLine, shellSafeQuoteUX(task)) {
+		t.Fatalf("agent-run follow-up missing task %q: %q", task, agentLine)
+	}
+	if !strings.HasSuffix(got, "\n") {
+		t.Fatalf("follow-up file should end with newline; got %q", got)
+	}
+}
+
 // setupCreateUXFromFakeHome prepares create from FakeHome with WRK_FOLLOWUP_FILE open
 // so home-gated parent auto-cd can be observed. Main repo is passed as TargetDir.
 func setupCreateUXFromFakeHome(t *testing.T, req *Request) string {
@@ -661,6 +740,97 @@ func setupCreateUXFromFakeHome(t *testing.T, req *Request) string {
 	req.FollowupFile = filepath.Join(req.WorkRoot, "followup.txt")
 	req.UseFollowupEnv = true
 	return mainRepo
+}
+
+// enableCreateUXFollowup opens WRK_FOLLOWUP_FILE for in-place --here checks
+// without requiring FakeHome cwd. Also seeds a modern integration/bash.sh under
+// WrkHome so --here treats the wrapper as able to run agent-run follow-up lines.
+func enableCreateUXFollowup(t *testing.T, req *Request) {
+	t.Helper()
+	req.FollowupFile = filepath.Join(req.WorkRoot, "followup.txt")
+	req.UseFollowupEnv = true
+	installCreateUXBashIntegrationScript(t, req, true)
+}
+
+// installCreateUXBashIntegrationScript writes WrkHome/integration/bash.sh.
+// modern=true includes the agent-run whitelist arm; false mimics a pre--here install.
+func installCreateUXBashIntegrationScript(t *testing.T, req *Request, modern bool) {
+	t.Helper()
+	dir := filepath.Join(req.WrkHome, "integration")
+	mkdirAll(t, dir)
+	body := "# test bash integration stub\ncase \"$_wrk_line\" in\n  cd\\ /*) ;;\n"
+	if modern {
+		body += "  agent-run\\ *) ;;\n"
+	}
+	body += "esac\n"
+	writeFile(t, filepath.Join(dir, "bash.sh"), body)
+}
+
+// installFakeBashUX places a non-interactive bash shim first on PATH so --here
+// fallback LoginInteractive / bash.Login cannot hang.
+func installFakeBashUX(t *testing.T, req *Request, exitCode int) {
+	t.Helper()
+	binDir := filepath.Join(req.WorkRoot, "fake-shell-bin")
+	mkdirAll(t, binDir)
+	logPath := filepath.Join(req.WorkRoot, "fake-shell-log.txt")
+	writeFile(t, logPath, "")
+	fake := filepath.Join(binDir, "bash")
+	body := `#!/bin/sh
+log="${WRK_FAKE_SHELL_LOG:-}"
+if [ -n "$log" ]; then
+  printf 'cwd=%s\n' "$(pwd)" >> "$log"
+  printf 'args=%s\n' "$*" >> "$log"
+fi
+code="${WRK_FAKE_SHELL_EXIT:-0}"
+exit "$code"
+`
+	if err := os.WriteFile(fake, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake bash: %v", err)
+	}
+	req.FakeShellDir = binDir
+	req.FakeShellLog = logPath
+	req.FakeShellExit = exitCode
+	req.ShellEnv = fake
+}
+
+func assertInstallHintUX(t *testing.T, stderr string) {
+	t.Helper()
+	if !strings.Contains(stderr, "wrk --bash-integration --install") {
+		t.Fatalf("stderr missing bash-integration install hint: %q", stderr)
+	}
+	if !strings.Contains(stderr, "warning:") {
+		t.Fatalf("stderr missing warning: prefix: %q", stderr)
+	}
+}
+
+func assertFakeShellLaunchedUX(t *testing.T, req *Request) {
+	t.Helper()
+	if req.FakeShellLog == "" {
+		t.Fatal("FakeShellLog not set")
+	}
+	got := readFileEmptyOK(t, req.FakeShellLog)
+	if strings.TrimSpace(got) == "" {
+		t.Fatal("expected fake shell to launch (log empty)")
+	}
+}
+
+func assertFakeShellCwdUX(t *testing.T, req *Request, wantAbs string) {
+	t.Helper()
+	got := readFileEmptyOK(t, req.FakeShellLog)
+	candidates := []string{filepath.Clean(wantAbs)}
+	if r, err := filepath.EvalSymlinks(wantAbs); err == nil {
+		candidates = append(candidates, filepath.Clean(r))
+	}
+	matched := false
+	for _, c := range candidates {
+		if strings.Contains(got, "cwd="+c) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		t.Fatalf("fake shell cwd: want one of %v; log=%q", candidates, got)
+	}
 }
 
 func assertNativeCreateOK(t *testing.T, req *Request, resp *Response, err error, wtPath string) {
@@ -717,6 +887,13 @@ func ensureCreateUXHelpersUsed() {
 	_ = readFollowupFileUX
 	_ = assertFollowupEmptyUX
 	_ = assertFollowupCDUX
+	_ = assertFollowupHereUX
 	_ = setupCreateUXFromFakeHome
+	_ = enableCreateUXFollowup
+	_ = installCreateUXBashIntegrationScript
+	_ = installFakeBashUX
+	_ = assertInstallHintUX
+	_ = assertFakeShellLaunchedUX
+	_ = assertFakeShellCwdUX
 }
 ```

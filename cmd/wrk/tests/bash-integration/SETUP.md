@@ -6,6 +6,10 @@
 # print script
 wrk --bash-integration -> stdout bash completion script
 
+# help (short-circuits; never dumps script / never mutates)
+wrk --bash-integration -h|--help -> dedicated usage
+wrk --bash-integration --install --help -> usage, no write
+
 # install / uninstall / status (fake HOME + isolated WRK_HOME)
 wrk --bash-integration --install -> bash.sh + dual profile markers
 wrk --bash-integration --uninstall -> strip markers, keep bash.sh

@@ -12,6 +12,9 @@ import (
 	"github.com/xhd2015/agent-pro/pkgs/agentrunapi"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/computer-use/macos/space"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/shell/applescript"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/shell/bash"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/shell/detect"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/shell/interactive"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/shell/iterm2"
 	"golang.org/x/term"
 )
@@ -57,6 +60,8 @@ type createUXFlags struct {
 	noNewTerminal bool
 	openInAgent   bool
 	noOpenInAgent bool
+	// here prefers parent-shell / nested-shell agent launch (implies no window/terminal).
+	here bool
 	// agentRunner is a one-shot create-agent override. Nil means use config/default.
 	agentRunner *string
 }
@@ -64,7 +69,7 @@ type createUXFlags struct {
 func (f createUXFlags) any() bool {
 	return f.newWindow || f.noNewWindow ||
 		f.newTerminal || f.reuseTerminal || f.smartTerminal || f.noNewTerminal ||
-		f.openInAgent || f.noOpenInAgent || f.agentRunner != nil
+		f.openInAgent || f.noOpenInAgent || f.here || f.agentRunner != nil
 }
 
 func (f createUXFlags) validate() error {
@@ -84,13 +89,15 @@ func (f createUXFlags) validate() error {
 	if f.openInAgent && f.noOpenInAgent {
 		return fmt.Errorf("wrk: --open-in-agent and --no-open-in-agent are mutually exclusive")
 	}
-	if f.newWindow && f.noNewWindow {
+	noWin := f.noNewWindow || f.here
+	noTerm := f.noNewTerminal || f.here
+	if f.newWindow && noWin {
 		return fmt.Errorf("wrk: --new-window and --no-new-window are mutually exclusive")
 	}
-	if f.noNewTerminal && (f.newTerminal || f.reuseTerminal || f.smartTerminal) {
+	if noTerm && (f.newTerminal || f.reuseTerminal || f.smartTerminal) {
 		return fmt.Errorf("wrk: terminal mode flags and --no-new-terminal are mutually exclusive")
 	}
-	if f.newWindow && f.noNewTerminal {
+	if f.newWindow && noTerm {
 		return fmt.Errorf("wrk: --new-window requires a terminal; cannot combine with --no-new-terminal")
 	}
 	return nil
@@ -101,6 +108,7 @@ type createUXPlan struct {
 	window       bool
 	terminalMode string // "" | "new" | "reuse" | "smart"
 	agent        bool
+	here         bool // prefer follow-up / nested-shell agent launch
 	runner       string
 	promptTmpl   string
 	agentArgs    []string
@@ -157,13 +165,15 @@ func resolveCreateUX(wrkHome string, flags createUXFlags, applyConfig bool) (cre
 	}
 
 	// Apply CLI: negatives clear, positives set.
-	if flags.noNewWindow {
+	// --here is an alias for --no-new-window + --no-new-terminal and selects
+	// follow-up / nested-shell agent placement (distinct from plain no-new-*).
+	if flags.noNewWindow || flags.here {
 		plan.window = false
 	}
 	if flags.newWindow {
 		plan.window = true
 	}
-	if flags.noNewTerminal {
+	if flags.noNewTerminal || flags.here {
 		plan.terminalMode = ""
 	}
 	if flags.newTerminal {
@@ -180,6 +190,9 @@ func resolveCreateUX(wrkHome string, flags createUXFlags, applyConfig bool) (cre
 	}
 	if flags.openInAgent {
 		plan.agent = true
+	}
+	if flags.here {
+		plan.here = true
 	}
 	if flags.agentRunner != nil {
 		if !plan.agent {
@@ -254,8 +267,9 @@ func warnMaxDesktopsFallback() {
 
 // runCreateUX runs terminal / agent steps after native create printed the path.
 // Window (space) must already be handled via ensureCreateWindow when required.
-// Order: terminal (optional agent follow-up) | agent-in-process.
-func runCreateUX(worktreePath, task string, plan createUXPlan) error {
+// Order: --here agent placement | terminal (optional agent follow-up) | agent-in-process.
+// noCd suppresses the follow-up cd line when --here emits into WRK_FOLLOWUP_FILE.
+func runCreateUX(worktreePath, task string, plan createUXPlan, noCd bool) error {
 	// Defensive: if window was not pre-run (e.g. older call path), still try.
 	if plan.window {
 		if _, err := createAndActivateSpace(); err != nil {
@@ -265,6 +279,11 @@ func runCreateUX(worktreePath, task string, plan createUXPlan) error {
 				return fmt.Errorf("wrk: window: %w", err)
 			}
 		}
+	}
+
+	// --here: no iTerm/window; prefer parent-shell follow-up, else nested shell.
+	if plan.here && plan.agent {
+		return runHereAgent(worktreePath, plan, task, noCd)
 	}
 
 	if plan.terminalMode != "" {
@@ -290,6 +309,90 @@ func runCreateUX(worktreePath, task string, plan createUXPlan) error {
 		return runAgentInProcess(worktreePath, plan, task)
 	}
 	return nil
+}
+
+// runHereAgent places agent-run in the current terminal family:
+// WRK_FOLLOWUP_FILE open + up-to-date bash.sh → write cd + agent-run;
+// channel open but outdated bash.sh → warn, write cd, run agent in-process;
+// otherwise warn and nest at the worktree (bash startup runs agent-run;
+// other shells: in-process agent then LoginInteractive).
+func runHereAgent(worktreePath string, plan createUXPlan, task string, noCd bool) error {
+	cmd, err := buildAgentShellCommand(worktreePath, plan, task)
+	if err != nil {
+		return fmt.Errorf("wrk: agent follow-up: %w", err)
+	}
+	if followupChannelOpen() {
+		if !bashIntegrationSupportsAgentFollowup() {
+			warnTok := "warning:"
+			if term.IsTerminal(int(os.Stderr.Fd())) && os.Getenv("NO_COLOR") == "" {
+				warnTok = colorize("warning:", ansiOrange)
+			}
+			fmt.Fprintf(os.Stderr, "%s bash integration is outdated for --here agent follow-up; update with: wrk --bash-integration --install\n", warnTok)
+			if err := writeFollowupCD(noCd, worktreePath); err != nil {
+				return err
+			}
+			return runAgentInProcess(worktreePath, plan, task)
+		}
+		if err := writeFollowupCD(noCd, worktreePath); err != nil {
+			return err
+		}
+		if err := writeFollowupLine(cmd); err != nil {
+			return err
+		}
+		return nil
+	}
+	return runHereAgentFallback(worktreePath, plan, task, cmd)
+}
+
+func runHereAgentFallback(worktreePath string, plan createUXPlan, task, agentCmd string) error {
+	fmt.Fprintf(os.Stderr, "warning: bash integration not active; install with: wrk --bash-integration --install\n")
+	if detect.Shell() == "bash" {
+		if err := runBashLoginWithAgentStartup(worktreePath, agentCmd); err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				return ExitCodeError{Code: exitErr.ExitCode()}
+			}
+			return err
+		}
+		return nil
+	}
+	if err := runAgentInProcess(worktreePath, plan, task); err != nil {
+		return err
+	}
+	err := interactive.LoginInteractive(worktreePath, filepath.Base(worktreePath), "WRK_SHELL=1")
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return ExitCodeError{Code: exitErr.ExitCode()}
+		}
+		return err
+	}
+	return nil
+}
+
+// runBashLoginWithAgentStartup starts an interactive bash at dir whose rcfile
+// runs agentCmd once before the prompt (nested-shell fallback for --here).
+func runBashLoginWithAgentStartup(dir, agentCmd string) error {
+	prefix := filepath.Base(dir)
+	rcfile, err := bash.RcFile(prefix)
+	if err != nil {
+		return fmt.Errorf("prepare bash rc: %w", err)
+	}
+	defer os.Remove(rcfile)
+	f, err := os.OpenFile(rcfile, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("open bash rc: %w", err)
+	}
+	_, werr := fmt.Fprintf(f, "\n# wrk --here agent startup\n%s\n", agentCmd)
+	cerr := f.Close()
+	if werr != nil {
+		return werr
+	}
+	if cerr != nil {
+		return cerr
+	}
+	cmd := bash.Login(dir, rcfile, "WRK_SHELL=1")
+	return cmd.Run()
 }
 
 func itermOpenMode(mode string) (iterm2.OpenMode, error) {

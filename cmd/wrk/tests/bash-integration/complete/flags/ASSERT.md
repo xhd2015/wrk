@@ -36,6 +36,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		"--add",
 		"--rm",
 		"--bash-integration",
+		"--here",
 	)
 	// P3: exact line match so "--pr" is not satisfied by "--propagate-tags".
 	assertExactFlagCandidates(t, resp.Stdout, "--pr", "--title", "--comment")

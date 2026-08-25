@@ -114,3 +114,59 @@ func TestCaptureAgentRunnerRejectsNonCreateMode(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q, want create-only error", res.ExitCode, res.Stderr)
 	}
 }
+
+func TestResolveCreateUXHereClearsWindowAndTerminal(t *testing.T) {
+	plan, err := resolveCreateUX(t.TempDir(), createUXFlags{
+		here:        true,
+		openInAgent: true,
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.here {
+		t.Fatal("here should be set")
+	}
+	if plan.window {
+		t.Fatal("here should clear window")
+	}
+	if plan.terminalMode != "" {
+		t.Fatalf("terminalMode=%q want empty", plan.terminalMode)
+	}
+	if !plan.agent {
+		t.Fatal("open-in-agent should still enable agent")
+	}
+}
+
+func TestResolveCreateUXHereDoesNotImplyAgent(t *testing.T) {
+	plan, err := resolveCreateUX(t.TempDir(), createUXFlags{here: true}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.here {
+		t.Fatal("here should be set")
+	}
+	if plan.agent {
+		t.Fatal("--here alone must not enable agent")
+	}
+}
+
+func TestCreateUXFlagsHereConflictsWithTerminal(t *testing.T) {
+	err := createUXFlags{here: true, newTerminal: true}.validate()
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("err=%v, want terminal/no-new-terminal mutual exclusion", err)
+	}
+}
+
+func TestCreateUXFlagsHereConflictsWithNewWindow(t *testing.T) {
+	err := createUXFlags{here: true, newWindow: true}.validate()
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("err=%v, want window mutual exclusion", err)
+	}
+}
+
+func TestCreateUXFlagsHereAllowsRedundantNoNewFlags(t *testing.T) {
+	err := createUXFlags{here: true, noNewWindow: true, noNewTerminal: true, openInAgent: true}.validate()
+	if err != nil {
+		t.Fatalf("redundant --no-new-* with --here should be ok: %v", err)
+	}
+}

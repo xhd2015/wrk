@@ -39,7 +39,7 @@ _wrk() {
 }
 
 # wrk() wrapper: when auto-cd is enabled, set WRK_FOLLOWUP_FILE so the binary
-# can append "cd /abs" lines; print each to stderr and builtin-cd after exit.
+# can append "cd /abs" and "agent-run …" lines; apply each after exit.
 wrk() {
   local _wrk_skip_followup=0
   local _wrk_arg
@@ -66,30 +66,50 @@ wrk() {
   local _wrk_status=$?
   unset WRK_FOLLOWUP_FILE
 
-  local _wrk_line _wrk_path _wrk_cd_failed=0
+  # Read follow-up lines first so later cd/agent-run keep stdin on the TTY.
+  # (Executing inside "done < file" would make interactive agent-run inherit the file.)
+  local _wrk_line _wrk_path _wrk_cd_failed=0 _wrk_run_status=0
+  local -a _wrk_lines=()
   if [[ -f "$_wrk_followup" ]]; then
     while IFS= read -r _wrk_line || [[ -n "$_wrk_line" ]]; do
       [[ -z "$_wrk_line" ]] && continue
-      # Whitelist: only "cd" + a single absolute path (never eval).
-      case "$_wrk_line" in
-        cd\ /*)
-          _wrk_path="${_wrk_line#cd }"
-          # Reject paths with spaces / extra fields.
-          if [[ "$_wrk_path" == *" "* || "$_wrk_path" != /* ]]; then
-            continue
-          fi
-          printf '%s\n' "cd $_wrk_path" >&2
-          if ! builtin cd "$_wrk_path"; then
-            _wrk_cd_failed=1
-            break
-          fi
-          ;;
-      esac
+      _wrk_lines+=("$_wrk_line")
     done < "$_wrk_followup"
   fi
   rm -f "$_wrk_followup"
+
+  for _wrk_line in "${_wrk_lines[@]}"; do
+    # Whitelist: "cd" + absolute path, or wrk-authored "agent-run …".
+    case "$_wrk_line" in
+      cd\ /*)
+        _wrk_path="${_wrk_line#cd }"
+        # Reject paths with spaces / extra fields.
+        if [[ "$_wrk_path" == *" "* || "$_wrk_path" != /* ]]; then
+          continue
+        fi
+        printf '%s\n' "cd $_wrk_path" >&2
+        if ! builtin cd "$_wrk_path"; then
+          _wrk_cd_failed=1
+          break
+        fi
+        ;;
+      agent-run\ *)
+        printf '%s\n' "$_wrk_line" >&2
+        # Trusted: only wrk writes the follow-up temp file for this invocation.
+        # eval in this interactive shell so grok-tty/codex-tty keep the TTY
+        # as a foreground job of the current shell.
+        if ! eval "$_wrk_line"; then
+          _wrk_run_status=$?
+          break
+        fi
+        ;;
+    esac
+  done
   if [[ "$_wrk_cd_failed" -ne 0 ]]; then
     return 1
+  fi
+  if [[ "$_wrk_run_status" -ne 0 ]]; then
+    return "$_wrk_run_status"
   fi
   return "$_wrk_status"
 }
@@ -158,6 +178,7 @@ var wrkCompletionFlags = []string{
 	"--reuse-terminal",
 	"--smart-terminal",
 	"--no-new-terminal",
+	"--here",
 	"--open-in-agent",
 	"--no-open-in-agent",
 	"--agent-runner",
@@ -202,6 +223,12 @@ func runBashIntegration(args []string) error {
 		return err
 	}
 
+	// Nested -h/--help short-circuits before print/install/uninstall/status.
+	if peelBashIntegrationHelp(args) {
+		fmt.Print(bashIntegrationUsage())
+		return nil
+	}
+
 	action, dryRun, completeReq, err := parseBashIntegrationArgs(args)
 	if err != nil {
 		return err
@@ -235,6 +262,58 @@ func runBashIntegration(args []string) error {
 	default:
 		return fmt.Errorf("wrk: unknown integration action %q", action)
 	}
+}
+
+// peelBashIntegrationHelp reports whether -h/--help appears among bash-integration
+// tokens (any order relative to action flags). Tokens after `--` are ignored so
+// `wrk --bash-integration --complete -- … --help …` stays a completion request.
+func peelBashIntegrationHelp(args []string) bool {
+	afterSep := false
+	for _, a := range args {
+		if a == "--" {
+			afterSep = true
+			continue
+		}
+		if afterSep {
+			continue
+		}
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+func bashIntegrationUsage() string {
+	return `wrk --bash-integration — bash tab completion + auto-cd wrapper
+
+Usage:
+  wrk --bash-integration                 print integration script to stdout
+  wrk --bash-integration --install [--dry-run]
+  wrk --bash-integration --uninstall [--dry-run]
+  wrk --bash-integration --status
+  wrk --bash-integration -h|--help
+
+Actions:
+  (default)        print bash.sh content (for inspection / manual install)
+  --install        write $WRK_HOME/integration/bash.sh + profile markers
+  --uninstall      remove profile markers (keeps bash.sh)
+  --status         report installed / not installed / partial
+                   (exit 1 if not fully installed)
+
+Options:
+  --dry-run        with --install/--uninstall: preview only
+  -h,--help        show this help message
+
+Notes:
+  Requires an interactive bash that sources ~/.bash_profile or ~/.bashrc.
+  After install, open a new shell (or source the profile) so the wrk() wrapper
+  can apply follow-up cd / agent-run lines.
+
+Examples:
+  wrk --bash-integration --install
+  wrk --bash-integration --status
+`
 }
 
 func checkBashIntegrationMutualExclusion(args []string) error {
@@ -304,8 +383,6 @@ func parseBashIntegrationArgs(args []string) (action string, dryRun bool, comple
 				return "", false, nil, fmt.Errorf("wrk: unknown integration action %q", arg)
 			}
 			afterCompleteSep = true
-		case "-h", "--help":
-			// Hidden from main help; no dedicated integration help in tests.
 		default:
 			return "", false, nil, fmt.Errorf("wrk: unknown integration action %q", arg)
 		}
@@ -344,6 +421,23 @@ func bashIntegrationPaths() (home, wrkHome, scriptPath, bashProfilePath, bashrcP
 func scriptPresent(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// bashIntegrationSupportsAgentFollowup reports whether the installed bash.sh
+// whitelist can apply "agent-run …" follow-up lines (required for --here).
+// Missing or unreadable script → false.
+func bashIntegrationSupportsAgentFollowup() bool {
+	_, _, scriptPath, _, _, err := bashIntegrationPaths()
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(scriptPath)
+	if err != nil {
+		return false
+	}
+	// Match the wrapper case arm added for --here agent follow-up
+	// (literal backslash before * in the installed bash case pattern).
+	return strings.Contains(string(data), `agent-run\ *)`)
 }
 
 func markerPresent(profilePath string) bool {

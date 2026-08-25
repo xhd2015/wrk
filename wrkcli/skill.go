@@ -65,6 +65,7 @@ var wrkModeFlags = map[string]struct{}{
 	"--reuse-terminal":       {},
 	"--smart-terminal":       {},
 	"--no-new-terminal":      {},
+	"--here":                 {},
 	"--open-in-agent":        {},
 	"--no-open-in-agent":     {},
 	"--agent-runner":         {},

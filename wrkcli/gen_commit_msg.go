@@ -33,6 +33,7 @@ var genCommitMsgDisallowedFlags = []string{
 	"--no-cd", "--force-cd",
 	"--new-window", "--no-new-window",
 	"--new-terminal", "--reuse-terminal", "--smart-terminal", "--no-new-terminal",
+	"--here",
 	"--open-in-agent", "--no-open-in-agent",
 	"--no-config",
 	"--color", "-v", "--verbose",
