@@ -58,6 +58,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xhd2015/doctest/session"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/withgo"
@@ -85,6 +86,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	if err != nil {
 		return fmt.Errorf("resolve work root: %w", err)
 	}
+	registerRetryWorkRootCleanup(t, workRoot)
 	req.WorkRoot = workRoot
 	req.WrkHome = filepath.Join(workRoot, ".wrk")
 	if err := os.MkdirAll(req.WrkHome, 0o755); err != nil {
@@ -93,7 +95,28 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.RepoDir = workRoot
 	req.InProcess = true
 	req.InstallDir = filepath.Join(workRoot, "installed")
-	req.ExtraEnv = append(req.ExtraEnv, "HOME="+workRoot)
+	goPath := filepath.Join(workRoot, "go")
+	modCache := filepath.Join(goPath, "pkg", "mod")
+	goCache := filepath.Join(workRoot, "gocache")
+	req.ExtraEnv = append(req.ExtraEnv,
+		"HOME="+workRoot,
+		"GOTELEMETRY=off",
+		"GOPATH="+goPath,
+		"GOMODCACHE="+modCache,
+		"GOCACHE="+goCache,
+	)
+	// go may fill caches with read-only files; unlock before t.TempDir cleanup.
+	t.Cleanup(func() {
+		for _, root := range []string{goPath, goCache} {
+			_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+				if err != nil || info == nil {
+					return nil
+				}
+				_ = os.Chmod(path, info.Mode()|0o200)
+				return nil
+			})
+		}
+	})
 	_ = seedHostGoWrapper(t, req.InstallDir, pinGo122)
 	req.WithGo = withgo.ResolveOptions{
 		InstallDir: req.InstallDir,
@@ -101,6 +124,35 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	}
 	ensureDepReplaceHelpersUsed()
 	return nil
+}
+
+// registerRetryWorkRootCleanup drains WorkRoot before testing.T's TempDir
+// RemoveAll (ENOTEMPTY flake under concurrent git/go activity).
+func registerRetryWorkRootCleanup(t *testing.T, root string) {
+	t.Helper()
+	if root == "" {
+		return
+	}
+	t.Cleanup(func() {
+		const attempts = 12
+		const delay = 15 * time.Millisecond
+		var err error
+		for i := 0; i < attempts; i++ {
+			err = os.RemoveAll(root)
+			if err == nil {
+				return
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "directory not empty") && !strings.Contains(msg, "not empty") {
+				t.Logf("workroot cleanup: %v", err)
+				return
+			}
+			time.Sleep(delay)
+		}
+		if err != nil {
+			t.Logf("workroot cleanup after %d attempts: %v", attempts, err)
+		}
+	})
 }
 
 // seedHostGoWrapper writes $installDir/<pin>/bin/go that records its arguments,
@@ -660,7 +712,16 @@ func assertNoReplaceFor(t *testing.T, goModPath, oldPath string) {
 	body := readFile(t, goModPath)
 	for _, line := range strings.Split(body, "\n") {
 		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "replace ") && strings.Contains(trim, oldPath) {
+		if !strings.HasPrefix(trim, "replace ") {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(trim, "replace "))
+		parts := strings.SplitN(rest, "=>", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		left := strings.Fields(strings.TrimSpace(parts[0]))
+		if len(left) > 0 && left[0] == oldPath {
 			t.Fatalf("did not expect replace for %s:\n%s", oldPath, body)
 		}
 	}
@@ -870,6 +931,200 @@ func assertGoModUnchangedAt(t *testing.T, path, baseline string) {
 	}
 }
 
+// setupUndoIntroduced: git primary requires dep; HEAD has no replace;
+// working tree has absolute replace for dep (simulates --dep-replace / --bring).
+// Empty vendor/ skips tidy so offline fixtures need not resolve example.com/*.
+func setupUndoIntroduced(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedPlainDep(t, req)
+	primary := initStackPrimary(t, req)
+	writeGoMod(t, primary, modApp, "require "+modDep+" v0.0.1\n")
+	writeConsumerMainWithImports(t, primary, modDep)
+	mkdirAll(t, filepath.Join(primary, "vendor"))
+	gitCommitAll(t, primary, "require dep")
+
+	primary = resolvePath(t, primary)
+	gm := strings.TrimRight(readFile(t, filepath.Join(primary, "go.mod")), "\n") +
+		"\n\nreplace " + modDep + " => " + dep + "\n"
+	writeFile(t, filepath.Join(primary, "go.mod"), gm)
+
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.VendorDir = filepath.Join(primary, "vendor")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.WantCheckout = "."
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+}
+
+// setupUndoKeepsHead: HEAD has replace for kool; WT also introduces dep replace.
+// Undo must drop only dep and keep kool. vendor/ skips tidy (offline fixtures).
+func setupUndoKeepsHead(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedPlainDep(t, req)
+	primary := initStackPrimary(t, req)
+	kool := seedExternalGitModule(t, primary, "kool", modKool, "")
+	writeLibPkg(t, kool, "kool", "Hi")
+	gitCommitAll(t, kool, "kool module")
+
+	body := fmt.Sprintf(
+		"require (\n\t%s v0.0.1\n\t%s v0.0.0\n)\n\nreplace %s => ./external/kool\n",
+		modDep, modKool, modKool,
+	)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep, modKool)
+	mkdirAll(t, filepath.Join(primary, "vendor"))
+	gitCommitAll(t, primary, "head has kool replace")
+
+	primary = resolvePath(t, primary)
+	gm := strings.TrimRight(readFile(t, filepath.Join(primary, "go.mod")), "\n") +
+		"\nreplace " + modDep + " => " + dep + "\n"
+	writeFile(t, filepath.Join(primary, "go.mod"), gm)
+
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.VendorDir = filepath.Join(primary, "vendor")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.WantCheckout = "."
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+}
+
+// setupUndoNothing: git primary; WT go.mod matches HEAD (no introduced replace).
+func setupUndoNothing(t *testing.T, req *Request) {
+	t.Helper()
+	_ = seedPlainDep(t, req)
+	primary := initStackPrimary(t, req)
+	writeGoMod(t, primary, modApp, "require "+modDep+" v0.0.1\n")
+	writeConsumerMainWithImports(t, primary, modDep)
+	gitCommitAll(t, primary, "clean require")
+
+	primary = resolvePath(t, primary)
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+}
+
+// setupUndoTwoIntroduced: HEAD clean; WT has replaces for dep and dep2.
+// vendor/ skips tidy (offline fixtures).
+func setupUndoTwoIntroduced(t *testing.T, req *Request) {
+	t.Helper()
+	dep := seedPlainDep(t, req)
+	dep2 := seedPlainDep2(t, req)
+	primary := initStackPrimary(t, req)
+	body := fmt.Sprintf("require (\n\t%s v0.0.1\n\t%s v0.0.1\n)\n", modDep, modDep2)
+	writeGoMod(t, primary, modApp, body)
+	writeConsumerMainWithImports(t, primary, modDep, modDep2)
+	mkdirAll(t, filepath.Join(primary, "vendor"))
+	gitCommitAll(t, primary, "require both")
+
+	primary = resolvePath(t, primary)
+	gm := strings.TrimRight(readFile(t, filepath.Join(primary, "go.mod")), "\n") +
+		"\n\nreplace " + modDep + " => " + dep + "\n" +
+		"replace " + modDep2 + " => " + dep2 + "\n"
+	writeFile(t, filepath.Join(primary, "go.mod"), gm)
+
+	req.RepoDir = primary
+	req.ConsumerModDir = primary
+	req.ConsumerGoMod = filepath.Join(primary, "go.mod")
+	req.VendorDir = filepath.Join(primary, "vendor")
+	req.BaselineGoMod = readFile(t, req.ConsumerGoMod)
+	req.WantConsumerModule = modApp
+	req.WantCheckout = "."
+	req.WantUpdated = 1
+	req.WantCheckouts = 1
+}
+
+func appendAbsoluteReplace(t *testing.T, goModPath, oldPath, absDir string) {
+	t.Helper()
+	gm := strings.TrimRight(readFile(t, goModPath), "\n") +
+		"\nreplace " + oldPath + " => " + absDir + "\n"
+	writeFile(t, goModPath, gm)
+}
+
+func ensureVendorDir(t *testing.T, modDir string) {
+	t.Helper()
+	mkdirAll(t, filepath.Join(modDir, "vendor"))
+}
+
+func assertHasReplaceFor(t *testing.T, goModPath, oldPath string) {
+	t.Helper()
+	body := readFile(t, goModPath)
+	for _, line := range strings.Split(body, "\n") {
+		trim := strings.TrimSpace(line)
+		if !strings.HasPrefix(trim, "replace ") {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(trim, "replace "))
+		parts := strings.SplitN(rest, "=>", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		left := strings.Fields(strings.TrimSpace(parts[0]))
+		if len(left) > 0 && left[0] == oldPath {
+			return
+		}
+	}
+	t.Fatalf("expected replace for %s in:\n%s", oldPath, body)
+}
+
+func assertRequireVersion(t *testing.T, goModPath, modulePath, version string) {
+	t.Helper()
+	body := readFile(t, goModPath)
+	needle := modulePath + " " + version
+	if !strings.Contains(body, needle) {
+		t.Fatalf("expected require %s in:\n%s", needle, body)
+	}
+}
+
+func assertUndoBanner(t *testing.T, stdout string, dryRun bool) {
+	t.Helper()
+	want := "==== dep-replace --undo ===="
+	if dryRun {
+		want = "==== dep-replace --undo (dry-run) ===="
+	}
+	if !strings.Contains(stdout, want) {
+		t.Fatalf("stdout missing banner %q; got:\n%s", want, stdout)
+	}
+}
+
+func assertDropLine(t *testing.T, stdout, modulePath string, dryRun bool) {
+	t.Helper()
+	prefix := "drop  " + modulePath + " => "
+	if dryRun {
+		prefix = "would: drop  " + modulePath + " => "
+	}
+	found := false
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(strings.TrimSpace(line), prefix) || strings.HasPrefix(strings.TrimSpace(line), prefix) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("stdout missing drop line for %s; got:\n%s", modulePath, stdout)
+	}
+}
+
+func assertUndoSummary(t *testing.T, stdout string, drops, modules, checkouts int, dryRun bool) {
+	t.Helper()
+	var needle string
+	if dryRun {
+		needle = fmt.Sprintf("dep-replace: would undo %d replaces in %d modules in %d checkouts", drops, modules, checkouts)
+	} else {
+		needle = fmt.Sprintf("dep-replace: undid %d replaces in %d modules in %d checkouts", drops, modules, checkouts)
+	}
+	if !strings.Contains(stdout, needle) {
+		t.Fatalf("stdout missing summary %q; got:\n%s", needle, stdout)
+	}
+}
+
 func ensureDepReplaceHelpersUsed() {
 	_ = setupConsumerWithDep
 	_ = setupConsumerTwoDeps
@@ -882,6 +1137,12 @@ func ensureDepReplaceHelpersUsed() {
 	_ = setupStackSkipSelf
 	_ = setupMultiDirStack
 	_ = setupStackZeroGated
+	_ = setupUndoIntroduced
+	_ = setupUndoKeepsHead
+	_ = setupUndoNothing
+	_ = setupUndoTwoIntroduced
+	_ = appendAbsoluteReplace
+	_ = ensureVendorDir
 	_ = seedPlainDep
 	_ = seedPlainDep2
 	_ = initStackPrimary
@@ -890,6 +1151,8 @@ func ensureDepReplaceHelpersUsed() {
 	_ = seedHostGoWrapper
 	_ = assertAbsoluteReplace
 	_ = assertNoReplaceFor
+	_ = assertHasReplaceFor
+	_ = assertRequireVersion
 	_ = assertDepReplaceLine
 	_ = assertWouldDepReplaceLine
 	_ = assertGoModUnchanged
@@ -897,6 +1160,9 @@ func ensureDepReplaceHelpersUsed() {
 	_ = assertNoTidyArtifacts
 	_ = assertApplyBanner
 	_ = assertDryRunBanner
+	_ = assertUndoBanner
+	_ = assertDropLine
+	_ = assertUndoSummary
 	_ = assertNoBanner
 	_ = assertDepHeader
 	_ = assertReplaceLine

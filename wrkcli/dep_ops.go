@@ -7,16 +7,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/commands"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/mod/scan"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/replace"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/resolve"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/update"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/withgo"
 	"github.com/xhd2015/wrk/wrkcli/storage"
+	"golang.org/x/mod/modfile"
 )
 
 // runDepReplace implements wrk --dep-replace <dir>… [--dry-run].
@@ -27,7 +30,7 @@ import (
 // any banner. Apply is fail-fast: a later bad arg leaves prior writes.
 func runDepReplace(workDir string, paths []string, dryRun bool, ctx *invocationContext) error {
 	if len(paths) == 0 {
-		return fmt.Errorf("wrk: --dep-replace requires a directory")
+		return fmt.Errorf("wrk: --dep-replace requires a directory or --undo")
 	}
 	deps := make([]depReplaceDep, 0, len(paths))
 	for _, p := range paths {
@@ -42,6 +45,237 @@ func runDepReplace(workDir string, paths []string, dryRun bool, ctx *invocationC
 		Quiet:  false,
 		WithGo: withGoFromCtx(ctx),
 	})
+}
+
+// runDepReplaceUndo implements wrk --dep-replace --undo [<dir>…] [--dry-run].
+// Requires git. For each stack consumer go.mod, drops replace OldPaths present
+// in the working tree but absent from HEAD's go.mod (introduced since HEAD).
+// Does not rewrite other go.mod content or put back HEAD NewPaths for existing
+// OldPaths. Optional dirs filter to those module paths. Then versioned tidy
+// once per affected module (vendor/ skips). Empty plan → soft success.
+func runDepReplaceUndo(workDir string, paths []string, dryRun bool, ctx *invocationContext) error {
+	cwd, err := absAgainstProcessCwd(workDir)
+	if err != nil {
+		return fmt.Errorf("wrk: resolve cwd: %w", err)
+	}
+	cwd = storage.NormalizePath(cwd)
+	if !worktree.IsInsideWorkTree(cwd) {
+		return fmt.Errorf("wrk: --dep-replace --undo requires git HEAD")
+	}
+
+	var filter map[string]struct{}
+	if len(paths) > 0 {
+		filter = make(map[string]struct{}, len(paths))
+		for _, p := range paths {
+			dep, err := resolveDepReplaceArg(p)
+			if err != nil {
+				return err
+			}
+			filter[dep.modulePath] = struct{}{}
+		}
+	}
+
+	consumers, err := collectDepUpdateConsumers(cwd)
+	if err != nil {
+		return err
+	}
+
+	tree, err := buildDepReplaceUndoTree(cwd, consumers, filter)
+	if err != nil {
+		return err
+	}
+	return applyDepReplaceUndoTree(tree, stackReplaceOpts{
+		DryRun: dryRun,
+		WithGo: withGoFromCtx(ctx),
+	})
+}
+
+type depReplaceUndoAction struct {
+	modulePath string
+	newPath    string // working-tree NewPath (display only)
+}
+
+type depReplaceUndoModule struct {
+	Path   string
+	ModDir string
+	Drops  []depReplaceUndoAction
+}
+
+type depReplaceUndoCheckout struct {
+	Path    string
+	Label   string
+	Modules []depReplaceUndoModule
+}
+
+func buildDepReplaceUndoTree(cwd string, consumers []depUpdateConsumer, filter map[string]struct{}) ([]depReplaceUndoCheckout, error) {
+	type builder struct {
+		path    string
+		label   string
+		modIdx  map[string]int
+		modules []depReplaceUndoModule
+	}
+	var order []string
+	byCheckout := make(map[string]*builder)
+
+	for _, c := range consumers {
+		headOld, err := headGoModReplaceOldPaths(c.Checkout, c.ModDir)
+		if err != nil {
+			return nil, err
+		}
+		var drops []depReplaceUndoAction
+		for _, r := range c.Replaces {
+			if r.OldPath == "" {
+				continue
+			}
+			if filter != nil {
+				if _, ok := filter[r.OldPath]; !ok {
+					continue
+				}
+			}
+			if _, ok := headOld[r.OldPath]; ok {
+				continue
+			}
+			drops = append(drops, depReplaceUndoAction{
+				modulePath: r.OldPath,
+				newPath:    r.NewPath,
+			})
+		}
+		if len(drops) == 0 {
+			continue
+		}
+		sort.Slice(drops, func(i, j int) bool {
+			return drops[i].modulePath < drops[j].modulePath
+		})
+		ck := c.Checkout
+		b, ok := byCheckout[ck]
+		if !ok {
+			b = &builder{
+				path:   ck,
+				label:  statusDirLine(cwd, ck),
+				modIdx: make(map[string]int),
+			}
+			byCheckout[ck] = b
+			order = append(order, ck)
+		}
+		if _, exists := b.modIdx[c.ModDir]; !exists {
+			b.modIdx[c.ModDir] = len(b.modules)
+			b.modules = append(b.modules, depReplaceUndoModule{
+				Path:   c.Path,
+				ModDir: c.ModDir,
+			})
+		}
+		mi := b.modIdx[c.ModDir]
+		b.modules[mi].Drops = append(b.modules[mi].Drops, drops...)
+	}
+
+	out := make([]depReplaceUndoCheckout, 0, len(order))
+	for _, ck := range order {
+		b := byCheckout[ck]
+		out = append(out, depReplaceUndoCheckout{
+			Path:    b.path,
+			Label:   b.label,
+			Modules: b.modules,
+		})
+	}
+	return out, nil
+}
+
+// headGoModReplaceOldPaths returns replace OldPaths from HEAD's go.mod for the
+// module at modDir under checkout. Missing HEAD blob → empty set (all WT
+// replaces count as introduced).
+func headGoModReplaceOldPaths(checkout, modDir string) (map[string]struct{}, error) {
+	out := make(map[string]struct{})
+	goModPath := filepath.Join(modDir, "go.mod")
+	rel, err := filepath.Rel(checkout, goModPath)
+	if err != nil {
+		return nil, fmt.Errorf("wrk: rel go.mod under checkout %s: %w", checkout, err)
+	}
+	if strings.HasPrefix(rel, "..") {
+		return nil, fmt.Errorf("wrk: go.mod %s is outside checkout %s", goModPath, checkout)
+	}
+	blob, err := gitOutputDir(checkout, "show", "HEAD:"+filepath.ToSlash(rel))
+	if err != nil {
+		// Untracked / missing at HEAD → treat as no replaces on base.
+		return out, nil
+	}
+	f, err := modfile.Parse(goModPath, []byte(blob), nil)
+	if err != nil {
+		f, err = modfile.ParseLax(goModPath, []byte(blob), nil)
+		if err != nil {
+			return nil, fmt.Errorf("wrk: parse HEAD go.mod for %s: %w", goModPath, err)
+		}
+	}
+	for _, r := range f.Replace {
+		if r.Old.Path != "" {
+			out[r.Old.Path] = struct{}{}
+		}
+	}
+	return out, nil
+}
+
+func countDepReplaceUndoTree(tree []depReplaceUndoCheckout) (drops, modules, checkouts int) {
+	for _, co := range tree {
+		modCount := 0
+		for _, mod := range co.Modules {
+			if len(mod.Drops) == 0 {
+				continue
+			}
+			modCount++
+			modules++
+			drops += len(mod.Drops)
+		}
+		if modCount > 0 {
+			checkouts++
+		}
+	}
+	return
+}
+
+func applyDepReplaceUndoTree(tree []depReplaceUndoCheckout, opts stackReplaceOpts) error {
+	nDrops, nMods, nCheckouts := countDepReplaceUndoTree(tree)
+	if nDrops == 0 {
+		fmt.Println("dep-replace: nothing to undo")
+		return nil
+	}
+	dryRun := opts.DryRun
+	if dryRun {
+		fmt.Println("==== dep-replace --undo (dry-run) ====")
+	} else {
+		fmt.Println("==== dep-replace --undo ====")
+	}
+	fmt.Println()
+	for _, co := range tree {
+		fmt.Printf("  checkout  %s\n", co.Label)
+		for _, mod := range co.Modules {
+			if len(mod.Drops) == 0 {
+				continue
+			}
+			fmt.Printf("    module  %s\n", mod.Path)
+			for _, act := range mod.Drops {
+				if !dryRun {
+					editOpts := &commands.GoModEditOptions{Dir: mod.ModDir, Stderr: false, Stdout: false}
+					if err := commands.GoModDropReplace(act.modulePath, editOpts); err != nil {
+						return fmt.Errorf("wrk: %w", err)
+					}
+				}
+				if dryRun {
+					fmt.Printf("      would: drop  %s => %s\n", act.modulePath, act.newPath)
+					continue
+				}
+				fmt.Printf("      drop  %s => %s\n", act.modulePath, act.newPath)
+			}
+			if err := tidyDepUpdateConsumer(mod.ModDir, mod.Path, dryRun, false, opts.WithGo); err != nil {
+				return err
+			}
+		}
+	}
+	fmt.Println()
+	if dryRun {
+		fmt.Printf("dep-replace: would undo %d replaces in %d modules in %d checkouts\n", nDrops, nMods, nCheckouts)
+		return nil
+	}
+	fmt.Printf("dep-replace: undid %d replaces in %d modules in %d checkouts\n", nDrops, nMods, nCheckouts)
+	return nil
 }
 
 // stackReplaceOpts controls applyStackAbsoluteReplace reporting and tidy.

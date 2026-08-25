@@ -1,9 +1,10 @@
 # wrk --dep-replace — unwind-stack fan-out + CLI tree (absolute + versioned tidy)
 
 ## Version
-0.0.3
+0.0.4
 
-Decision tree for **`wrk --dep-replace <dir>… [--dry-run]`**.
+Decision tree for **`wrk --dep-replace <dir>… [--dry-run]`** and
+**`wrk --dep-replace --undo [<dir>…] [--dry-run]`**.
 
 Adds (or rewrites) an **absolute** `replace module => absDir`. Consumer set =
 **`CollectStackInventory(cwd)`** (cwd git toplevel + nested status repos +
@@ -15,6 +16,13 @@ never rewritten. **Not git** → today’s walk-up nearest go.mod and **D7**
 arg → no banner / no tree / no writes). Apply write errors are **fail-fast**
 (prior writes may remain). After replaces: **versioned `go mod tidy`** via the
 same `tidyDepUpdateConsumer` helper as `--dep-update` (unless `vendor/`).
+
+**`--undo`:** require git HEAD. For each stack consumer, drop replace
+`OldPath`s present in the working-tree `go.mod` but **absent from HEAD’s
+`go.mod`** (introduced since HEAD). Do **not** restore whole-file content or
+rewrite HEAD `NewPath` for OldPaths that already existed on HEAD. Optional
+dirs filter those module paths. Then versioned tidy. Empty plan →
+`dep-replace: nothing to undo` (exit 0).
 
 **Layer:** **L2** — in-process CLI via `wrkcli.Capture` (`req.InProcess=true`).
 No L3 e2e leaves. Parallel-safe: inject Env/Dir/`WithGo` via Capture.
@@ -31,11 +39,17 @@ No L3 e2e leaves. Parallel-safe: inject Env/Dir/`WithGo` via Capture.
 | D6 | Git: `CollectStackInventory(cwd)`. Not git: nearest go.mod from workDir |
 | D7 | Not-git nearest fallback still writes **without** a prior require. Git stack: gated (require **or** existing replace). Self never rewritten |
 | D8 | Zero gated consumers on the whole stack (git) → `wrk:` error containing `replace` or `consumer`; **no banner** |
+| R1 | `--undo` only with `--dep-replace`; bare `--dep-replace` still needs a dir **or** `--undo` |
+| R2 | Undo requires git HEAD (not-git → hard error; no banner) |
+| R3 | Drop only WT OldPaths absent from HEAD go.mod; never wholesale `go.mod` restore; never re-add HEAD NewPath for existing OldPaths |
+| R4 | Undo empty plan → soft `nothing to undo` (exit 0) |
+| R5 | Undo CLI tree: `==== dep-replace --undo ====`; `drop` / `would: drop`; tidy; summary `undid N replaces in M modules in C checkouts` |
 
-**Partners:** `--dry-run`, optional `--color` / `--no-color`, `-v`.
+**Partners:** `--dry-run`, optional `--color` / `--no-color`, `-v`; `--undo`
+(partner of `--dep-replace` only).
 
 **Out of scope:** `--dep-update` pin semantics; relative replace (`--pin-locals`);
-`--all`; commit; kool.
+`--all`; commit; kool; deleting `./external` worktrees on undo.
 
 # DSN (Domain Specific Notion)
 
@@ -88,18 +102,29 @@ dep-replace/
 │   ├── stack-no-write
 │   ├── multi-dir-stack-no-write
 │   └── bad-second-arg                 # no banner; first dep not a half-plan
-└── apply/
-    ├── single-dir                     # not-git nearest
-    ├── multi-dir
-    ├── nested-module                  # workDir under consumer; walk up
-    ├── no-existing-require            # D7 not-git nearest
-    ├── fail-fast-second-missing       # validate-first: no partial write
-    ├── stack-other-checkout
-    ├── stack-skip-self
-    ├── stack-skip-non-consumer
-    ├── stack-existing-replace         # other checkout gated by existing replace
-    ├── multi-dir-stack
-    └── vendor-skip                    # replace + skip tidy (vendor/)
+├── apply/
+│   ├── single-dir                     # not-git nearest
+│   ├── multi-dir
+│   ├── nested-module                  # workDir under consumer; walk up
+│   ├── no-existing-require            # D7 not-git nearest
+│   ├── fail-fast-second-missing       # validate-first: no partial write
+│   ├── stack-other-checkout
+│   ├── stack-skip-self
+│   ├── stack-skip-non-consumer
+│   ├── stack-existing-replace         # other checkout gated by existing replace
+│   ├── multi-dir-stack
+│   └── vendor-skip                    # replace + skip tidy (vendor/)
+└── undo/
+    ├── help/mentions-undo
+    ├── reject/undo-alone           # --undo without --dep-replace
+    ├── error/not-git                  # requires git HEAD
+    ├── dry-run/no-write
+    └── apply/
+        ├── drops-introduced           # WT-only OldPath dropped; require stays
+        ├── keeps-head-replace         # HEAD OldPath kept; only introduced dropped
+        ├── nothing-to-undo         # soft no-op
+        ├── filter-dir                 # optional dir filter
+        └── stack-other-checkout       # fan-out across stack
 ```
 
 # Test Index
@@ -131,6 +156,15 @@ dep-replace/
 | `apply/stack-existing-replace` | Other checkout gated by existing replace (no require) |
 | `apply/multi-dir-stack` | Two dep args; one consumer both replaces; other only first |
 | `apply/vendor-skip` | Replace applied; `skip tidy  (vendor/)`; no go.sum |
+| `undo/help/mentions-undo` | Root help mentions `--undo` |
+| `undo/reject/undo-alone` | Bare `--undo` → only valid with `--dep-replace` |
+| `undo/error/not-git` | Not-git → requires git HEAD; no banner |
+| `undo/dry-run/no-write` | Would drop + tidy plan; go.mod unchanged |
+| `undo/apply/drops-introduced` | Drop WT-only replace; require version unchanged |
+| `undo/apply/keeps-head-replace` | Keep HEAD replace; drop only introduced |
+| `undo/apply/nothing-to-undo` | Soft `nothing to undo`; exit 0 |
+| `undo/apply/filter-dir` | Optional dir filters which introduced OldPaths drop |
+| `undo/apply/stack-other-checkout` | Fan-out drop across stack checkouts |
 
 # Output contracts (assert targets)
 

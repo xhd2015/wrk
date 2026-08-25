@@ -216,6 +216,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var pinLocals bool
 	var depReplace bool
 	var depUpdate bool
+	var undoFlag bool
 	var allFlag bool
 	var execArgs []string
 	// Manual commit message path: --commit -m/--message (wrk-owned; not AI gen).
@@ -280,6 +281,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--pin-locals", &pinLocals).
 		Bool("--dep-replace", &depReplace).
 		Bool("--dep-update", &depUpdate).
+		Bool("--undo", &undoFlag).
 		Bool("--all", &allFlag).
 		Varargs("--reinstall-local", &reinstallLocalNames).
 		Bool("--tag-next", &tagNext).
@@ -348,6 +350,9 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if allFlag && !depUpdate {
 		return fmt.Errorf("wrk: --all is only valid with --dep-update")
 	}
+	if undoFlag && !depReplaceMode {
+		return fmt.Errorf("wrk: --undo is only valid with --dep-replace")
+	}
 	if depUpdate && depReplaceMode {
 		return fmt.Errorf("wrk: --dep-replace and --dep-update are mutually exclusive")
 	}
@@ -370,8 +375,8 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if depReplaceMode {
 		depReplacePaths = append(depReplacePaths, remaining...)
 		remaining = nil
-		if len(depReplacePaths) == 0 {
-			return fmt.Errorf("wrk: --dep-replace requires a directory")
+		if len(depReplacePaths) == 0 && !undoFlag {
+			return fmt.Errorf("wrk: --dep-replace requires a directory or --undo")
 		}
 	}
 
@@ -1347,7 +1352,11 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		return runPinLocals(workDir, dryRun, colorFlag)
 	}
 	// --dep-replace: absolute replace on unwind-stack consumers + versioned tidy.
+	// --dep-replace --undo: drop WT-only replaces vs HEAD, then versioned tidy.
 	if depReplaceMode {
+		if undoFlag {
+			return runDepReplaceUndo(workDir, depReplacePaths, dryRun, ctx)
+		}
 		return runDepReplace(workDir, depReplacePaths, dryRun, ctx)
 	}
 	// --dep-update: dir-mode fan-out pin + versioned tidy, or --all inventory pull.
@@ -1660,6 +1669,9 @@ Flags:
   --dep-replace <dir>… [--dry-run]
                                   absolute replace into every gated go.mod on the unwind stack
                                   (require or existing replace; not-git nearest; versioned tidy unless vendor/)
+  --dep-replace --undo [<dir>…] [--dry-run]
+                                  drop replaces introduced since HEAD (WT OldPath absent from HEAD go.mod);
+                                  optional dirs filter module paths; versioned tidy unless vendor/; requires git
   --dep-update <dir>… [--dry-run]
                                   pin latest tag into every existing requirer on the unwind stack
                                   (cwd git + nested/replace BFS; else nearest go.mod); versioned tidy unless vendor/
@@ -1699,7 +1711,7 @@ Flags:
                                   compose dry-run uses planned next tags when with --tag-next)
   --sync [--dry-run]              FF-only bi-directional sync main ↔ linked worktrees
                                   (also: after successful --done / --merge-back)
-  --dry-run                       with --done/--merge-back/--tag-next/--propagate-tags/--sync/--push/--reinstall-local/--unwind/--pin-locals/--dep-replace/--dep-update/--gen-commit-msg/--commit -m: plan only
+  --dry-run                       with --done/--merge-back/--tag-next/--propagate-tags/--sync/--push/--reinstall-local/--unwind/--pin-locals/--dep-replace[--undo]/--dep-update/--gen-commit-msg/--commit -m: plan only
   --push                          push current checkout branch to upstream/origin;
                                   with --done/--merge-back: push main branch (and tags when with --tag-next);
                                   also force-with-lease origin/<worktree-branch> when that ref already exists

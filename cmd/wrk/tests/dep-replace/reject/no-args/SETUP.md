@@ -1,11 +1,11 @@
 # Scenario
 
-**Feature**: wrk --dep-replace with zero directory args errors
+**Feature**: wrk --dep-replace with zero directory args and no --undo errors
 
 ```
 wrk --dep-replace
   -> non-zero
-  -> Error requires directory (or equivalent empty-path wording)
+  -> Error requires a directory or --undo
 ```
 
 ## Steps
