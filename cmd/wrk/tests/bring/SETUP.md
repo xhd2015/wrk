@@ -4,6 +4,8 @@
 
 ```
 # sole external-dep worktree mode: external/{basename}[-N] under parent; branch {token}-{date}[-N] on dep repo
+# path and branch -N are independent: path -N only when preferred name is occupied
+# (foreign worktree / plain dir / other); taken preferred branch does not bump path
 # parent = git toplevel when cwd is git; parent = abs(cwd) when cwd is plain non-git
 # soft SKIP (exit 0) when not a go module / no modules / not a dep / non-git cwd
 # git consumer: worktree + /external gitignore + abs path when worktree succeeds

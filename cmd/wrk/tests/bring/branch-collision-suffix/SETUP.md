@@ -1,12 +1,13 @@
 # Scenario
 
-**Feature**: external dep preferred branch pre-exists → joint path+branch `-1` (P2 collision; always new branch)
+**Feature**: external dep preferred branch pre-exists → path stays free basename; branch only `-1`
 
 ```
 # dep main has refs/heads/main-{date}; path external/mydep free
 consumer --bring mydep
-  -> path external/mydep-1
+  -> path external/mydep
   -> branch main-{date}-1 (no mydep- basename; -b new branch)
+  -> stderr warning: branch main-{date} exists; using main-{date}-1
 ```
 
 ## Steps

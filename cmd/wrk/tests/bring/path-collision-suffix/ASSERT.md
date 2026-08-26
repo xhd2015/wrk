@@ -3,7 +3,7 @@
 - Exit code 0.
 - Stdout (trimmed) equals `{consumerTop}/external/mydep-1`.
 - Plain occupied `{consumerTop}/external/mydep` remains (no Policy A reuse).
-- Branch in dep repo is `main-{WRK_DATE}-1` (joint path+branch `-N`).
+- Branch in dep repo is `main-{WRK_DATE}` (path occupied does not force branch `-N`).
 
 ## Exit Code
 
@@ -34,9 +34,9 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertGitFileIsWorktreeLink(t, wantPath)
 	assertWorktreeListContains(t, req.DepPath, wantPath)
 
-	wantBranch := branchName("main", wrkDate, 1)
-	assertBranchNotExists(t, req.DepPath, branchName("main", wrkDate, 0))
+	wantBranch := branchName("main", wrkDate, 0)
 	assertBranchExists(t, req.DepPath, wantBranch)
+	assertBranchNotExists(t, req.DepPath, branchName("main", wrkDate, 1))
 	assertBranchCheckedOutInWorktree(t, wantPath, wantBranch)
 	assertNotContains(t, resp.Stderr, "already exists under external/")
 	assertNotContains(t, resp.Stderr, "reusing")

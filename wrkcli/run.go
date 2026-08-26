@@ -3485,55 +3485,57 @@ func warnReuseExternal(basename string, paths []string) {
 }
 
 // planExternalWorktreePath is the read-only planner for an external dep
-// worktree: it resolves the dep's main repo, basename, branch base, path token,
-// date and consumer main repo, then runs the suffix loop
-// (externalCandidateNames + externalCandidateBlocked) to return the first
-// non-blocked candidate external worktree path. It performs NO writes: no
+// worktree: it resolves the dep's main repo, basename, path token, and date,
+// then picks an auto path and branch independently. It performs NO writes: no
 // MkdirAll(external/), no ensureGitignoreExternal, no createExternalWorktree.
 // It may call read-only git helpers (ShowToplevel, ResolveMainRepo, ReadBranch,
 // resolveNamingInputs) which only run git rev-parse / git symbolic-ref.
 //
 // Policy A: if any live linked worktree of depMain already exists under
-// {consumerTop}/external/, returns the lex-smallest path and emits reuse
-// warnings on stderr (shared by --bring and dry-run planners).
-func planExternalWorktreePath(consumerTop, depPath string) (externalPath string, err error) {
+// {consumerTop}/external/, returns the lex-smallest path, empty branch, and
+// emits reuse warnings on stderr (shared by --bring and dry-run planners).
+//
+// Auto path is external/{basename}[-N]. Path -N is only for an occupied
+// preferred name (foreign linked worktree, plain dir, or other occupant). A
+// taken preferred branch does not bump the path: branch walks {token}-{date}[-N]
+// on its own.
+func planExternalWorktreePath(consumerTop, depPath string) (externalPath, branch string, err error) {
 	depSource, err := worktree.ShowToplevel(depPath)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	depMain, err := worktree.ResolveMainRepo(depSource)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if existing, err := findExistingExternalForDep(consumerTop, depMain); err != nil {
-		return "", err
+		return "", "", err
 	} else if len(existing) > 0 {
 		warnReuseExternal(filepath.Base(depMain), existing)
-		return existing[0], nil
+		return existing[0], "", nil
 	}
 
 	baseBranch, err := worktree.ReadBranch(depPath)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	basename := filepath.Base(depMain)
 	_, pathToken, err := resolveNamingInputs(depPath, baseBranch)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	date := resolveWrkDate()
 
-	for suffix := 0; suffix < 100; suffix++ {
-		candidatePath, branch := externalCandidateNames(consumerTop, basename, pathToken, date, suffix)
-		// Branch-collision check runs against depMain: the external worktree's
-		// branch lives in the dep repo (see createExternalWorktree).
-		if externalCandidateBlocked(depMain, candidatePath, branch) {
-			continue
-		}
-		return candidatePath, nil
+	externalPath, err = pickExternalAutoPath(consumerTop, basename)
+	if err != nil {
+		return "", "", err
 	}
-	return "", fmt.Errorf("could not find available external worktree name after 99 attempts")
+	branch, err = pickExternalAutoBranch(depMain, pathToken, date)
+	if err != nil {
+		return "", "", err
+	}
+	return externalPath, branch, nil
 }
 
 // createExternalWorktreeForRepo materializes the external worktree for the dep
@@ -3548,7 +3550,7 @@ func planExternalWorktreePath(consumerTop, depPath string) (externalPath string,
 // worktree/branch. Non-git consumerTop (e.g. --bring from a plain dir) skips
 // ensureGitignoreExternal entirely.
 func createExternalWorktreeForRepo(consumerTop, depPath string) (externalPath string, err error) {
-	externalPath, err = planExternalWorktreePath(consumerTop, depPath)
+	externalPath, branch, err := planExternalWorktreePath(consumerTop, depPath)
 	if err != nil {
 		return "", err
 	}
@@ -3569,6 +3571,9 @@ func createExternalWorktreeForRepo(consumerTop, depPath string) (externalPath st
 	if st, err := os.Stat(externalPath); err == nil && st.IsDir() && worktree.IsLinked(externalPath) {
 		return externalPath, nil
 	}
+	if branch == "" {
+		return "", fmt.Errorf("wrk: internal: planned new external path without branch: %s", externalPath)
+	}
 
 	depSource, err := worktree.ShowToplevel(depPath)
 	if err != nil {
@@ -3578,29 +3583,8 @@ func createExternalWorktreeForRepo(consumerTop, depPath string) (externalPath st
 	if err != nil {
 		return "", err
 	}
-
-	baseBranch, err := worktree.ReadBranch(depPath)
-	if err != nil {
+	if err := createExternalWorktree(depMain, depPath, externalPath, branch); err != nil {
 		return "", err
-	}
-	basename := filepath.Base(depMain)
-	_, pathToken, err := resolveNamingInputs(depPath, baseBranch)
-	if err != nil {
-		return "", err
-	}
-	date := resolveWrkDate()
-
-	for suffix := 0; suffix < 100; suffix++ {
-		candidatePath, branch := externalCandidateNames(consumerTop, basename, pathToken, date, suffix)
-		if candidatePath != externalPath {
-			// planExternalWorktreePath already selected the first non-blocked
-			// candidate; later suffixes are never needed here.
-			continue
-		}
-		if err := createExternalWorktree(depMain, depPath, candidatePath, branch); err != nil {
-			return "", err
-		}
-		break
 	}
 	return externalPath, nil
 }
@@ -3623,7 +3607,7 @@ func createExternalWorktree(depMain, depPath, externalPath, branch string) error
 	}
 
 	// Always create a new branch from the dep's current tip. Callers must have
-	// already walked to a free branch name (externalCandidateBlocked).
+	// already walked to a free branch name (pickExternalAutoBranch).
 	// Use runGitWorktreeAdd so -v streams Preparing worktree / HEAD is now at.
 	cmd := gitCommand("-C", depMain, "worktree", "add", "-b", branch, externalPath, depBranch)
 	return runGitWorktreeAdd(cmd)
@@ -3732,26 +3716,50 @@ func findGoModDir(cwd, top string) (string, error) {
 	return "", fmt.Errorf("no go.mod found within %s", top)
 }
 
-func externalCandidateNames(consumerTop, basename, pathToken, date string, suffix int) (path, branch string) {
-	// Path is dep basename only (no token/date); branch is {token}-{date}[-N]
-	// with no dep basename prefix. Distinct deps live in separate git repos so
-	// same branch name across deps is fine; within one dep, joint path+branch
-	// -N via blocked loop (external/{basename}[-N]). Policy A reuses any live
-	// same-repo worktree under external/ before this naming runs.
-	name := basename
-	branch = pathToken + "-" + date
-	if suffix > 0 {
-		name = fmt.Sprintf("%s-%d", name, suffix)
-		branch = fmt.Sprintf("%s-%d", branch, suffix)
+// pickExternalAutoPath returns the first free external/{basename}[-N].
+// An occupied path blocks (foreign linked worktree, plain dir, file, etc.).
+// Same-dep linked worktrees under external/ are handled by Policy A before this
+// runs, so they are not recreated here.
+func pickExternalAutoPath(consumerTop, basename string) (string, error) {
+	for suffix := 0; suffix < 100; suffix++ {
+		path := externalAutoPath(consumerTop, basename, suffix)
+		if _, err := os.Stat(path); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("stat external path %s: %w", path, err)
+		}
+		return path, nil
 	}
-	return filepath.Join(consumerTop, "external", name), branch
+	return "", fmt.Errorf("could not find available external worktree path after 99 attempts")
 }
 
-func externalCandidateBlocked(mainRepo, wtPath, branch string) bool {
-	if _, err := os.Stat(wtPath); err == nil {
-		return true
+// pickExternalAutoBranch returns the first free {token}-{date}[-N] on depMain.
+// Path collisions do not affect the branch suffix. Warns on stderr when the
+// preferred name is taken and a -N form is chosen.
+func pickExternalAutoBranch(depMain, pathToken, date string) (string, error) {
+	preferred := pathToken + "-" + date
+	for suffix := 0; suffix < 100; suffix++ {
+		branch := preferred
+		if suffix > 0 {
+			branch = fmt.Sprintf("%s-%d", preferred, suffix)
+		}
+		if branchExists(depMain, branch) {
+			continue
+		}
+		if suffix > 0 {
+			fmt.Fprintf(os.Stderr, "wrk: warning: branch %s exists; using %s\n", preferred, branch)
+		}
+		return branch, nil
 	}
-	return branchExists(mainRepo, branch)
+	return "", fmt.Errorf("could not find available external branch name after 99 attempts")
+}
+
+func externalAutoPath(consumerTop, basename string, suffix int) string {
+	name := basename
+	if suffix > 0 {
+		name = fmt.Sprintf("%s-%d", name, suffix)
+	}
+	return filepath.Join(consumerTop, "external", name)
 }
 
 func runCreate(workDir string, origWd string, targetDir string, taskDesc string, noCd, forceCd bool, execArgs []string, ux createUXPlan, bring *bringApplyPlan) error {

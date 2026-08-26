@@ -1,12 +1,12 @@
 # Scenario
 
-**Feature**: preferred external path occupied (not a same-repo worktree) → joint path+branch `-1`
+**Feature**: preferred external path occupied (not a same-repo worktree) → path `-1`; branch stays preferred when free
 
 ```
 # external/mydep exists as a plain dir; preferred branch main-{date} free
 consumer --bring mydep
   -> path external/mydep-1
-  -> branch main-{date}-1 (joint -N; no same-repo Policy A reuse)
+  -> branch main-{date} (path and branch suffixes independent; no same-repo Policy A reuse)
 ```
 
 ## Steps
