@@ -46,6 +46,7 @@ wrk --tag-next --propagate-tags --dry-run
 - Pre-stage: source worktree; `--dir` invalid when composed.
 - `--propagate-tags`: bump consumer `go.mod` requires to source release tags (with `--tag-next` uses new tags; alone uses existing).
 - `--json` only for bare `--tag-next` (not with primary / `--propagate-tags`).
+- Before land, `--done` / `--merge-back` refresh **main** from its upstream (`fetch` + `rebase` onto `@{u}` or `origin/<branch>`); skip only when no remote exists. Main must be clean.
 - `--push` after `--done` / `--merge-back` publishes main (and tags). If `origin/<worktree-branch>` already exists and its tip is in the local branch, also lease-updates that ref so a standing PR is not left on pre-rebase commits.
 - Default auto-yes on `--done` / `--merge-back` / `--set-task`; `--confirm` for Y/n; `-y` still valid.
 
