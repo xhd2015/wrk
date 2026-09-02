@@ -19,7 +19,7 @@ Flow: **dashboard** or create → work → `--done` / `--merge-back` → optiona
 | Create | `wrk --new` · `wrk <basename> [-t 'task']` |
 | Finish | `wrk --done` (merge + remove) · `wrk --merge-back` (merge only) |
 
-`--new` is explicit create; create also runs with create-selecting args (`<dir>`, `-t` / `--task`). Bare `wrk` alone is **dashboard**, not create. `-t` / `--task` slugs branch/dir names. With create agent launch enabled, `--agent-runner codex|codex-tty|grok|grok-tty` overrides that launch for one invocation (`codex` and `grok` resolve to their `-tty` runners); it errors if the effective create UX does not open an agent. `--here` clears window/terminal UX and, when agent launch is on, prefers shell follow-up `cd` + `agent-run` in the current terminal (else nested shell like `--main`/`--cd` fallback).
+`--new` is explicit create; create also runs with create-selecting args (`<dir>`, `-t` / `--task`). Bare `wrk` alone is **dashboard**, not create. `-t` / `--task` slugs branch/dir names. With create agent launch enabled, `--agent-runner codex|codex-tty|grok|grok-tty` overrides that launch for one invocation (`codex` and `grok` resolve to their `-tty` runners); it errors if the effective create UX does not open an agent. `--here` clears window/terminal UX and, when agent launch is on, prefers shell follow-up `cd` + `agent-run` in the current terminal (else nested shell like `--main`/`--cd` fallback). With create+`--bring`, `--here` or `--no-new-terminal` suppresses bring plan / soft SKIP / external path lines (create path still prints) and ignores `-v` / `--verbose`.
 
 # Compose pipeline
 

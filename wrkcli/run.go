@@ -506,6 +506,11 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	}
 	ctx.eventArgs = extractEventArgs(args, remaining)
 
+	// Stay-in-terminal create UX: -v/--verbose would disturb the invoking
+	// terminal; treat it as unset when --here or --no-new-terminal is set.
+	if here || noNewTerminal {
+		verbose = false
+	}
 	setInvocationVerbose(verbose)
 	// Keep force color for main's FormatStderrError after Run returns (do not
 	// clear in defer — main prints err after Run exits).
@@ -1601,13 +1606,17 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 				return e
 			}
 		}
-		if len(bringPaths) > 1 {
+		// --here / --no-new-terminal: suppress bring plan/SKIP/external path lines
+		// so the stay-in-place terminal is not disturbed (create path still prints).
+		quietBring := here || noNewTerminal
+		if len(bringPaths) > 1 && !quietBring {
 			printBringPlan(bringPaths, resolved)
 		}
 		bringPlan = &bringApplyPlan{
 			args:     bringPaths,
 			resolved: resolved,
 			noDep:    noDep,
+			quiet:    quietBring,
 			withGo:   withGoFromCtx(ctx),
 		}
 	}
@@ -1689,6 +1698,7 @@ Flags:
   --github                        with --projects: only show projects whose origin is github.com
   --fetch                         with --projects or --status: fetch upstream before Remote: compare
   -v, --verbose                   log major git commands and go mod tidy to stderr
+                                  (ignored with --here / --no-new-terminal)
   --add <dir>                     manually record a main repository path
   --rm <dir>                      remove a recorded main repository path
   --where <basename>              look up saved project path(s) by basename (positional; also: wrk <basename> --where)
@@ -1701,6 +1711,7 @@ Flags:
                                    with --reinstall-local: reinstall from main repo modules;
                                    with pipeline stages: run activeRoot as main, no nested shell)
   --bring p1 p2                   spawn one or more dep worktrees under ./external (repeatable); with create, apply inside the new worktree
+                                  (with --here / --no-new-terminal: suppress bring plan, SKIP, and external path lines)
   --no-dep                        with --bring: worktree only; skip replace and tidy
   --reinstall-local [name...]     reinstall local module binaries already in GOBIN/GOPATH/bin
                                   (with names: install only those bins, exclusive path; skip binDir gate;
@@ -1752,9 +1763,12 @@ Flags:
   --agent-runner RUNNER           with create agent launch: codex→codex-tty, grok→grok-tty;
                                   accepts codex, codex-tty, grok, or grok-tty
   --no-new-window                 disable window UX for this run
-  --no-new-terminal               disable terminal UX for this run
+  --no-new-terminal               disable terminal UX for this run; with --bring, suppress bring
+                                  plan/SKIP/external path lines; ignore -v/--verbose
   --here                          create: no new window/terminal; with agent, prefer shell
-                                  follow-up cd + agent-run in this terminal (else nested shell)
+                                  follow-up cd + agent-run in this terminal (else nested shell);
+                                  with --bring, suppress bring plan/SKIP/external path lines;
+                                  ignore -v/--verbose
   --no-open-in-agent              disable agent UX for this run
   --no-config                     do not read $WRK_HOME/config.json for this run
   --exec <cmd> [args...]          after success, run command in the mode target directory
@@ -2902,7 +2916,7 @@ func runBring(workDir string, bringArgs []string, wrkHome string, rawArgs []stri
 		printBringPlan(bringArgs, resolved)
 	}
 
-	lastExternal, err := applyBringResolved(workDir, bringArgs, resolved, resolveErrs, noDep, withGoFromCtx(ctx))
+	lastExternal, err := applyBringResolved(workDir, bringArgs, resolved, resolveErrs, noDep, false, withGoFromCtx(ctx))
 	if err != nil {
 		return err
 	}
@@ -2916,6 +2930,7 @@ type bringApplyPlan struct {
 	args     []string
 	resolved []string
 	noDep    bool
+	quiet    bool // --here / --no-new-terminal: no plan/SKIP/external path lines
 	withGo   withgo.ResolveOptions
 }
 
@@ -2939,7 +2954,7 @@ func applyBringPlan(consumer string, bring *bringApplyPlan) error {
 	if bring == nil || len(bring.args) == 0 {
 		return nil
 	}
-	_, err := applyBringResolved(consumer, bring.args, bring.resolved, nil, bring.noDep, bring.withGo)
+	_, err := applyBringResolved(consumer, bring.args, bring.resolved, nil, bring.noDep, bring.quiet, bring.withGo)
 	return err
 }
 
@@ -2982,7 +2997,9 @@ func seedConsumerGoModFromSource(srcRoot, consumer string, bring *bringApplyPlan
 // gated deps (shared with --dep-replace). resolveErrs[i] is returned at that
 // index (exclusive bring defers unknown basenames to the apply loop). Compose
 // callers pass nil resolveErrs after failing closed on any preflight resolve error.
-func applyBringResolved(consumer string, bringArgs, resolved []string, resolveErrs []error, noDep bool, withGo withgo.ResolveOptions) (lastExternal string, err error) {
+// quiet suppresses will-bring callers' plan (already gated), soft SKIP notices,
+// and per-dep external abs path lines on stdout (create path remains the contract).
+func applyBringResolved(consumer string, bringArgs, resolved []string, resolveErrs []error, noDep, quiet bool, withGo withgo.ResolveOptions) (lastExternal string, err error) {
 	var replaceDeps []depReplaceDep
 
 	for i := range bringArgs {
@@ -2995,7 +3012,7 @@ func applyBringResolved(consumer string, bringArgs, resolved []string, resolveEr
 			// returns at the first resolveErrs[i] above before reaching them.
 			return lastExternal, fmt.Errorf("wrk: internal: unresolved --bring path: %s", bringArgs[i])
 		}
-		externalPath, deps, err := bringOneFromResolved(consumer, depPath, noDep)
+		externalPath, deps, err := bringOneFromResolved(consumer, depPath, noDep, quiet)
 		if err != nil {
 			return lastExternal, err
 		}
@@ -3005,7 +3022,9 @@ func applyBringResolved(consumer string, bringArgs, resolved []string, resolveEr
 		if err != nil {
 			return lastExternal, fmt.Errorf("resolve external worktree path: %w", err)
 		}
-		fmt.Println(absPath)
+		if !quiet {
+			fmt.Println(absPath)
+		}
 		lastExternal = absPath
 	}
 
@@ -3091,7 +3110,8 @@ func preflightResolveBringArgs(bringArgs []string, wrkHome string, rawArgs []str
 // targets for the shared applyStackAbsoluteReplace pass. Soft-SKIP notices
 // leave the worktree in place with an empty dep list. Does not call
 // resolveDirArg — preflight already resolved and confirmed basenames.
-func bringOneFromResolved(workDir, depPath string, noDep bool) (externalPath string, deps []depReplaceDep, err error) {
+// quiet suppresses soft SKIP notices (hard errors still return).
+func bringOneFromResolved(workDir, depPath string, noDep, quiet bool) (externalPath string, deps []depReplaceDep, err error) {
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve cwd: %w", err)
@@ -3128,7 +3148,9 @@ func bringOneFromResolved(workDir, depPath string, noDep bool) (externalPath str
 		if err != nil {
 			return "", nil, err
 		}
-		fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a git repository\n", cwd)
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a git repository\n", cwd)
+		}
 		return externalPath, nil, nil
 	}
 
@@ -3144,7 +3166,9 @@ func bringOneFromResolved(workDir, depPath string, noDep bool) (externalPath str
 		if err != nil {
 			return "", nil, err
 		}
-		fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a go module\n", depPath)
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a go module\n", depPath)
+		}
 		return externalPath, nil, nil
 	}
 
@@ -3152,13 +3176,17 @@ func bringOneFromResolved(workDir, depPath string, noDep bool) (externalPath str
 	if err != nil {
 		return "", nil, err
 	}
-	printStderrWarnings(warnings)
+	if !quiet {
+		printStderrWarnings(warnings)
+	}
 	if len(consumers) == 0 {
 		externalPath, err = createExternalWorktreeForRepo(consumerTop, depPath)
 		if err != nil {
 			return "", nil, err
 		}
-		fmt.Fprintf(os.Stderr, "SKIP local dep replacement: consumer has no Go modules\n")
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "SKIP local dep replacement: consumer has no Go modules\n")
+		}
 		return externalPath, nil, nil
 	}
 
@@ -3168,7 +3196,9 @@ func bringOneFromResolved(workDir, depPath string, noDep bool) (externalPath str
 		if err != nil {
 			return "", nil, err
 		}
-		fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a dependency of any consumer module\n", depPath)
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "SKIP local dep replacement: %s is not a dependency of any consumer module\n", depPath)
+		}
 		return externalPath, nil, nil
 	}
 
