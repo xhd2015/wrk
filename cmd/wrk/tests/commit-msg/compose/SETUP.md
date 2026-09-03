@@ -1,21 +1,25 @@
 # Scenario
 
-**Feature**: flag-layer compose of manual --commit -m with primary partners
+**Feature**: compose of manual --commit -m with primary/post partners
 
 ```
-# same compose partners as gen-commit-msg (sample: --done)
+# flag-layer (sample: --done)
 wrk --commit -m "x" --done [--dry-run]
   -> must NOT stderr "mutually exclusive"
   -> may later fail: not a linked worktree / nothing staged
+
+# clean-tree soft-skip only when -m already matches HEAD
+wrk --commit -m "initial" --exec true   # HEAD is "initial" → notice skip
+wrk --commit -m "feat: other" --exec true  # differs → still nothing-to-commit error
 ```
 
 ## Preconditions
 
-- Flag-layer leaves only (done-compose pattern). Full multi-stage apply is out of scope.
+- Flag-layer leaves use `initGitRepoOnMain`. Soft-skip leaves use `initCleanGitRepo`.
 
 ## Steps
 
-1. Leaves init main repo via `initGitRepoOnMain` and set Args.
+1. Leaves init a git fixture and set Args.
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {

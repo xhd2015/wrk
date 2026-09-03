@@ -1555,7 +1555,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	// Bare manual commit: --commit -m/--message (no pipeline partners).
 	if manualCommit {
 		ctx.command = "commit"
-		return runManualCommitStage(workDir, manualMessage, noVerify, addAll, dryRun)
+		return runManualCommitStage(workDir, manualMessage, noVerify, addAll, dryRun, false)
 	}
 	task := ""
 	if taskDesc != nil {
@@ -2296,13 +2296,15 @@ func runActiveRootPipeline(workDir, wrkHome string, genCommitMsg bool, genCommit
 	}
 
 	if genCommitMsg {
-		if err := runGenCommitMsgStage(activeRoot, genCommitArgs, dryRun); err != nil {
+		// Soft-skip empty index: later stages remain in this pipeline.
+		if err := runGenCommitMsgStage(activeRoot, genCommitArgs, dryRun, true); err != nil {
 			return err
 		}
 		printed = true
 	}
 	if manualCommit {
-		if err := runManualCommitStage(activeRoot, manualMessage, noVerify, addAll, dryRun); err != nil {
+		// Soft-skip empty index only when -m already matches HEAD.
+		if err := runManualCommitStage(activeRoot, manualMessage, noVerify, addAll, dryRun, true); err != nil {
 			return err
 		}
 		printed = true

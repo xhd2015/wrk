@@ -43,7 +43,7 @@ wrk --add-all --commit -m '…' --pr --title '…' --comment '…'
 wrk --tag-next --propagate-tags --dry-run
 ```
 
-- Pre-stage: source worktree; `--dir` invalid when composed.
+- Pre-stage: source worktree; `--dir` invalid when composed. Clean tree: `--gen-commit-msg --commit` soft-skips with `notice: worktree clean, skip commit` when later stages remain; bare gen-commit still errors. Manual `--commit -m` soft-skips only when the message already matches HEAD (else still errors).
 - `--propagate-tags`: bump consumer `go.mod` requires to source release tags (with `--tag-next` uses new tags; alone uses existing).
 - `--json` only for bare `--tag-next` (not with primary / `--propagate-tags`).
 - Before land, `--done` / `--merge-back` refresh **main** from its upstream (`fetch` + `rebase` onto `@{u}` or `origin/<branch>`); skip only when no remote exists. Main must be clean.

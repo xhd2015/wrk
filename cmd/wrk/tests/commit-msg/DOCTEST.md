@@ -63,7 +63,9 @@ commit-msg/
 │   └── refuse/                              # multi-wt same branch → refuse
 └── compose/
     ├── allow-done/                          # --commit -m --done not mutex
-    └── allow-done-dry-run/                  # + --dry-run flag-layer accept
+    ├── allow-done-dry-run/                  # + --dry-run flag-layer accept
+    ├── clean-skip-when-msg-matches-head/    # clean + -m==HEAD + --exec → notice skip
+    └── clean-still-fail-when-msg-differs/   # clean + -m≠HEAD + --exec → still error
 ```
 
 ## Test Case Index
@@ -87,6 +89,8 @@ commit-msg/
 | S8 | shared-branch/refuse | multi-wt + `--commit -m "x"` → refuse |
 | C1 | compose/allow-done | `--commit -m "x" --done` not mutually exclusive |
 | C2 | compose/allow-done-dry-run | `--commit -m "x" --done --dry-run` flag-layer accept |
+| C3 | compose/clean-skip-when-msg-matches-head | clean + `-m`==HEAD + `--exec` → notice skip; exit 0 |
+| C4 | compose/clean-still-fail-when-msg-differs | clean + `-m`≠HEAD + `--exec` → non-zero; no skip notice |
 
 ## How to Run
 

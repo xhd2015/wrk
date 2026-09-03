@@ -28,6 +28,9 @@ staged + FAKE_OPENCODE_MOCK_CONFIG + --agent-runner-binary <fake-opencode>
 # validation / mutex vs pipeline compose
 wrk --gen-commit-msg --status              -> mutually exclusive
 wrk --gen-commit-msg --sync [--dry-run]     -> allowed multi-stage (activeRoot pipeline)
+# clean compose soft-skip / bare hard-fail
+wrk --add-all --gen-commit-msg --commit --exec true -> notice: worktree clean, skip commit
+wrk --add-all --gen-commit-msg --commit             -> non-zero; no staged
 wrk --gen-commit-msg --no-verify           -> requires --commit
 wrk --gen-commit-msg --dry-run --agent-runner codex
   -> unsupported agent runner
@@ -386,6 +389,14 @@ func stageOneTextFile(t *testing.T, req *Request) {
 	req.RepoDir = repo
 }
 
+// initCleanGitRepo inits hooks-disabled repo with only the seed commit (nothing staged).
+func initCleanGitRepo(t *testing.T, req *Request) {
+	t.Helper()
+	repo := filepath.Join(req.WorkRoot, "repo")
+	initGitRepo(t, repo)
+	req.RepoDir = repo
+}
+
 // initGitRepoWithFailingPreCommitHook creates a repo with a pre-commit hook that exits 1.
 // Initial commit uses hooks disabled; then hooksPath is pointed at .git/hooks with a failing pre-commit.
 func initGitRepoWithFailingPreCommitHook(t *testing.T, dir string) {
@@ -531,6 +542,7 @@ func ensureGenCommitMsgHelpersUsed() {
 	_ = stageBinaryAndTextFile
 	_ = stageOneTextFileWithFailingPreCommit
 	_ = initGitRepoWithFailingPreCommitHook
+	_ = initCleanGitRepo
 	_ = gitHEADSubject
 	_ = gitStagedNames
 	_ = mockMessageB

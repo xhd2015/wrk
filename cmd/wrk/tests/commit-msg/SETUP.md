@@ -19,10 +19,13 @@ staged -> wrk --commit -m "feat: x" [--no-verify] [--add-all]
 two checkouts of same branch + staged
   -> wrk --commit -m "x" -> Error: refuse commit
 
-# compose (flag layer; same partners as gen-commit-msg)
+# compose (same partners as gen-commit-msg)
 wrk --commit -m "x" --done [--dry-run]
   -> must NOT stderr "mutually exclusive"
   -> may later fail (not a linked worktree / nothing staged)
+# clean + compose: soft-skip only when -m already matches HEAD
+wrk --commit -m "initial" --exec true   -> notice: worktree clean, skip commit
+wrk --commit -m "feat: other" --exec true -> still nothing to commit
 
 # help
 wrk -h -> documents -m/--message, requires --commit, exclusive with gen-commit-msg

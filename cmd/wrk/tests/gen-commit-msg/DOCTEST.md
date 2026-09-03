@@ -65,7 +65,10 @@ gen-commit-msg/
 │   └── no-verify/                     # failing pre-commit + --commit --no-verify → succeeds
 ├── mutual-exclusion/
 │   ├── with-status/                   # --gen-commit-msg --status → mutex error
-│   └── with-sync/                     # bare --gen-commit-msg --sync → mutex (no primary)
+│   └── with-sync/                     # bare --gen-commit-msg --sync → allowed compose
+├── compose/
+│   ├── clean-skip-with-exec/          # clean + --commit --exec → notice skip; exit 0
+│   └── bare-clean-still-fails/        # clean + bare --commit → non-zero; no skip notice
 └── validation/
     ├── no-verify-requires-commit/     # --no-verify without --commit → error
     └── unknown-agent-runner/          # --agent-runner codex → unsupported
@@ -85,7 +88,9 @@ gen-commit-msg/
 | C1 | commit/succeeds | `--commit` + fake-opencode → HEAD subject `feat: add feature` |
 | C2 | commit/no-verify | failing pre-commit + `--commit --no-verify` → subject `feat: skip hooks` |
 | M1 | mutual-exclusion/with-status | `--gen-commit-msg --status` → non-zero; mutually exclusive |
-| M2 | mutual-exclusion/with-sync | bare `--gen-commit-msg --sync` → non-zero; mutually exclusive (GREEN pin) |
+| M2 | mutual-exclusion/with-sync | bare `--gen-commit-msg --sync` → allowed multi-stage compose |
+| P1 | compose/clean-skip-with-exec | clean + `--add-all --gen-commit-msg --commit --exec true` → notice skip; exit 0 |
+| P2 | compose/bare-clean-still-fails | clean + bare `--add-all --gen-commit-msg --commit` → non-zero; no skip notice |
 | V1 | validation/no-verify-requires-commit | `--no-verify` alone → non-zero; requires --commit |
 | V2 | validation/unknown-agent-runner | `--dry-run --agent-runner codex` → unsupported runner |
 

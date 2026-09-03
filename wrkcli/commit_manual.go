@@ -39,9 +39,46 @@ func manualCommitShellQuote(s string) string {
 	).Replace(s) + "'"
 }
 
+const noticeWorktreeCleanSkipCommit = "notice: worktree clean, skip commit\n"
+
+// normalizeCommitMessage trims trailing whitespace so -m text matches git %B.
+func normalizeCommitMessage(s string) string {
+	return strings.TrimRight(s, " \t\r\n")
+}
+
+// headCommitMessage returns HEAD's full message (%B), normalized.
+func headCommitMessage(workDir string) (string, error) {
+	out, err := gitOutputDir(workDir, "log", "-1", "--pretty=%B")
+	if err != nil {
+		return "", err
+	}
+	return normalizeCommitMessage(out), nil
+}
+
+// manualCommitMessageMatchesHEAD reports whether message equals HEAD's full
+// commit message (trailing whitespace ignored).
+func manualCommitMessageMatchesHEAD(workDir, message string) bool {
+	head, err := headCommitMessage(workDir)
+	if err != nil {
+		return false
+	}
+	return normalizeCommitMessage(message) == head
+}
+
+// isNoStagedCommitErr reports empty-index failures from gen-commit-msg or
+// the wrk-owned manual commit path.
+func isNoStagedCommitErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "no staged")
+}
+
 // runManualCommitStage is the wrk-owned commit path for --commit -m/--message.
 // Order: refuse shared branch → optional add-all → require staged → dry-run would-line or real commit.
-func runManualCommitStage(workDir, message string, noVerify, addAll, dryRun bool) error {
+// When allowEmptySkip is true (compose partners remain) and the index is empty,
+// soft-skip only if message already matches HEAD; otherwise still hard-fail.
+func runManualCommitStage(workDir, message string, noVerify, addAll, dryRun, allowEmptySkip bool) error {
 	if err := refuseCommitIfBranchShared(workDir); err != nil {
 		return err
 	}
@@ -64,6 +101,10 @@ func runManualCommitStage(workDir, message string, noVerify, addAll, dryRun bool
 		return fmt.Errorf("failed to list staged files: %w", err)
 	}
 	if len(staged) == 0 {
+		if allowEmptySkip && manualCommitMessageMatchesHEAD(workDir, message) {
+			fmt.Fprint(os.Stderr, noticeWorktreeCleanSkipCommit)
+			return nil
+		}
 		return fmt.Errorf("no staged changes to commit")
 	}
 
@@ -90,9 +131,10 @@ func runManualCommitStage(workDir, message string, noVerify, addAll, dryRun bool
 
 // runManualCommitPreStage runs the manual commit stage before --done/--merge-back
 // or as stage 1 of multi-stage compose. enabled is false when not using -m/--message.
+// Always allowEmptySkip: a primary/post stage follows.
 func runManualCommitPreStage(workDir string, enabled bool, message string, noVerify, addAll, dryRun bool) error {
 	if !enabled {
 		return nil
 	}
-	return runManualCommitStage(workDir, message, noVerify, addAll, dryRun)
+	return runManualCommitStage(workDir, message, noVerify, addAll, dryRun, true)
 }

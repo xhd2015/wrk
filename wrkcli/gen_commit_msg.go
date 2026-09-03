@@ -145,13 +145,15 @@ func runGenCommitMsgPreStage(workDir string, enabled bool, genArgs []string, dry
 		return fmt.Errorf("wrk: --dir is not valid with --gen-commit-msg when used with %s", primaryFlag)
 	}
 
-	return runGenCommitMsgStage(workDir, genArgs, dryRun)
+	return runGenCommitMsgStage(workDir, genArgs, dryRun, true)
 }
 
 // runGenCommitMsgStage runs library gen-commit-msg against workDir (activeRoot).
 // Used as stage 1 of multi-stage compose (with or without done/merge-back).
 // Does not require --commit (caller / library may still fail later).
-func runGenCommitMsgStage(workDir string, genArgs []string, dryRun bool) error {
+// When allowEmptySkip is true and the index is empty, soft-skips with a notice
+// so later pipeline stages can continue (bare gen-commit keeps hard-fail).
+func runGenCommitMsgStage(workDir string, genArgs []string, dryRun, allowEmptySkip bool) error {
 	if genArgsHasFlag(genArgs, "--dir") {
 		return fmt.Errorf("wrk: --dir is not valid with --gen-commit-msg when used in multi-stage compose")
 	}
@@ -172,11 +174,18 @@ func runGenCommitMsgStage(workDir string, genArgs []string, dryRun bool) error {
 	if err == nil {
 		return nil
 	}
+	if !isNoStagedCommitErr(err) {
+		return err
+	}
 	// Dry-run compose with empty index (common for dashboard recipe defaults):
 	// library prints would: lines then errors "no staged". Continue so primary
-	// dry-run plan can still run; real (non-dry) runs still fail.
-	if dryRun && strings.Contains(err.Error(), "no staged") {
+	// dry-run plan can still run.
+	if dryRun {
 		fmt.Fprintf(os.Stderr, "would: skip gen-commit-msg (no staged changes)\n")
+		return nil
+	}
+	if allowEmptySkip {
+		fmt.Fprint(os.Stderr, noticeWorktreeCleanSkipCommit)
 		return nil
 	}
 	return err

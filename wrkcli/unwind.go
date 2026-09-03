@@ -1119,12 +1119,14 @@ func applyUnwindPeelOne(
 			// Stage only when --add-all is in GenCommitArgs (library honors
 			// it). Do not unconditional git add -A before gen-commit so
 			// untracked dirt is not forced into the AI commit.
-			if err := runGenCommitMsgStage(m.Path, flags.GenCommitArgs, false); err != nil {
+			// allowEmptySkip=false so this path still receives "no staged" and
+			// can auto-commit remaining porcelain before land.
+			if err := runGenCommitMsgStage(m.Path, flags.GenCommitArgs, false, false); err != nil {
 				// Empty index after pinReady (or no feature dirt): soft-skip
 				// gen-commit even with --add-all when worktree is clean so land
 				// can proceed. If still dirty, auto-commit remaining porcelain.
 				// Other gen-commit errors remain hard failures.
-				if !isNoStagedGenCommitErr(err) {
+				if !isNoStagedCommitErr(err) {
 					return err
 				}
 				if err := autoCommitIfDirty(m.Path); err != nil {
@@ -1345,14 +1347,10 @@ func pickPeelMembersByLabel(members []StackMember) map[string]StackMember {
 	return out
 }
 
-// isNoStagedGenCommitErr reports the library "no staged changes" failure so
-// unwind can soft-skip AI gen-commit when the index is empty (including after
-// pinReady with --add-all when the worktree is clean).
+// isNoStagedGenCommitErr is kept as a thin alias for callers/tests that still
+// name the gen-commit empty-index case; prefer isNoStagedCommitErr.
 func isNoStagedGenCommitErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "no staged")
+	return isNoStagedCommitErr(err)
 }
 
 // autoCommitIfDirty stages and commits porcelain dirt so --done MergeBack can
