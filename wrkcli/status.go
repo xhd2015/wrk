@@ -8,13 +8,13 @@ import (
 	"strconv"
 	"strings"
 
-	gitcmd "github.com/xhd2015/dot-pkgs/go-pkgs/git/cmd"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/checkout"
+	gitcmd "github.com/xhd2015/dot-pkgs/go-pkgs/git/cmd"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/scan_repo"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/status"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
-	"github.com/xhd2015/wrk/wrkcli/storage"
 	"github.com/xhd2015/gitops/git"
+	"github.com/xhd2015/wrk/wrkcli/storage"
 )
 
 var wrkCheckoutOpts = checkout.Options{
@@ -27,28 +27,8 @@ type statusBlockPrintOpts struct {
 }
 
 // statusDirLine formats a Dir: value relative to invocation cwd.
-// Rel fail or more than two leading ".." segments → absolute NormalizePath.
 func statusDirLine(displayCwd, repoPath string) string {
-	base := storage.NormalizePath(displayCwd)
-	target := storage.NormalizePath(repoPath)
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return target
-	}
-	rel = filepath.Clean(rel)
-	slash := filepath.ToSlash(rel)
-	leading := 0
-	for _, p := range strings.Split(slash, "/") {
-		if p == ".." {
-			leading++
-			continue
-		}
-		break
-	}
-	if leading > 2 {
-		return target
-	}
-	return slash
+	return storage.DirLine(displayCwd, repoPath)
 }
 
 func sameNormalizedPath(a, b string) bool {

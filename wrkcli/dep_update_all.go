@@ -10,6 +10,7 @@ import (
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/update"
 	"github.com/xhd2015/wrk/wrkcli/storage"
+	"github.com/xhd2015/wrk/wrkcli/unwind"
 )
 
 // DepUpdateAllAction is one planned pin under --dep-update --all.
@@ -54,7 +55,7 @@ func PlanDepUpdateAll(workDir, wrkHome string) (*DepUpdateAllPlan, error) {
 		return nil, fmt.Errorf("wrk: %s is not a git repository", cwd)
 	}
 
-	stack, err := CollectStackInventory(cwd)
+	stack, err := unwind.CollectStackInventory(cwd)
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "wrk:") {
 			return nil, err

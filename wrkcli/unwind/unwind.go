@@ -1,4 +1,4 @@
-package wrkcli
+package unwind
 
 import (
 	"context"
@@ -32,8 +32,8 @@ type StackMember struct {
 // RepoEdge is a depends-on edge in the stack repo DAG: From depends on To
 // (module require/replace contracted to main-repo labels).
 type RepoEdge struct {
-	From string // consumer label
-	To   string // dependency label
+	From string `json:"from"` // consumer label
+	To   string `json:"to"`   // dependency label
 }
 
 // UnwindFlags are ship/land modifiers composed with --unwind.
@@ -86,6 +86,7 @@ type StackInventory struct {
 	Members        []StackMember
 	SyntheticEdges []RepoEdge // C→D when follow maps consumer C into dep checkout D
 	Warnings       []string   // warning: lines (missing/non-git replaces; skipped broken nested checkouts)
+	scans          map[string][]scan.Module
 }
 
 // BuildStackInventory discovers the checkout stack under workDir: primary git
@@ -149,7 +150,7 @@ func CollectStackInventory(workDir string) (StackInventory, error) {
 		addSeed(r.Path)
 	}
 
-	paths, pathEdges, expandWarnings, err := expandStackViaLocalReplaces(seed)
+	paths, pathEdges, expandWarnings, scans, err := expandStackViaLocalReplaces(seed)
 	if err != nil {
 		return empty, err
 	}
@@ -188,6 +189,7 @@ func CollectStackInventory(workDir string) (StackInventory, error) {
 		Members:        members,
 		SyntheticEdges: pathEdgesToRepoEdges(members, pathEdges),
 		Warnings:       warnings,
+		scans:          scans,
 	}, nil
 }
 
@@ -201,7 +203,7 @@ type stackPathEdge struct {
 // filesystem replaces on every Go module under each known checkout. Intra-repo
 // targets (toplevel already in the set) are not re-added; missing/non-git
 // targets yield soft warnings and are skipped.
-func expandStackViaLocalReplaces(seed []string) (paths []string, pathEdges []stackPathEdge, warnings []string, err error) {
+func expandStackViaLocalReplaces(seed []string) (paths []string, pathEdges []stackPathEdge, warnings []string, scans map[string][]scan.Module, err error) {
 	seen := make(map[string]struct{}, len(seed))
 	queue := make([]string, 0, len(seed))
 	addPath := func(p string) bool {
@@ -235,10 +237,14 @@ func expandStackViaLocalReplaces(seed []string) (paths []string, pathEdges []sta
 
 	for qi := 0; qi < len(queue); qi++ {
 		checkout := queue[qi]
-		scanned, scanErr := scan.Scan(checkout, scan.Options{})
+		scanned, scanErr := scanModules(checkout)
 		if scanErr != nil {
-			return nil, nil, nil, scanErr
+			return nil, nil, nil, nil, scanErr
 		}
+		if scans == nil {
+			scans = make(map[string][]scan.Module)
+		}
+		scans[checkout] = scanned
 		for _, sm := range scanned {
 			modDir := checkout
 			if sm.Dir != "" && sm.Dir != "." {
@@ -281,12 +287,15 @@ func expandStackViaLocalReplaces(seed []string) (paths []string, pathEdges []sta
 			}
 		}
 	}
-	return paths, pathEdges, warnings, nil
+	if scans == nil {
+		scans = make(map[string][]scan.Module)
+	}
+	return paths, pathEdges, warnings, scans, nil
 }
 
-// resolveLocalReplacePath resolves a local filesystem replace NewPath against
+// ResolveLocalReplacePath resolves a local filesystem replace NewPath against
 // the owning module directory (not necessarily the repo root).
-func resolveLocalReplacePath(modDir, newPath string) (string, error) {
+func ResolveLocalReplacePath(modDir, newPath string) (string, error) {
 	if newPath == "" {
 		return "", fmt.Errorf("empty replace path")
 	}
@@ -294,6 +303,10 @@ func resolveLocalReplacePath(modDir, newPath string) (string, error) {
 		return filepath.Clean(newPath), nil
 	}
 	return filepath.Clean(filepath.Join(modDir, newPath)), nil
+}
+
+func resolveLocalReplacePath(modDir, newPath string) (string, error) {
+	return ResolveLocalReplacePath(modDir, newPath)
 }
 
 // pathEdgesToRepoEdges maps checkout-path synthetic edges to peel labels.
@@ -368,7 +381,7 @@ func stackCheckoutDirty(path string) (bool, error) {
 // that cannot run git status (broken gitdir, etc.).
 func formatSkipNestedCheckoutWarning(root, path string, err error) string {
 	return fmt.Sprintf("warning: skipping nested checkout %s: %s",
-		statusDirLine(root, path), compactStackCheckoutErr(err))
+		storage.DirLine(root, path), compactStackCheckoutErr(err))
 }
 
 // compactStackCheckoutErr shortens git status failures for warning text.
@@ -395,6 +408,10 @@ func compactStackCheckoutErr(err error) string {
 // BuildRepoDAG contracts module require/replace edges among stack-owned modules
 // into a repo-level DAG keyed by peel labels. Edge From→To means From depends on To.
 func BuildRepoDAG(members []StackMember) ([]RepoEdge, error) {
+	return buildRepoDAG(members, nil)
+}
+
+func buildRepoDAG(members []StackMember, scans map[string][]scan.Module) ([]RepoEdge, error) {
 	// module path → label (first owner wins; fixtures are single-module repos).
 	modOwner := make(map[string]string)
 	type modRec struct {
@@ -405,7 +422,7 @@ func BuildRepoDAG(members []StackMember) ([]RepoEdge, error) {
 	var mods []modRec
 
 	for _, m := range members {
-		scanned, err := scan.Scan(m.Path, scan.Options{})
+		scanned, err := scanModulesCached(m.Path, scans)
 		if err != nil {
 			return nil, err
 		}
@@ -670,11 +687,21 @@ func ValidateUnwindFlags(plan *UnwindPlan, flags UnwindFlags) error {
 // Ship tail (--push / --sync): planned once after peels/cascade (not under each
 // peel), matching applyUnwindShipTail — push then sync per touched main.
 func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string, flags ...UnwindFlags) string {
-	var b strings.Builder
 	var f UnwindFlags
 	if len(flags) > 0 {
 		f = flags[0]
 	}
+	var cascade *UnwindCascadePlan
+	var nodes []UnwindGraphModuleNode
+	var modEdges []UnwindGraphModuleEdge
+	if f.TagNext && len(members) > 0 {
+		cascade, nodes, modEdges = planCascadeOnce(members)
+	}
+	return formatUnwindDryRun(plan, members, workDir, f, cascade, nodes, modEdges)
+}
+
+func formatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string, f UnwindFlags, cascade *UnwindCascadePlan, nodes []UnwindGraphModuleNode, modEdges []UnwindGraphModuleEdge) string {
+	var b strings.Builder
 	byLabel := pickPeelMembersByLabel(members)
 	addAll := genArgsHasFlag(f.GenCommitArgs, "--add-all")
 	b.WriteString("==== unwind (dry-run) ====\n")
@@ -731,25 +758,36 @@ func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string,
 	if plan != nil {
 		if f.TagNext && len(members) > 0 {
 			// B1 interleave: early peels → cascade → deferred peels (same as apply).
-			early, deferred := splitPeelOrderB1(plan.PeelOrder, members)
+			// One module-graph + tagscope pass (do not PlanUnwindCascade twice).
+			early, deferred := splitPeelOrderB1(plan.PeelOrder, members, cascade, nodes, modEdges)
+			if len(early) > 0 {
+				b.WriteString("---- early peels ----\n")
+			}
 			writePeels(early)
-			// Cascade errors are soft: peel plan still prints; empty cascade on failure.
-			if cascade, err := PlanUnwindCascade(members); err == nil {
-				b.WriteString(formatUnwindCascadeDryRun(cascade))
+			if cas := formatUnwindCascadeDryRun(cascade); cas != "" {
+				b.WriteString("---- cascade ----\n")
+				b.WriteString(cas)
+			}
+			if len(deferred) > 0 {
+				b.WriteString("---- deferred peels ----\n")
 			}
 			writePeels(deferred)
 		} else {
 			// Legacy peel-only (or cascade unavailable without members).
 			writePeels(plan.PeelOrder)
 		}
-	} else if f.TagNext && len(members) > 0 {
-		if cascade, err := PlanUnwindCascade(members); err == nil {
-			b.WriteString(formatUnwindCascadeDryRun(cascade))
+	} else if f.TagNext && cascade != nil {
+		if cas := formatUnwindCascadeDryRun(cascade); cas != "" {
+			b.WriteString("---- cascade ----\n")
+			b.WriteString(cas)
 		}
 	}
 
 	// Ship tail: once per planned peel main (push then sync), before reinstall.
 	if f.Push || f.Sync {
+		if f.TagNext {
+			b.WriteString("---- ship ----\n")
+		}
 		if len(shipMainLabels) == 0 && plan != nil {
 			for _, label := range plan.PeelOrder {
 				noteShipLabel(label)
@@ -783,7 +821,7 @@ func FormatUnwindDryRun(plan *UnwindPlan, members []StackMember, workDir string,
 // peelDisplayPath formats a peel checkout path for dry-run/apply banners.
 // Same policy as statusDirLine (slash form; abs if Rel fails or leading ".." > 2).
 func peelDisplayPath(workDir, checkoutPath string) string {
-	return statusDirLine(workDir, checkoutPath)
+	return storage.DirLine(workDir, checkoutPath)
 }
 
 // formatLeaveUncommittedLine is the locked dry-run leave-N vocabulary.
@@ -820,7 +858,7 @@ func countNotFullyStagedPaths(repoPath string) (int, error) {
 // runUnwind implements wrk --unwind [flags]. Dry-run prints the free-first plan;
 // apply peels free-first with explicit ship/land flags and pins consumers.
 // --show-graph / --verify are read-only early paths (no ValidateUnwindFlags / ApplyUnwind).
-func runUnwind(workDir string, flags UnwindFlags) error {
+func runUnwind(workDir, wrkHome string, flags UnwindFlags) error {
 	if flags.ShowGraph {
 		if flags.Color && flags.NoColor {
 			return fmt.Errorf("wrk: --color and --no-color are mutually exclusive")
@@ -842,37 +880,26 @@ func runUnwind(workDir string, flags UnwindFlags) error {
 		}
 		return runUnwindVerify(workDir, flags.JSON, colorOn)
 	}
-	wrkHome, err := resolveWrkHome()
-	if err != nil {
-		return err
-	}
-	inv, err := CollectStackInventory(workDir)
+	snap, err := CollectSnapshot(workDir, SnapshotOpts{Cascade: flags.TagNext})
 	if err != nil {
 		return err
 	}
 	// Soft follow warnings (missing/non-git local replace targets) on stderr.
-	for _, w := range inv.Warnings {
+	for _, w := range snap.Inv.Warnings {
 		msg := w
 		if !strings.HasPrefix(msg, "warning:") && !strings.HasPrefix(msg, "Warning:") {
 			msg = "warning: " + msg
 		}
 		fmt.Fprintln(os.Stderr, msg)
 	}
-	members := inv.Members
-	edges, err := BuildRepoDAG(members)
-	if err != nil {
-		return err
-	}
-	edges = mergeRepoEdges(edges, inv.SyntheticEdges)
-	plan, err := PlanUnwind(members, edges)
-	if err != nil {
-		return err
-	}
+	members := snap.Inv.Members
+	edges := snap.RepoEdges
+	plan := snap.Peel
 	if err := ValidateUnwindFlags(plan, flags); err != nil {
 		return err
 	}
 	if flags.DryRun {
-		_, err = fmt.Fprint(os.Stdout, FormatUnwindDryRun(plan, members, workDir, flags))
+		_, err = fmt.Fprint(os.Stdout, formatUnwindDryRun(plan, members, workDir, flags, snap.Cascade, snap.ModuleNodes, snap.ModuleEdges))
 		return err
 	}
 	return ApplyUnwind(workDir, wrkHome, members, edges, plan, flags)
@@ -948,7 +975,8 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 		// droppable external replace remains (D7 separate pin then feature commit).
 		// Pure pin-consumer TagNext waits until after those peels so the
 		// consumer self-tag lands at main HEAD (not pre-feature cascade tip).
-		early, deferred := splitPeelOrderB1(plan.PeelOrder, members)
+		cascade, nodes, modEdges := planCascadeOnceCached(members, tagCache)
+		early, deferred := splitPeelOrderB1(plan.PeelOrder, members, cascade, nodes, modEdges)
 		for _, lab := range early {
 			if err := applyUnwindPeelOne(workDir, wrkHome, lab, byLabel, members, edges, flags, &stats, addReinstallMainPath, peelCount > 0, tagCache); err != nil {
 				return err
@@ -1196,20 +1224,17 @@ func applyUnwindPeelOne(
 // Dirty droppable-replace targets are also early (CS-openterm2): unpublished
 // WIP on a replace target must land before any consumer network pin/tidy.
 // Plan/cascade failures fall back to all-early (legacy peel-then-cascade).
-func splitPeelOrderB1(peelOrder []string, members []StackMember) (early, deferred []string) {
+func splitPeelOrderB1(peelOrder []string, members []StackMember, cascade *UnwindCascadePlan, nodes []UnwindGraphModuleNode, graphEdges []UnwindGraphModuleEdge) (early, deferred []string) {
 	if len(peelOrder) == 0 {
 		return nil, nil
 	}
 	if len(members) == 0 {
 		return append([]string(nil), peelOrder...), nil
 	}
-	cascade, err := PlanUnwindCascade(members)
-	if err != nil || cascade == nil || len(cascade.Steps) == 0 {
+	if cascade == nil || len(cascade.Steps) == 0 {
 		return append([]string(nil), peelOrder...), nil
 	}
-	byLabel := pickPeelMembersByLabel(members)
-	nodes, graphEdges, err := buildUnwindModuleGraph(members, byLabel)
-	if err != nil {
+	if len(nodes) == 0 {
 		return append([]string(nil), peelOrder...), nil
 	}
 	labelOfMod := make(map[string]string, len(nodes))
@@ -1314,9 +1339,13 @@ func dirtyDroppableReplaceTargetLabels(members []StackMember, nodes []UnwindGrap
 // modules is not an error for a successful unwind, matching the compose tail.
 // Returns the reinstalled binary count for the summary rollup.
 func runUnwindReinstallLocal(mainPath string, colorFlag, noColor bool) (int, error) {
-	st, err := runReinstallLocalEx(mainPath, false, true, colorFlag, noColor, nil)
+	h := currentHost()
+	if h.ReinstallLocal == nil {
+		return 0, hostErr("ReinstallLocal")
+	}
+	n, err := h.ReinstallLocal(mainPath, colorFlag, noColor)
 	if err == nil {
-		return st.Reinstalled, nil
+		return n, nil
 	}
 	if strings.Contains(err.Error(), "no go.mod modules found") ||
 		strings.Contains(err.Error(), "no go.mod found") {

@@ -11,6 +11,7 @@ import (
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/commands"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/mod/scan"
 	"github.com/xhd2015/wrk/wrkcli/storage"
+	"github.com/xhd2015/wrk/wrkcli/unwind"
 )
 
 // Pin action kinds for PlanPinLocals.
@@ -45,7 +46,7 @@ type pinModuleOwner struct {
 // Inventory = CollectStackInventory only (no WRK_HOME project universe).
 // Wanted set per consumer = require paths ∪ replace OldPaths that have a stack owner.
 func PlanPinLocals(workDir string) (*PinLocalsPlan, error) {
-	inv, err := CollectStackInventory(workDir)
+	inv, err := unwind.CollectStackInventory(workDir)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +267,7 @@ func replaceAlreadyRelative(consumerModDir, existingNew, wantedRel, depModDir st
 		return false
 	}
 	// Relative form that resolves to the same dep dir.
-	resolved, err := resolveLocalReplacePath(consumerModDir, existingNew)
+	resolved, err := unwind.ResolveLocalReplacePath(consumerModDir, existingNew)
 	if err != nil {
 		return false
 	}
@@ -380,7 +381,7 @@ func goModTidyForPinLocals(dir string) error {
 		if r.path == "" {
 			continue
 		}
-		if goModHasLocalReplace(dir, r.path) {
+		if unwind.GoModHasLocalReplace(dir, r.path) {
 			continue
 		}
 		needsResolve = append(needsResolve, r)

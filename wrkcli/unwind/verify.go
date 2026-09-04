@@ -1,19 +1,18 @@
-package wrkcli
+package unwind
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
 // UnwindVerifyReport is the read-only post-job audit for --unwind --verify.
 type UnwindVerifyReport struct {
-	WorkDir  string               `json:"work_dir"`
-	Checks   []UnwindVerifyCheck  `json:"checks"`
-	Summary  UnwindVerifySummary  `json:"summary"`
-	Warnings []string             `json:"warnings"`
+	WorkDir  string              `json:"work_dir"`
+	Checks   []UnwindVerifyCheck `json:"checks"`
+	Summary  UnwindVerifySummary `json:"summary"`
+	Warnings []string            `json:"warnings"`
 }
 
 // UnwindVerifyCheck is one catalog audit line.
@@ -47,39 +46,18 @@ var verifyCheckCatalog = []string{
 // BuildUnwindVerifyReport collects inventory, peel plan, module graph, cascade
 // plan, and materializes the six error-severity checks. Does not mutate.
 func BuildUnwindVerifyReport(workDir string) (*UnwindVerifyReport, error) {
-	cwd, err := filepath.Abs(workDir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve cwd: %w", err)
-	}
-	inv, err := CollectStackInventory(cwd)
+	snap, err := CollectSnapshot(workDir, SnapshotOpts{Cascade: true})
 	if err != nil {
 		return nil, err
 	}
-	members := inv.Members
-	edges, err := BuildRepoDAG(members)
-	if err != nil {
-		return nil, err
-	}
-	edges = mergeRepoEdges(edges, inv.SyntheticEdges)
-	plan, err := PlanUnwind(members, edges)
-	if err != nil {
-		return nil, err
-	}
+	cwd := snap.WorkDir
+	inv := snap.Inv
+	plan := snap.Peel
 	if plan == nil {
 		plan = &UnwindPlan{}
 	}
-
-	byLabel := pickPeelMembersByLabel(members)
-	modNodes, modEdges, err := buildUnwindModuleGraph(members, byLabel)
-	if err != nil {
-		return nil, err
-	}
-	attachTagScopeToModules(modNodes, members, nil)
-
-	cascade, err := planUnwindCascadeFromGraph(modNodes, modEdges)
-	if err != nil {
-		return nil, err
-	}
+	modNodes, modEdges := snap.ModuleNodes, snap.ModuleEdges
+	cascade := snap.Cascade
 	if cascade == nil {
 		cascade = &UnwindCascadePlan{}
 	}
@@ -142,7 +120,7 @@ func materializeUnwindVerifyChecks(
 		Status:   statusPassFail(needsLandFail),
 	}
 	if needsLandFail {
-		needsLand.Details = []string{"linked dirty stack still needs land (merge-back)"}
+		needsLand.Details = []string{"linked dirty stack still needs --merge-back or --done"}
 	}
 
 	// --- owned-changed ---

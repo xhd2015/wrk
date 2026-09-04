@@ -1,4 +1,4 @@
-package wrkcli
+package unwind
 
 import (
 	"encoding/json"
@@ -15,20 +15,20 @@ import (
 
 // UnwindGraphReport is the read-only unwind stack graph (repo + module + summary).
 type UnwindGraphReport struct {
-	WorkDir  string
-	Repos    UnwindGraphRepos
-	Modules  UnwindGraphModules
-	Summary  UnwindGraphSummary
-	Warnings []string
+	WorkDir  string             `json:"work_dir,omitempty"`
+	Repos    UnwindGraphRepos    `json:"repos"`
+	Modules  UnwindGraphModules `json:"modules"`
+	Summary  UnwindGraphSummary `json:"summary"`
+	Warnings []string           `json:"warnings,omitempty"`
 }
 
 // UnwindGraphRepos is the stack-repo layer of the show-graph report.
 type UnwindGraphRepos struct {
-	Nodes           []UnwindGraphRepoNode
-	Edges           []RepoEdge
-	PeelOrder       []string // display paths, free-first
-	HasPendingEdges bool
-	NeedsLand       bool
+	Nodes           []UnwindGraphRepoNode `json:"nodes"`
+	Edges           []RepoEdge            `json:"edges"`
+	PeelOrder       []string              `json:"peel_order"` // display paths, free-first
+	HasPendingEdges bool                  `json:"has_pending_edges"`
+	NeedsLand       bool                  `json:"needs_land"`
 }
 
 // UnwindGraphRepoNode is one stack checkout in the repo graph.
@@ -45,8 +45,8 @@ type UnwindGraphRepoNode struct {
 
 // UnwindGraphModules is the full-stack module layer.
 type UnwindGraphModules struct {
-	Nodes []UnwindGraphModuleNode
-	Edges []UnwindGraphModuleEdge
+	Nodes []UnwindGraphModuleNode `json:"nodes"`
+	Edges []UnwindGraphModuleEdge `json:"edges"`
 }
 
 // UnwindGraphModuleNode is one go.mod under the unwind stack.
@@ -71,37 +71,35 @@ type UnwindGraphModuleEdge struct {
 
 // UnwindGraphSummary aggregates counts and an optional apply hint.
 type UnwindGraphSummary struct {
-	Repos        int    `json:"repos"`
-	DirtyRepos   int    `json:"dirty_repos"`
-	Modules      int    `json:"modules"`
-	RepoEdges    int    `json:"repo_edges"`
-	ModuleEdges  int    `json:"module_edges"`
-	PeelSteps    int    `json:"peel_steps"`
-	Cycle        string `json:"cycle"`
-	ApplyHint    string `json:"apply_hint,omitempty"`
+	Repos       int    `json:"repos"`
+	DirtyRepos  int    `json:"dirty_repos"`
+	Modules     int    `json:"modules"`
+	RepoEdges   int    `json:"repo_edges"`
+	ModuleEdges int    `json:"module_edges"`
+	PeelSteps   int    `json:"peel_steps"`
+	Cycle       string `json:"cycle"`
+	ApplyHint   string `json:"apply_hint,omitempty"`
 }
 
 // BuildUnwindGraphReport collects inventory, repo DAG, peel plan, module graph,
 // and tagscope status for a read-only show-graph inspect. Does not mutate.
 func BuildUnwindGraphReport(workDir string) (*UnwindGraphReport, error) {
-	cwd, err := filepath.Abs(workDir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve cwd: %w", err)
-	}
-	inv, err := CollectStackInventory(cwd)
+	snap, err := CollectSnapshot(workDir, SnapshotOpts{Cascade: true})
 	if err != nil {
 		return nil, err
 	}
+	return graphFromSnapshot(snap)
+}
+
+func graphFromSnapshot(snap *Snapshot) (*UnwindGraphReport, error) {
+	if snap == nil {
+		return &UnwindGraphReport{}, nil
+	}
+	cwd := snap.WorkDir
+	inv := snap.Inv
 	members := inv.Members
-	edges, err := BuildRepoDAG(members)
-	if err != nil {
-		return nil, err
-	}
-	edges = mergeRepoEdges(edges, inv.SyntheticEdges)
-	plan, err := PlanUnwind(members, edges)
-	if err != nil {
-		return nil, err
-	}
+	edges := snap.RepoEdges
+	plan := snap.Peel
 	if plan == nil {
 		plan = &UnwindPlan{}
 	}
@@ -172,11 +170,7 @@ func BuildUnwindGraphReport(workDir string) (*UnwindGraphReport, error) {
 		return repoNodes[i].Display < repoNodes[j].Display
 	})
 
-	modNodes, modEdges, err := buildUnwindModuleGraph(members, byLabel)
-	if err != nil {
-		return nil, err
-	}
-	attachTagScopeToModules(modNodes, members, nil)
+	modNodes, modEdges := snap.ModuleNodes, snap.ModuleEdges
 
 	applyHint := buildApplyHint(plan)
 	summary := UnwindGraphSummary{
@@ -222,15 +216,25 @@ func uniqueRepoLabels(members []StackMember) []string {
 }
 
 func buildApplyHint(plan *UnwindPlan) string {
+	return buildApplyHintRemaining(plan, UnwindFlags{})
+}
+
+// buildApplyHintRemaining lists only flags still missing for a successful apply.
+func buildApplyHintRemaining(plan *UnwindPlan, flags UnwindFlags) string {
 	if plan == nil {
 		return ""
 	}
 	var parts []string
-	if plan.NeedsLand {
+	if plan.NeedsLand && !flags.Done && !flags.MergeBack {
 		parts = append(parts, "--merge-back")
 	}
 	if plan.HasPendingEdges {
-		parts = append(parts, "--tag-next", "--push")
+		if !flags.TagNext {
+			parts = append(parts, "--tag-next")
+		}
+		if !flags.Push {
+			parts = append(parts, "--push")
+		}
 	}
 	if len(parts) == 0 {
 		return ""
@@ -249,6 +253,10 @@ type stackModule struct {
 }
 
 func buildUnwindModuleGraph(members []StackMember, byLabel map[string]StackMember) ([]UnwindGraphModuleNode, []UnwindGraphModuleEdge, error) {
+	return buildUnwindModuleGraphScans(members, byLabel, nil)
+}
+
+func buildUnwindModuleGraphScans(members []StackMember, byLabel map[string]StackMember, scans map[string][]scan.Module) ([]UnwindGraphModuleNode, []UnwindGraphModuleEdge, error) {
 	_ = byLabel
 	// Prefer linked/dirty checkout when the same main appears twice: scan each
 	// inventory path but dedupe modules by module path (first wins after sort).
@@ -257,7 +265,7 @@ func buildUnwindModuleGraph(members []StackMember, byLabel map[string]StackMembe
 	}
 	modByPath := make(map[string]stackModule)
 	for _, m := range members {
-		scanned, err := scan.Scan(m.Path, scan.Options{})
+		scanned, err := scanModulesCached(m.Path, scans)
 		if err != nil {
 			return nil, nil, err
 		}

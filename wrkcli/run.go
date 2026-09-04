@@ -30,6 +30,8 @@ import (
 	lessflags "github.com/xhd2015/less-flags"
 	"github.com/xhd2015/wrk/workops"
 	"github.com/xhd2015/wrk/wrkcli/storage"
+	unwindpkg "github.com/xhd2015/wrk/wrkcli/unwind"
+	unwindweb "github.com/xhd2015/wrk/wrkcli/unwind/web"
 	"golang.org/x/term"
 )
 
@@ -590,11 +592,12 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	}
 
 	// --web is a standalone long-running mode: local HTTP UI + wrkserver API.
-	if webFlag {
+	// --unwind --web is handled later (static preview + Run).
+	if webFlag && !unwind {
 		otherMode := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || reinstallLocal || tagNext || propagateTags || syncFlag ||
 			dryRun || pushFlag || prFlag || jsonFlag || taskFlagSet || setTaskFlagSet || fetchFlag || noCd || forceCd ||
-			cd || mainFlag || unwind || confirmFromStdin || forceConfirm || noInModuleReplace || scanGitRepos ||
+			cd || mainFlag || confirmFromStdin || forceConfirm || noInModuleReplace || scanGitRepos ||
 			newFlag || newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
 			noNewTerminal || here || openInAgent || noOpenInAgent || len(execArgs) > 0
 		ctx.workDir = origWd
@@ -1216,6 +1219,50 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		if confirmFromStdin || forceConfirm || noInModuleReplace {
 			return fmt.Errorf("wrk: --unwind is mutually exclusive with other modes")
 		}
+		if webFlag {
+			if webDev {
+				return fmt.Errorf("wrk: --dev is not valid with --unwind")
+			}
+			if showGraph {
+				return fmt.Errorf("wrk: --web is mutually exclusive with --show-graph")
+			}
+			if verify {
+				return fmt.Errorf("wrk: --web is mutually exclusive with --verify")
+			}
+			if dryRun {
+				return fmt.Errorf("wrk: --web is mutually exclusive with --dry-run")
+			}
+			if jsonFlag {
+				return fmt.Errorf("wrk: --web is mutually exclusive with --json")
+			}
+			if len(remaining) > 0 {
+				return fmt.Errorf("wrk: unexpected arguments")
+			}
+			port := 0
+			if portFlagSet {
+				port = *portFlag
+			}
+			return mapUnwindError(unwindweb.Serve(unwindweb.Options{
+				WorkDir: workDir,
+				WrkHome: wrkHome,
+				Port:    port,
+				Flags: unwindpkg.UnwindFlags{
+					TagNext:        tagNext,
+					Push:           pushFlag,
+					Force:          forcePush,
+					Done:           done,
+					MergeBack:      mergeBack,
+					ReinstallLocal: reinstallLocal,
+					Color:          colorFlag,
+					NoColor:        noColorFlag,
+					Sync:           syncFlag,
+					GenCommitMsg:   genCommitMsg,
+					GenCommitArgs:  genCommitArgs,
+					AddAll:         addAll,
+				},
+				Host: newUnwindHost(),
+			}))
+		}
 		if showGraph && verify {
 			return fmt.Errorf("wrk: --verify is mutually exclusive with --show-graph")
 		}
@@ -1289,7 +1336,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 				return fmt.Errorf("wrk: --verify is mutually exclusive with --propagate-tags")
 			}
 		}
-		return runUnwind(workDir, UnwindFlags{
+		return mapUnwindError(unwindpkg.Run(workDir, wrkHome, unwindpkg.UnwindFlags{
 			DryRun:         dryRun,
 			TagNext:        tagNext,
 			Push:           pushFlag,
@@ -1306,7 +1353,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			ShowGraph:      showGraph,
 			Verify:         verify,
 			JSON:           jsonFlag,
-		})
+		}, newUnwindHost()))
 	}
 
 	if projects {
@@ -1677,6 +1724,9 @@ Flags:
   --unwind --verify [--json] [--color|--no-color]
                                   read-only: post-job audit of peel/land/tags/require/replace/cascade
                                   (exit 1 when any error check fails; exclusive with --show-graph and apply partners)
+  --unwind --web [--port PORT] [--done|--merge-back] [--tag-next] [--push] [--sync] [--reinstall-local]
+                                  action preview + Run (listen first; prints http://127.0.0.1:<port>/; plan may load in UI)
+                                  (exclusive with --show-graph, --verify, --dry-run; apply only from the button)
   --pin-locals [--dry-run]        add/normalize relative replace for already-required stack deps
                                   (inventory = unwind stack only; go mod tidy per consumer; soft tidy fails)
   --dep-replace <dir>… [--dry-run]
@@ -1785,8 +1835,8 @@ Flags:
                                   exclusive with -m/--message; also: pre-stage before --done /
                                   --merge-back / --pr (requires --commit with primary; --dir not valid when composed)
 
-  --web                           start local web UI (React SPA + API on 127.0.0.1)
-  --port PORT                     listen port for --web only (default: free port from 8080)
+  --web                           start local web UI (React SPA + API; listen :PORT)
+  --port PORT                     listen port for --web or --unwind --web (default: free :port from 8080)
   --dev                           with --web: proxy UI to Vite (wrk-react/) for HMR
   --version                       print version and exit
   --help, -h                      show this help and exit

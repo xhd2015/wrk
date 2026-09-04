@@ -5,7 +5,7 @@
 ```
 # CLI surface
 wrk --web [--port PORT] [--dev]
-  -> bind 127.0.0.1:<port>
+  -> listen :<port> (auto from 8080 when omitted; skip busy :port)
   -> stdout: http://127.0.0.1:<port>/\n
   -> serve GET / (SPA home) and client routes e.g. /mockup/repo-view
   -> mount wrkserver at /api/wrk/* (GET /api/wrk/projects, …)
@@ -34,7 +34,7 @@ wrk -h  -> documents --web and --port
 
 ## Context
 
-- Bind address is localhost only (`127.0.0.1`).
+- Listen is `:port` (all interfaces); stdout URL remains `http://127.0.0.1:<port>/`.
 - Successful start prints a single stdout line: `http://127.0.0.1:<port>/` with trailing `\n`.
 - HTML markers for tests: `task`, `changes`/`worktree`, `Main`, `Remote`, title/heading contains `wrk`.
 - Empty projects API always returns JSON array (never null): `{"projects":[]}`.

@@ -22,6 +22,7 @@ import (
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/update"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/withgo"
 	"github.com/xhd2015/wrk/wrkcli/storage"
+	"github.com/xhd2015/wrk/wrkcli/unwind"
 )
 
 // runDepReplace implements wrk --dep-replace <dir>… [--dry-run].
@@ -448,7 +449,7 @@ func consumerReplaceAlreadyEquivalent(c depUpdateConsumer, depPath, absDir strin
 		if !isLocalFilesystemReplace(r.NewPath, r.NewVersion) {
 			continue
 		}
-		resolved, err := resolveLocalReplacePath(c.ModDir, r.NewPath)
+		resolved, err := unwind.ResolveLocalReplacePath(c.ModDir, r.NewPath)
 		if err != nil {
 			continue
 		}
@@ -847,7 +848,7 @@ type depUpdateTreeCheckout struct {
 func collectDepUpdateConsumers(cwd string) ([]depUpdateConsumer, []string, error) {
 	cwd = storage.NormalizePath(cwd)
 	if worktree.IsInsideWorkTree(cwd) {
-		inv, err := CollectStackInventory(cwd)
+		inv, err := unwind.CollectStackInventory(cwd)
 		if err != nil {
 			if strings.HasPrefix(err.Error(), "wrk:") {
 				return nil, nil, err

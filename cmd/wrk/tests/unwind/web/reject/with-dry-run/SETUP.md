@@ -1,0 +1,13 @@
+# Scenario
+
+**Feature**: `--unwind --web` cannot combine with `--dry-run`
+
+```go
+func Setup(t *testing.T, d *session.Doctest, req *Request) error {
+	_ = d
+	_ = t
+	req.InProcess = true
+	req.Args = []string{"--unwind", "--web", "--dry-run"}
+	return nil
+}
+```

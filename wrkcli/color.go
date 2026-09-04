@@ -177,30 +177,3 @@ func formatGoInstallProgressLine(method Method, relPath string, colorOn bool) st
 	}
 	return verb + " " + relPath
 }
-
-// formatUnwindSummaryLine builds the end-of-apply rollup for --unwind.
-// Only includes stages that were requested / performed (omit unused).
-func formatUnwindSummaryLine(stats UnwindApplyStats, flags UnwindFlags, colorOn bool) string {
-	var parts []string
-	if stats.HadPeels {
-		parts = append(parts, fmt.Sprintf("peeled %s", paintCount(stats.Peeled, colorOn)))
-	}
-	if flags.TagNext {
-		parts = append(parts, fmt.Sprintf("tagged %s", paintCount(stats.Tagged, colorOn)))
-		parts = append(parts, fmt.Sprintf("pinned %s", paintCount(stats.Pinned, colorOn)))
-	}
-	if flags.Push {
-		parts = append(parts, fmt.Sprintf("pushed %s", paintCount(stats.Pushed, colorOn)))
-	}
-	if flags.ReinstallLocal {
-		parts = append(parts, fmt.Sprintf("reinstalled %s", paintCount(stats.Reinstalled, colorOn)))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	prefix := "unwind:"
-	if colorOn {
-		prefix = colorize(prefix, ansiGrey)
-	}
-	return prefix + " " + strings.Join(parts, ", ")
-}

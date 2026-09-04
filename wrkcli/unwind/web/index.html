@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wrk unwind</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0e0f12; --fg: #e8eaed; --muted: #8b929a; --acc: #6bcf8e; --bad: #e66;
+      --card: #171a1f; --line: #2a3038; --canvas: #12151a;
+      --warn: #e6a35a; --merge: #c084fc; --tag: #5eead4; --ship: #93c5fd;
+    }
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--fg); }
+    header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--line); }
+    h1 { font-size: 1.15rem; margin: 0 0 .35rem; }
+    .muted { color: var(--muted); font-size: .9rem; }
+    main { padding: 1rem 1.25rem 3rem; max-width: none; }
+    .flags { display: flex; flex-wrap: wrap; gap: .6rem 1.1rem; margin: 1rem 0; }
+    .flags label { display: flex; gap: .35rem; align-items: center; }
+    button { font: inherit; padding: .45rem .9rem; border-radius: 6px; border: 1px solid #456; background: #243; color: var(--fg); cursor: pointer; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button.primary { background: var(--acc); color: #111; border-color: var(--acc); font-weight: 600; }
+    .blockers { color: var(--bad); margin: .5rem 0 1rem; white-space: pre-wrap; }
+    #plan-status { min-height: 1.2em; }
+    #log { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: .8rem; background: #0a0a0a; padding: .75rem; border-radius: 8px; min-height: 4rem; }
+    .preview-wrap {
+      margin: 1rem 0 1.5rem;
+      background: var(--canvas);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: auto;
+    }
+    .preview-wrap .empty {
+      padding: 1.25rem 1rem; color: var(--muted); font-style: italic;
+    }
+    .preview-wrap .loading-pane {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: .75rem; min-height: 280px; color: var(--muted); text-align: center; padding: 2rem 1rem;
+      position: relative;
+    }
+    .preview-wrap .loading-pane strong { color: var(--fg); font-size: .95rem; }
+    .preview-wrap .loading-pane .phase {
+      font-family: ui-monospace, Menlo, monospace; font-size: .75rem; color: var(--tag);
+    }
+    .preview-wrap .loading-pane.error strong { color: var(--bad); }
+    .spinner {
+      width: 28px; height: 28px; border: 3px solid var(--line); border-top-color: var(--acc);
+      border-radius: 50%; animation: unwind-spin .8s linear infinite;
+    }
+    @keyframes unwind-spin { to { transform: rotate(360deg); } }
+    .skel {
+      position: absolute; inset: 1rem; opacity: .22; pointer-events: none;
+      display: flex; gap: 2rem;
+    }
+    .skel .col { width: 200px; }
+    .skel .box { height: 64px; background: #1c2128; border-radius: 8px; margin-bottom: .6rem; }
+    .skel .box.s { height: 40px; }
+    .flags.disabled { opacity: .55; }
+    .flags.disabled input { pointer-events: none; }
+    #action-graph { width: 100%; display: block; min-width: 720px; }
+    .anode, .aproj {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: .45rem .6rem;
+      width: 100%;
+      box-sizing: border-box;
+      font-size: .72rem;
+      box-shadow: 0 6px 18px rgba(0,0,0,.28);
+    }
+    .anode .k, .aproj .k, .astep .k {
+      font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: var(--acc);
+    }
+    .anode.peel .k { color: var(--warn); }
+    .anode.merge-back .k, .anode.done .k, .astep.merge-back .k, .astep.done .k { color: var(--merge); }
+    .anode.tag-next .k, .anode.pin .k, .anode.gen-commit .k,
+    .astep.tag-next .k, .astep.pin .k, .astep.gen-commit .k { color: var(--tag); }
+    .anode.push .k, .anode.sync .k, .anode.reinstall-local .k { color: var(--ship); }
+    .anode .t, .aproj .t {
+      margin-top: .18rem;
+      white-space: normal;
+      overflow: visible;
+      word-break: break-all;
+      line-height: 1.25;
+    }
+    .aproj .t { margin-top: 0; font-weight: 600; font-size: .78rem; }
+    .anode .d, .astep .d {
+      margin-top: .12rem;
+      color: var(--muted);
+      font-size: .65rem;
+      white-space: normal;
+      overflow: visible;
+      word-break: break-all;
+      line-height: 1.25;
+    }
+    .aproj .steps { margin-top: .35rem; display: flex; flex-direction: column; gap: .28rem; }
+    .astep {
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .5rem;
+      padding: .28rem .4rem; border-radius: 6px;
+      background: #12151a; border: 1px solid #222830;
+    }
+    .astep .d { margin-top: 0; }
+    .aproj .why {
+      margin-top: .3rem; color: var(--muted); font-size: .62rem;
+    }
+    .aedge { fill: none; stroke: #5a6570; stroke-width: 1.5; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>wrk unwind</h1>
+    <div class="muted" id="summary">action preview</div>
+  </header>
+  <main>
+    <div class="flags" id="flags">
+      <label><input type="checkbox" data-flag="merge_back"> --merge-back</label>
+      <label><input type="checkbox" data-flag="done"> --done</label>
+      <label><input type="checkbox" data-flag="tag_next"> --tag-next</label>
+      <label><input type="checkbox" data-flag="push"> --push</label>
+      <label><input type="checkbox" data-flag="sync"> --sync</label>
+      <label><input type="checkbox" data-flag="reinstall_local"> --reinstall-local</label>
+      <label><input type="checkbox" data-flag="gen_commit_msg"> --gen-commit-msg</label>
+      <label><input type="checkbox" data-flag="commit"> --commit</label>
+      <label><input type="checkbox" data-flag="add_all"> --add-all</label>
+      <label><input type="checkbox" data-flag="no_verify"> --no-verify</label>
+    </div>
+    <div class="muted" id="agent-runner" style="margin:.25rem 0 .5rem;font-size:.85rem"></div>
+    <div>
+      <button class="primary" id="run" type="button">Run</button>
+      <span class="muted" id="hint"></span>
+      <span class="muted" id="plan-status"></span>
+    </div>
+    <div class="blockers" id="blockers"></div>
+    <section id="preview" class="preview-wrap" data-action-graph="1"></section>
+    <h2 class="muted">log</h2>
+    <div id="log"></div>
+  </main>
+  <script>
+    const INITIAL = /*__UNWIND_JSON__*/null;
+    let snapStatus = (INITIAL && INITIAL.status) || "ready";
+    let snapError = (INITIAL && INITIAL.error) || "";
+    let plan = INITIAL && INITIAL.plan ? INITIAL.plan : { flags: {}, epochs: [], blockers: [], can_run: false };
+    let planTimer = null;
+    let planAbort = null;
+    let planSeq = 0;
+    let readyPollTimer = null;
+    const PLAN_DEBOUNCE_MS = 200;
+    const READY_POLL_MS = 300;
+    // Wide enough for long module paths; text wraps inside the card.
+    const NODE_W = 340;
+    const NODE_GAP = 14;
+    const COL_GAP = 48;
+    const CHAR_PER_LINE = 42;
+
+    function textLines(s) {
+      return Math.max(1, Math.ceil(String(s || "").length / CHAR_PER_LINE));
+    }
+
+    function cardHeight(st) {
+      const pad = 22;
+      const line = 15;
+      const tLines = textLines(st && st.target);
+      const dLines = st && st.detail ? textLines(st.detail) : 0;
+      return pad + (1 + tLines + dLines) * line;
+    }
+
+    function isPeelEpoch(ep) {
+      const id = (ep && ep.id) || "";
+      return id === "early-peel" || id === "deferred-peel" || id === "peel";
+    }
+
+    // Peel epochs: consecutive same-target steps → one project card; omit peel kind.
+    // Cascade/ship/reinstall stay one node per step.
+    function epochNodes(ep) {
+      const steps = (ep && ep.steps) || [];
+      if (!isPeelEpoch(ep)) {
+        return steps.map(function (st) { return { kind: "step", st: st }; });
+      }
+      const nodes = [];
+      let cur = null;
+      steps.forEach(function (st) {
+        const target = st.target || "";
+        if (!cur || cur.target !== target) {
+          cur = { kind: "project", target: target, actions: [], why: "" };
+          nodes.push(cur);
+        }
+        if (st.kind === "peel") {
+          if (st.why) cur.why = st.why;
+          return;
+        }
+        cur.actions.push(st);
+        if (!cur.why && st.why) cur.why = st.why;
+      });
+      return nodes;
+    }
+
+    function projectHeight(node) {
+      const pad = 20;
+      const line = 15;
+      const row = 26;
+      let h = pad + textLines(node.target) * line;
+      h += (node.actions || []).length * row;
+      if (node.why) h += 14;
+      if (!(node.actions || []).length) h += 4;
+      return Math.max(h, 44);
+    }
+
+    function nodeHeight(node) {
+      return node.kind === "project" ? projectHeight(node) : cardHeight(node.st);
+    }
+
+    function flagsFromUI() {
+      const f = {};
+      document.querySelectorAll("[data-flag]").forEach((el) => {
+        f[el.getAttribute("data-flag")] = !!el.checked;
+      });
+      // Preserve agent-runner from plan (CLI peel); not a checkbox.
+      if (plan.flags && plan.flags.agent_runner) {
+        f.agent_runner = plan.flags.agent_runner;
+      }
+      return f;
+    }
+
+    function applyFlagsToUI(f) {
+      document.querySelectorAll("[data-flag]").forEach((el) => {
+        el.checked = !!f[el.getAttribute("data-flag")];
+      });
+      const ar = document.getElementById("agent-runner");
+      if (ar) {
+        ar.textContent = f.agent_runner ? ("--agent-runner=" + f.agent_runner) : "";
+      }
+    }
+
+    function enforceExclusiveLand(changed) {
+      const done = document.querySelector('[data-flag="done"]');
+      const merge = document.querySelector('[data-flag="merge_back"]');
+      if (!done || !merge) return;
+      if (changed === done && done.checked) merge.checked = false;
+      if (changed === merge && merge.checked) done.checked = false;
+    }
+
+    function svgEl(name, attrs) {
+      const n = document.createElementNS("http://www.w3.org/2000/svg", name);
+      if (attrs) Object.keys(attrs).forEach((k) => n.setAttribute(k, attrs[k]));
+      return n;
+    }
+
+    function buildStepCard(st) {
+      const div = document.createElement("div");
+      div.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+      div.className = "anode " + (st.kind || "");
+      div.setAttribute("data-action-kind", st.kind || "");
+      div.setAttribute("data-action-target", st.target || "");
+      const k = document.createElement("div");
+      k.className = "k";
+      k.textContent = st.kind || "?";
+      const t = document.createElement("div");
+      t.className = "t";
+      t.textContent = st.target || "";
+      t.title = st.target || "";
+      div.appendChild(k);
+      div.appendChild(t);
+      if (st.detail) {
+        const d = document.createElement("div");
+        d.className = "d";
+        d.textContent = st.detail;
+        d.title = st.detail;
+        div.appendChild(d);
+      }
+      return div;
+    }
+
+    function buildProjectCard(node) {
+      const div = document.createElement("div");
+      div.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+      div.className = "aproj";
+      div.setAttribute("data-action-project", "1");
+      div.setAttribute("data-action-target", node.target || "");
+      const t = document.createElement("div");
+      t.className = "t";
+      t.textContent = node.target || "";
+      t.title = node.target || "";
+      div.appendChild(t);
+      if ((node.actions || []).length) {
+        const steps = document.createElement("div");
+        steps.className = "steps";
+        node.actions.forEach(function (st) {
+          const row = document.createElement("div");
+          row.className = "astep " + (st.kind || "");
+          row.setAttribute("data-action-kind", st.kind || "");
+          const k = document.createElement("span");
+          k.className = "k";
+          k.textContent = st.kind || "?";
+          row.appendChild(k);
+          if (st.detail) {
+            const d = document.createElement("span");
+            d.className = "d";
+            d.textContent = st.detail;
+            d.title = st.detail;
+            row.appendChild(d);
+          }
+          steps.appendChild(row);
+        });
+        div.appendChild(steps);
+      }
+      if (node.why) {
+        const w = document.createElement("div");
+        w.className = "why";
+        w.textContent = node.why;
+        div.appendChild(w);
+      }
+      return div;
+    }
+
+    function setFlagsEnabled(on) {
+      const box = document.getElementById("flags");
+      if (!box) return;
+      box.classList.toggle("disabled", !on);
+      box.querySelectorAll("[data-flag]").forEach((el) => { el.disabled = !on; });
+    }
+
+    function ingestPlanResponse(data) {
+      if (!data || typeof data !== "object") return;
+      if (data.status) snapStatus = data.status;
+      if (typeof data.error === "string") snapError = data.error;
+      if (data.plan) {
+        plan = data.plan;
+      } else {
+        plan = data;
+      }
+    }
+
+    function renderLoadingPane() {
+      const host = document.getElementById("preview");
+      // Keep the spinner DOM stable across /plan polls so the CSS animation
+      // does not restart every READY_POLL_MS.
+      if (snapStatus === "loading") {
+        const existing = host.querySelector('[data-plan-loading="1"]');
+        if (existing) return;
+      }
+      if (snapStatus === "error") {
+        const existing = host.querySelector("[data-plan-error]");
+        if (existing) {
+          const detail = existing.querySelector(".muted");
+          if (detail) detail.textContent = snapError || "snapshot error";
+          return;
+        }
+      }
+      host.innerHTML = "";
+      const pane = document.createElement("div");
+      pane.className = "loading-pane" + (snapStatus === "error" ? " error" : "");
+      pane.setAttribute("data-plan-loading", snapStatus === "loading" ? "1" : "0");
+      if (snapStatus === "error") {
+        pane.setAttribute("data-plan-error", "1");
+        const strong = document.createElement("strong");
+        strong.textContent = "Failed to build unwind plan";
+        const detail = document.createElement("div");
+        detail.className = "muted";
+        detail.style.fontSize = ".8rem";
+        detail.style.maxWidth = "28rem";
+        detail.style.whiteSpace = "pre-wrap";
+        detail.textContent = snapError || "snapshot error";
+        pane.appendChild(strong);
+        pane.appendChild(detail);
+        host.appendChild(pane);
+        return;
+      }
+      const skel = document.createElement("div");
+      skel.className = "skel";
+      skel.setAttribute("aria-hidden", "true");
+      skel.innerHTML = '<div class="col"><div class="box"></div><div class="box"></div></div><div class="col"><div class="box"></div><div class="box s"></div><div class="box s"></div></div>';
+      const spin = document.createElement("div");
+      spin.className = "spinner";
+      spin.setAttribute("aria-hidden", "true");
+      const strong = document.createElement("strong");
+      strong.textContent = "Building unwind plan…";
+      const phase = document.createElement("div");
+      phase.className = "phase";
+      phase.textContent = "collecting stack · cascade";
+      const hint = document.createElement("div");
+      hint.className = "muted";
+      hint.style.fontSize = ".8rem";
+      hint.style.maxWidth = "22rem";
+      hint.textContent = "Server is up. First scan of this worktree can take a while on large stacks.";
+      pane.appendChild(skel);
+      pane.appendChild(spin);
+      pane.appendChild(strong);
+      pane.appendChild(phase);
+      pane.appendChild(hint);
+      host.appendChild(pane);
+    }
+
+    function renderActionGraph(epochs) {
+      const host = document.getElementById("preview");
+      host.innerHTML = "";
+      const list = epochs || [];
+      const stepCount = list.reduce((n, ep) => n + ((ep.steps && ep.steps.length) || 0), 0);
+      if (stepCount === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.setAttribute("data-action-empty", "1");
+        empty.textContent = "no actions in plan";
+        host.appendChild(empty);
+        return;
+      }
+
+      const colNodes = list.map(epochNodes);
+      const svg = svgEl("svg", { id: "action-graph", "data-action-svg": "1" });
+      const colCount = Math.max(list.length, 1);
+      const colW = NODE_W + COL_GAP;
+      const colHeights = colNodes.map(function (nodes) {
+        if (!nodes.length) return 40;
+        return nodes.reduce(function (sum, n) { return sum + nodeHeight(n) + NODE_GAP; }, 0) - NODE_GAP;
+      });
+      const maxColH = Math.max.apply(null, colHeights.concat([120]));
+      const W = Math.max(720, 40 + colCount * colW);
+      const H = Math.max(280, 48 + maxColH);
+      svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+      svg.style.height = Math.min(900, Math.max(320, H)) + "px";
+      svg.style.minWidth = W + "px";
+
+      const defs = svgEl("defs");
+      defs.innerHTML = '<marker id="action-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#5a6570"/></marker>';
+      svg.appendChild(defs);
+      const edgeGroup = svgEl("g");
+      svg.appendChild(edgeGroup);
+
+      const pos = [];
+      list.forEach(function (ep, ci) {
+        const x = 20 + ci * colW;
+        const lab = svgEl("text", {
+          x: String(x), y: "18", fill: "#8b929a", "font-size": "11",
+          "font-family": "ui-sans-serif, system-ui, sans-serif",
+          "data-epoch-label": ep.id || ep.title || String(ci),
+        });
+        lab.textContent = ep.title || ep.id || ("epoch " + (ci + 1));
+        svg.appendChild(lab);
+
+        const nodes = colNodes[ci] || [];
+        let y = 36;
+        nodes.forEach(function (node, si) {
+          const h = nodeHeight(node);
+          pos.push({ ci: ci, si: si, x: x + NODE_W / 2, y: y + h / 2, h: h });
+
+          const fo = svgEl("foreignObject", {
+            x: String(x), y: String(y), width: String(NODE_W), height: String(h),
+          });
+          fo.appendChild(node.kind === "project" ? buildProjectCard(node) : buildStepCard(node.st));
+          svg.appendChild(fo);
+
+          if (si > 0) {
+            const prev = pos[pos.length - 2];
+            const p = svgEl("path", {
+              class: "aedge",
+              d: "M " + prev.x + " " + (prev.y + prev.h / 2 - 2) + " L " + prev.x + " " + (y - 2),
+              "marker-end": "url(#action-arr)",
+            });
+            edgeGroup.appendChild(p);
+          }
+          y += h + NODE_GAP;
+        });
+
+        if (ci > 0 && nodes.length && (colNodes[ci - 1] || []).length) {
+          const from = pos.find(function (p) { return p.ci === ci - 1 && p.si === colNodes[ci - 1].length - 1; });
+          const to = pos.find(function (p) { return p.ci === ci && p.si === 0; });
+          if (from && to) {
+            const x1 = from.x + NODE_W / 2, y1 = from.y;
+            const x2 = to.x - NODE_W / 2, y2 = to.y;
+            const dx = Math.max(30, (x2 - x1) * 0.4);
+            const p = svgEl("path", {
+              class: "aedge",
+              d: "M " + x1 + " " + y1 + " C " + (x1 + dx) + " " + y1 + ", " + (x2 - dx) + " " + y2 + ", " + x2 + " " + y2,
+              "marker-end": "url(#action-arr)",
+            });
+            edgeGroup.appendChild(p);
+          }
+        }
+      });
+
+      host.appendChild(svg);
+    }
+
+    function render() {
+      const ready = snapStatus === "ready";
+      setFlagsEnabled(ready);
+      if (snapStatus === "loading") {
+        document.getElementById("summary").textContent = (plan.work_dir || "…") + " · scanning stack…";
+        document.getElementById("hint").textContent = "preparing plan…";
+        document.getElementById("blockers").textContent = "";
+        document.getElementById("run").disabled = true;
+        renderLoadingPane();
+        return;
+      }
+      if (snapStatus === "error") {
+        document.getElementById("summary").textContent = "snapshot failed";
+        document.getElementById("hint").textContent = "";
+        document.getElementById("blockers").textContent = snapError || "";
+        document.getElementById("run").disabled = true;
+        renderLoadingPane();
+        return;
+      }
+      const s = plan.graph && plan.graph.summary ? plan.graph.summary : {};
+      document.getElementById("summary").textContent =
+        (plan.work_dir || "") + " · repos " + (s.repos || 0) +
+        " · dirty " + (s.dirty_repos || 0) + " · modules " + (s.modules || 0) +
+        " · peel-steps " + (s.peel_steps || 0);
+      document.getElementById("hint").textContent = plan.apply_hint || "";
+      const blockers = plan.blockers || [];
+      document.getElementById("blockers").textContent = blockers.join("\n");
+      document.getElementById("run").disabled = !plan.can_run;
+      const ar = document.getElementById("agent-runner");
+      if (ar) {
+        const name = plan.flags && plan.flags.agent_runner;
+        ar.textContent = name ? ("--agent-runner=" + name) : "";
+      }
+      renderActionGraph(plan.epochs);
+    }
+
+    async function reloadPlan(opts) {
+      const silent = opts && opts.silent;
+      if (planAbort) planAbort.abort();
+      planAbort = new AbortController();
+      const seq = ++planSeq;
+      const body = JSON.stringify(flagsFromUI());
+      const status = document.getElementById("plan-status");
+      if (!silent) status.textContent = snapStatus === "loading" ? "loading…" : "updating…";
+      try {
+        const res = await fetch("/plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: body,
+          signal: planAbort.signal,
+        });
+        if (seq !== planSeq) return;
+        if (!res.ok) {
+          status.textContent = "update failed";
+          return;
+        }
+        ingestPlanResponse(await res.json());
+        render();
+        if (seq === planSeq) status.textContent = "";
+        if (snapStatus === "loading") scheduleReadyPoll();
+        else clearReadyPoll();
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
+        if (seq === planSeq) status.textContent = "update failed";
+      }
+    }
+
+    function scheduleReload() {
+      if (snapStatus !== "ready") return;
+      if (planTimer) clearTimeout(planTimer);
+      planSeq++;
+      if (planAbort) planAbort.abort();
+      planTimer = setTimeout(() => {
+        planTimer = null;
+        reloadPlan();
+      }, PLAN_DEBOUNCE_MS);
+    }
+
+    function clearReadyPoll() {
+      if (readyPollTimer) {
+        clearTimeout(readyPollTimer);
+        readyPollTimer = null;
+      }
+    }
+
+    function scheduleReadyPoll() {
+      clearReadyPoll();
+      readyPollTimer = setTimeout(() => {
+        readyPollTimer = null;
+        if (snapStatus === "loading") reloadPlan({ silent: true });
+      }, READY_POLL_MS);
+    }
+
+    document.getElementById("flags").addEventListener("change", (ev) => {
+      if (snapStatus !== "ready") return;
+      const el = ev.target;
+      if (el && el.matches && el.matches("[data-flag]")) {
+        enforceExclusiveLand(el);
+      }
+      scheduleReload();
+    });
+
+    document.getElementById("run").addEventListener("click", async () => {
+      if (snapStatus !== "ready" || !plan.can_run) return;
+      if (!confirm("Run this unwind? It will merge-back/done, tag, pin, and/or push according to the preview.")) return;
+      document.getElementById("run").disabled = true;
+      document.getElementById("log").textContent = "";
+      const res = await fetch("/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(flagsFromUI()),
+      });
+      if (res.status === 400 || res.status === 409 || res.status === 503) {
+        const body = await res.json().catch(() => ({ error: res.statusText }));
+        document.getElementById("log").textContent = body.error || JSON.stringify(body);
+        document.getElementById("run").disabled = !plan.can_run;
+        return;
+      }
+      const es = new EventSource("/run/logs");
+      es.addEventListener("log", (ev) => {
+        const el = document.getElementById("log");
+        el.textContent += (el.textContent ? "\n" : "") + ev.data;
+      });
+      es.addEventListener("done", (ev) => {
+        es.close();
+        const el = document.getElementById("log");
+        el.textContent += (el.textContent ? "\n" : "") + ev.data;
+        reloadPlan();
+      });
+    });
+
+    applyFlagsToUI(plan.flags || {});
+    render();
+    if (snapStatus === "loading") scheduleReadyPoll();
+  </script>
+</body>
+</html>

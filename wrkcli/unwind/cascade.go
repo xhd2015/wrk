@@ -1,4 +1,4 @@
-package wrkcli
+package unwind
 
 import (
 	"fmt"
@@ -883,12 +883,12 @@ func memberCheckoutPath(m StackMember) string {
 
 // cascadePinCheckout chooses where cascade pin+tidy+selective commit runs.
 //
-//	- Dirty Path → Path (partial-edit WIP, P3)
-//	- Clean linked Path with same HEAD as MainRepo → MainRepo so --reinstall-local
-//	  useMain sees pin+tidy (C-RI3 nested cmd←parent; free clean pin-only)
-//	- Clean linked Path ahead/diverged from Main (branch-local committed replace)
-//	  → Path so pin edits the inventory checkout (A4 / pin-on-linked-consumer)
-//	- Early peels remap Path→MainRepo → path==main → pin main
+//   - Dirty Path → Path (partial-edit WIP, P3)
+//   - Clean linked Path with same HEAD as MainRepo → MainRepo so --reinstall-local
+//     useMain sees pin+tidy (C-RI3 nested cmd←parent; free clean pin-only)
+//   - Clean linked Path ahead/diverged from Main (branch-local committed replace)
+//     → Path so pin edits the inventory checkout (A4 / pin-on-linked-consumer)
+//   - Early peels remap Path→MainRepo → path==main → pin main
 func cascadePinCheckout(m StackMember) string {
 	path := ""
 	if m.Path != "" {
@@ -1954,8 +1954,8 @@ func classifyLocalReplace(consumerModDir, replNew string) (keep bool, newPath st
 	return false, replNew
 }
 
-// goModHasLocalReplace reports a replace directive for modulePath in dir's go.mod.
-func goModHasLocalReplace(modDir, modulePath string) bool {
+// GoModHasLocalReplace reports a replace directive for modulePath in dir's go.mod.
+func GoModHasLocalReplace(modDir, modulePath string) bool {
 	data, err := os.ReadFile(filepath.Join(modDir, "go.mod"))
 	if err != nil {
 		return false
@@ -1965,6 +1965,10 @@ func goModHasLocalReplace(modDir, modulePath string) bool {
 		return true
 	}
 	return strings.Contains(content, modulePath+" =>")
+}
+
+func goModHasLocalReplace(modDir, modulePath string) bool {
+	return GoModHasLocalReplace(modDir, modulePath)
 }
 
 // goModSumUncommitted reports uncommitted changes to go.mod or go.sum under repo root.
@@ -2299,7 +2303,6 @@ func readHeadBlob(checkout, rel string) ([]byte, error) {
 	}
 	return out, nil
 }
-
 
 // cascadeCommitPin stages the consumer module's go.mod/go.sum (paths relative to
 // checkout — nested e.g. tools/go.mod) or -A with addAll, then commits with locked

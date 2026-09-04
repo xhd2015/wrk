@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
@@ -52,6 +53,31 @@ func NormalizePath(path string) string {
 		return resolved
 	}
 	return abs
+}
+
+// DirLine formats a checkout path relative to cwd for Dir: / peel display.
+// Rel fail or more than two leading ".." segments → absolute NormalizePath.
+func DirLine(displayCwd, repoPath string) string {
+	base := NormalizePath(displayCwd)
+	target := NormalizePath(repoPath)
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return target
+	}
+	rel = filepath.Clean(rel)
+	slash := filepath.ToSlash(rel)
+	leading := 0
+	for _, p := range strings.Split(slash, "/") {
+		if p == ".." {
+			leading++
+			continue
+		}
+		break
+	}
+	if leading > 2 {
+		return target
+	}
+	return slash
 }
 
 func projectsPath(wrkHome string) string {

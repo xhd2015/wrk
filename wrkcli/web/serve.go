@@ -40,8 +40,8 @@ type Options struct {
 	Dev bool
 }
 
-// Serve binds 127.0.0.1:port (or auto-picks from 8080 when port==0), prints the
-// listen URL to stdout, serves the React SPA (or Vite in Dev) and mounts
+// Serve binds :port (or auto-picks from 8080 when port==0), prints
+// http://127.0.0.1:<port>/, serves the React SPA (or Vite in Dev) and mounts
 // wrkserver at /api/wrk. Blocks until SIGINT/SIGTERM or server error.
 func Serve(opts Options) error {
 	ln, actualPort, err := listenLocal(opts.Port)
@@ -121,21 +121,21 @@ func listenLocal(port int) (net.Listener, int, error) {
 		return nil, 0, fmt.Errorf("wrk: invalid --port %d", port)
 	}
 	if port > 0 {
-		ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 		if err != nil {
-			return nil, 0, fmt.Errorf("wrk: listen 127.0.0.1:%d: %w", port, err)
+			return nil, 0, fmt.Errorf("wrk: listen :%d: %w", port, err)
 		}
 		return ln, port, nil
 	}
 	for p := 8080; p < 8080+200; p++ {
-		ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(p)))
+		ln, err := net.Listen("tcp", ":"+strconv.Itoa(p))
 		if err == nil {
 			return ln, p, nil
 		}
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", ":0")
 	if err != nil {
-		return nil, 0, fmt.Errorf("wrk: listen 127.0.0.1: %w", err)
+		return nil, 0, fmt.Errorf("wrk: listen :0: %w", err)
 	}
 	addr, ok := ln.Addr().(*net.TCPAddr)
 	if !ok {
