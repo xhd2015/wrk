@@ -14,6 +14,8 @@ import (
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/commands"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/mod/scan"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/mod/seed"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/mod/tidy"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/replace"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/resolve"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/update"
@@ -265,7 +267,7 @@ func applyDepReplaceUndoTree(tree []depReplaceUndoCheckout, opts stackReplaceOpt
 				}
 				fmt.Printf("      drop  %s => %s\n", act.modulePath, act.newPath)
 			}
-			if err := tidyDepUpdateConsumer(mod.ModDir, mod.Path, dryRun, false, opts.WithGo); err != nil {
+			if err := tidyDepUpdateConsumer(mod.ModDir, mod.Path, dryRun, false, opts.WithGo, nil); err != nil {
 				return err
 			}
 		}
@@ -529,7 +531,7 @@ func applyDepReplaceTree(tree []depReplaceCheckout, deps []depReplaceDep, opts s
 			if len(mod.Replaces) == 0 {
 				continue
 			}
-			if err := tidyDepUpdateConsumer(mod.ModDir, mod.Path, dryRun, quiet, opts.WithGo); err != nil {
+			if err := tidyDepUpdateConsumer(mod.ModDir, mod.Path, dryRun, quiet, opts.WithGo, nil); err != nil {
 				return err
 			}
 		}
@@ -969,7 +971,11 @@ func applyDepUpdateTree(checkouts []depUpdateTreeCheckout, dryRun bool, withGo w
 			if len(mod.Pins) == 0 {
 				continue
 			}
-			if err := tidyDepUpdateConsumer(mod.ModDir, mod.Path, dryRun, false, withGo); err != nil {
+			locals := make([]seed.Mapping, 0, len(mod.Pins))
+			for _, pin := range mod.Pins {
+				locals = append(locals, seed.Mapping{RepoDir: pin.DepDir, ModulePath: pin.ModulePath})
+			}
+			if err := tidyDepUpdateConsumer(mod.ModDir, mod.Path, dryRun, false, withGo, locals); err != nil {
 				return err
 			}
 		}
@@ -1000,10 +1006,12 @@ func resolveDepUpdateWithGo(opts withgo.ResolveOptions) (withgo.ResolveOptions, 
 }
 
 // tidyDepUpdateConsumer is the shared versioned tidy helper for --dep-update,
-// --dep-replace, and --bring. vendor/ directory → skip tidy (never go mod
-// vendor). Else versioned withgo.ModuleGoLine + withgo.Run. Quiet suppresses
-// tree lines (bring). Does not use goModTidy (pin-locals/unwind).
-func tidyDepUpdateConsumer(modDir, modulePath string, dryRun, quiet bool, resolveOpts withgo.ResolveOptions) error {
+// --dep-replace, and --bring. One pipeline: probe → annotate → gate mutate.
+// vendor/ → skip tidy (never go mod vendor). Else versioned withgo +
+// tidy.Seeded. Locals (local VCS overlay) only from --dep-update;
+// --dep-replace / --bring pass nil. Quiet suppresses tree lines (bring).
+// Does not use goModTidy (pin-locals/unwind).
+func tidyDepUpdateConsumer(modDir, modulePath string, dryRun, quiet bool, resolveOpts withgo.ResolveOptions, locals []seed.Mapping) error {
 	vendor := filepath.Join(modDir, "vendor")
 	if fi, err := os.Stat(vendor); err == nil && fi.IsDir() {
 		if !quiet {
@@ -1027,26 +1035,55 @@ func tidyDepUpdateConsumer(modDir, modulePath string, dryRun, quiet bool, resolv
 	if err != nil {
 		return err
 	}
+	// Shared annotation inputs (both modes). TargetGoroot only — no SDK download.
+	preferLocal := len(locals) > 0
 	toolchain := planDepUpdateGoToolchain(ver, resolveOpts)
+	suffix := depUpdateTidySuffix(toolchain, preferLocal)
+
+	// Gate mutate: dry-run prints the same annotated tidy line apply would claim.
 	if dryRun {
 		if !quiet {
-			printDepUpdateTidyPlan(toolchain)
+			if suffix == "" {
+				fmt.Println("      would: go mod tidy")
+			} else {
+				fmt.Printf("      would: go mod tidy  (%s)\n", suffix)
+			}
 		}
 		return nil
 	}
 
-	var buf bytes.Buffer
-	execOpts := withgo.ExecOptions{Dir: absDir}
-	if invocationVerbose {
-		logDepUpdateGoCommand(absDir, toolchain)
-		mw := io.MultiWriter(os.Stderr, &buf)
-		execOpts.Stdout = mw
-		execOpts.Stderr = mw
-	} else {
-		execOpts.Stdout = &buf
-		execOpts.Stderr = &buf
+	goroot, err := withgo.ResolveGoroot(ver, resolveOpts)
+	if err != nil {
+		return fmt.Errorf("wrk: resolve go for tidy in %s: %w", absDir, err)
 	}
-	if err := withgo.Run(ver, []string{"go", "mod", "tidy"}, resolveOpts, execOpts); err != nil {
+	absGoroot, err := filepath.Abs(goroot)
+	if err != nil {
+		return fmt.Errorf("wrk: resolve GOROOT for tidy in %s: %w", absDir, err)
+	}
+	goBin := filepath.Join(absGoroot, "bin", "go")
+	if fi, err := os.Stat(goBin); err != nil || fi.IsDir() {
+		goBin = "go"
+	}
+	pathEnv := filepath.Join(absGoroot, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
+	baseEnv := append(os.Environ(), "GOROOT="+absGoroot, "PATH="+pathEnv)
+
+	var buf bytes.Buffer
+	var stdout, stderr io.Writer
+	if invocationVerbose {
+		logDepUpdateGoCommand(absDir, toolchain, preferLocal)
+		mw := io.MultiWriter(os.Stderr, &buf)
+		stdout, stderr = mw, mw
+	} else {
+		stdout, stderr = &buf, &buf
+	}
+	if err := tidy.Seeded(nil, tidy.SeededRequest{
+		Dir:     absDir,
+		Locals:  locals,
+		GoCmd:   goBin,
+		Environ: baseEnv,
+		Stdout:  stdout,
+		Stderr:  stderr,
+	}); err != nil {
 		msg := strings.TrimSpace(buf.String())
 		if msg != "" {
 			return fmt.Errorf("wrk: go mod tidy in %s: %w\n%s", absDir, err, msg)
@@ -1054,7 +1091,11 @@ func tidyDepUpdateConsumer(modDir, modulePath string, dryRun, quiet bool, resolv
 		return fmt.Errorf("wrk: go mod tidy in %s: %w", absDir, err)
 	}
 	if !quiet {
-		fmt.Println("      go mod tidy ok")
+		if preferLocal {
+			fmt.Println("      go mod tidy ok  (local git)")
+		} else {
+			fmt.Println("      go mod tidy ok")
+		}
 	}
 	return nil
 }
@@ -1064,9 +1105,8 @@ type depUpdateGoToolchain struct {
 	override bool
 }
 
-// planDepUpdateGoToolchain predicts the same pinned GOROOT that withgo.Run
-// will use, without checking for or downloading the SDK. This lets dry-run
-// remain mutation-free while accurately describing a future tidy command.
+// planDepUpdateGoToolchain returns the TargetGoroot apply will use (no SDK
+// download). Shared by dry-run annotation and apply verbose logging.
 func planDepUpdateGoToolchain(version string, opts withgo.ResolveOptions) depUpdateGoToolchain {
 	goroot := withgo.TargetGoroot(version, opts)
 	defaultGoroot, err := defaultGoGOROOT()
@@ -1097,22 +1137,38 @@ func sameCleanPath(a, b string) bool {
 	return filepath.Clean(a) == filepath.Clean(b)
 }
 
-func printDepUpdateTidyPlan(toolchain depUpdateGoToolchain) {
-	if !toolchain.override {
-		fmt.Println("      would: go mod tidy")
-		return
+// depUpdateTidySuffix annotates would/ok tidy lines when preferLocal
+// (dep-update locals) and/or a non-default GOROOT is used.
+func depUpdateTidySuffix(toolchain depUpdateGoToolchain, preferLocal bool) string {
+	if preferLocal && toolchain.override {
+		return fmt.Sprintf("local git; go=%s; GOROOT=%s", filepath.Base(toolchain.goroot), toolchain.goroot)
 	}
-	fmt.Printf("      would: go mod tidy  (go=%s; GOROOT=%s)\n", filepath.Base(toolchain.goroot), toolchain.goroot)
+	if preferLocal {
+		return "local git"
+	}
+	if toolchain.override {
+		return fmt.Sprintf("go=%s; GOROOT=%s", filepath.Base(toolchain.goroot), toolchain.goroot)
+	}
+	return ""
 }
 
-func logDepUpdateGoCommand(absDir string, toolchain depUpdateGoToolchain) {
+func logDepUpdateGoCommand(absDir string, toolchain depUpdateGoToolchain, preferLocal bool) {
+	hint := ""
+	if preferLocal {
+		hint = "  # local git"
+	}
 	if !toolchain.override {
+		if preferLocal {
+			ts := time.Now().Format("2006-01-02 15:04:05")
+			fmt.Fprintf(os.Stderr, "[%s] $ go -C %s mod tidy%s\n", ts, absDir, hint)
+			return
+		}
 		logGoCommand([]string{"-C", absDir, "mod", "tidy"})
 		return
 	}
 	ts := time.Now().Format("2006-01-02 15:04:05")
 	goBin := filepath.Join(toolchain.goroot, "bin", "go")
-	fmt.Fprintf(os.Stderr, "[%s] $ GOROOT=%s %s -C %s mod tidy\n", ts, toolchain.goroot, goBin, absDir)
+	fmt.Fprintf(os.Stderr, "[%s] $ GOROOT=%s %s -C %s mod tidy%s\n", ts, toolchain.goroot, goBin, absDir, hint)
 }
 
 // resolveDepModuleForReplace resolves module path + absolute dep dir without writing.

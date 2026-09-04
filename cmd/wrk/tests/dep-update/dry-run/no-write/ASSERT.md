@@ -7,7 +7,7 @@ dep  example.com/dep -> v0.0.2
   checkout  .
     module  example.com/consumer
       would: pin  example.com/dep  v0.0.1 -> v0.0.2
-      would: go mod tidy(?:  \(go=go1\.22\.12; GOROOT=.+\))?
+      would: go mod tidy(?:  \(local git(?:; go=go1\.22\.12; GOROOT=.+)?\)|  \(go=go1\.22\.12; GOROOT=.+\))?
 
 dep-update: would update 1 modules in 1 checkouts
 ```
@@ -46,7 +46,7 @@ dep  example\.com/dep -> v0\.0\.2(?:  \(tag .+\))?
   checkout  \.
     module  example\.com/consumer
       would: pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
-      would: go mod tidy(?:  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
+      would: go mod tidy(?:  \(local git(?:; go=go1\.\d+\.\d+; GOROOT=.+)?\)|  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
 
 dep-update: would update 1 modules in 1 checkouts
 `)

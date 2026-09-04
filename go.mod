@@ -6,7 +6,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/xhd2015/agent-pro v0.0.126
-	github.com/xhd2015/dot-pkgs/go-pkgs v0.0.161
+	github.com/xhd2015/dot-pkgs/go-pkgs v0.0.167
 	github.com/xhd2015/gitops v0.0.31
 	github.com/xhd2015/less-flags v1.0.5
 	github.com/xhd2015/skills v0.0.26

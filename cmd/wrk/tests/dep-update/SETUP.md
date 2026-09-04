@@ -1674,7 +1674,8 @@ func assertTidyOkLine(t *testing.T, stdout, consumerModule string) {
 	}
 	found := false
 	for _, line := range strings.Split(stdout, "\n") {
-		if strings.TrimSpace(line) == "go mod tidy ok" {
+		trim := strings.TrimSpace(line)
+		if trim == "go mod tidy ok" || strings.HasPrefix(trim, "go mod tidy ok  (") {
 			found = true
 			break
 		}

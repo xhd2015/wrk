@@ -6,11 +6,11 @@
   checkout  .
     module  example.com/app
       pin  example.com/lib  v1.0.0 -> v1.2.3
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
   checkout  external/kool
     module  example.com/kool
       pin  example.com/lib  v1.0.0 -> v1.2.3
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
 
 dep-update: updated 2, already 0, skipped 0 in 2 checkouts
 ```
@@ -50,11 +50,11 @@ version: 3
   checkout  \.
     module  example\.com/app
       pin  example\.com/lib  v1\.0\.0 -> v1\.2\.3
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
   checkout  external/kool
     module  example\.com/kool
       pin  example\.com/lib  v1\.0\.0 -> v1\.2\.3
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
 
 dep-update: updated 2, already 0, skipped 0 in 2 checkouts
 `)

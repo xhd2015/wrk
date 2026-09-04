@@ -6,7 +6,7 @@
   checkout  .
     module  example.com/app
       would: pin  example.com/lib  v1.0.0 -> v1.2.3
-      would: go mod tidy(?:  \(go=go1\.22\.12; GOROOT=.+\))?
+      would: go mod tidy(?:  \(local git(?:; go=go1\.22\.12; GOROOT=.+)?\)|  \(go=go1\.22\.12; GOROOT=.+\))?
 
 dep-update: would update 1, already 0, skipped 0 in 1 checkouts
 ```
@@ -47,7 +47,7 @@ version: 3
   checkout  \.
     module  example\.com/app
       would: pin  example\.com/lib  v1\.0\.0 -> v1\.2\.3
-      would: go mod tidy(?:  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
+      would: go mod tidy(?:  \(local git(?:; go=go1\.\d+\.\d+; GOROOT=.+)?\)|  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
 
 dep-update: would update 1, already 0, skipped 0 in 1 checkouts
 `)

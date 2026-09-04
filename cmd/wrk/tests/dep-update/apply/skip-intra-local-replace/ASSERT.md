@@ -7,7 +7,7 @@ dep  example.com/dep -> v0.0.2
   checkout  .
     module  example.com/app
       pin  example.com/dep  v0.0.1 -> v0.0.2
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
   checkout  external/dep
     module  example.com/dep/cmd
       skip  example.com/dep  (intra-module replace)
@@ -52,7 +52,7 @@ dep  example\.com/dep -> v0\.0\.2(?:  \(tag .+\))?
   checkout  \.
     module  example\.com/app
       pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
   checkout  external/dep
     module  example\.com/dep/cmd
       skip  example\.com/dep  \(intra-module replace\)

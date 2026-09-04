@@ -7,7 +7,7 @@ dep  example.com/dep -> v0.0.2
   checkout  .
     module  example.com/app
       would: pin  example.com/dep  v0.0.1 -> v0.0.2
-      would: go mod tidy
+      would: go mod tidy(?:  \(local git(?:; go=go1\.\d+\.\d+; GOROOT=.+)?\)|  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
   checkout  external/dep
     module  example.com/dep/cmd
       would: skip  example.com/dep  (intra-module replace)
@@ -50,7 +50,7 @@ dep  example\.com/dep -> v0\.0\.2(?:  \(tag .+\))?
   checkout  \.
     module  example\.com/app
       would: pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
-      would: go mod tidy(?:  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
+      would: go mod tidy(?:  \(local git(?:; go=go1\.\d+\.\d+; GOROOT=.+)?\)|  \(go=go1\.\d+\.\d+; GOROOT=.+\))?
   checkout  external/dep
     module  example\.com/dep/cmd
       would: skip  example\.com/dep  \(intra-module replace\)

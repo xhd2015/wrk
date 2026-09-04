@@ -12,7 +12,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertDryRunBanner(t, resp.Stdout)
 	assertWouldTidyLine(t, resp.Stdout, modConsumer)
 	goRoot := filepath.Join(req.InstallDir, req.WantGoPin)
-	assertContains(t, resp.Stdout, "would: go mod tidy  (go="+req.WantGoPin+"; GOROOT="+goRoot+")")
+	assertContains(t, resp.Stdout, "would: go mod tidy  (local git; go="+req.WantGoPin+"; GOROOT="+goRoot+")")
 	assertGoModUnchanged(t, req)
 	assertNoTidyArtifacts(t, req)
 }

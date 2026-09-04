@@ -7,7 +7,7 @@ dep  example.com/dep -> v0.0.2
   checkout  .
     module  example.com/app
       pin  example.com/dep  v0.0.1 -> v0.0.2
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
 
 dep-update: updated 1 modules in 1 checkouts
 ```
@@ -51,7 +51,7 @@ dep  example\.com/dep -> v0\.0\.2(?:  \(tag .+\))?
   checkout  \.
     module  example\.com/app
       pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
 
 dep-update: updated 1 modules in 1 checkouts
 `)

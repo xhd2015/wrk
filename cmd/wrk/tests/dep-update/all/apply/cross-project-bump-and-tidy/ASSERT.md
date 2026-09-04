@@ -6,7 +6,7 @@
   checkout  .
     module  example.com/app
       pin  example.com/lib  v1.0.0 -> v1.2.3
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
 
 dep-update: updated 1, already 0, skipped 0 in 1 checkouts
 ```
@@ -50,7 +50,7 @@ version: 3
   checkout  \.
     module  example\.com/app
       pin  example\.com/lib  v1\.0\.0 -> v1\.2\.3
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
 
 dep-update: updated 1, already 0, skipped 0 in 1 checkouts
 `)

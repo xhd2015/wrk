@@ -9,11 +9,11 @@ dep  example.com/dep2 -> v0.1.1
     module  example.com/app
       pin  example.com/dep  v0.0.1 -> v0.0.2
       pin  example.com/dep2  v0.1.0 -> v0.1.1
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
   checkout  external/kool
     module  example.com/kool
       pin  example.com/dep  v0.0.1 -> v0.0.2
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
 
 dep-update: updated 2 modules in 2 checkouts
 ```
@@ -56,11 +56,11 @@ dep  example\.com/dep2 -> v0\.1\.1(?:  \(tag .+\))?
     module  example\.com/app
       pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
       pin  example\.com/dep2  v0\.1\.0 -> v0\.1\.1
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
   checkout  external/kool
     module  example\.com/kool
       pin  example\.com/dep  v0\.0\.1 -> v0\.0\.2
-      go mod tidy ok
+      go mod tidy ok(?:  \(local git\))?
 
 dep-update: updated 2 modules in 2 checkouts
 `)
