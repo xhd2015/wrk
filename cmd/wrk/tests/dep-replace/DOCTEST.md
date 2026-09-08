@@ -20,11 +20,11 @@ alone (no write, no tidy). **Not git** → today’s walk-up nearest go.mod and
 mod tidy`** via the same `tidyDepUpdateConsumer` helper as `--dep-update`
 (unless `vendor/`).
 
-**`--undo`:** require git HEAD. For each stack consumer, drop replace
-`OldPath`s present in the working-tree `go.mod` but **absent from HEAD’s
-`go.mod`** (introduced since HEAD). Do **not** restore whole-file content or
-rewrite HEAD `NewPath` for OldPaths that already existed on HEAD. Optional
-dirs filter those module paths. Then versioned tidy. Empty plan →
+**`--undo`:** require git HEAD. For each stack consumer, structurally diff the
+working-tree `go.mod` against `HEAD:go.mod` and drop only `ReplaceAdded`
+changes whose target is a local filesystem path. Preserve `ReplaceChanged`,
+`ReplaceRemoved`, non-local replacements, and unrelated changes. Optional dirs
+filter those module paths. Then versioned tidy. Empty plan →
 `dep-replace: nothing to undo` (exit 0).
 
 **Layer:** **L2** — in-process CLI via `wrkcli.Capture` (`req.InProcess=true`).
@@ -45,7 +45,7 @@ No L3 e2e leaves. Parallel-safe: inject Env/Dir/`WithGo` via Capture.
 | D9 | Existing local filesystem replace whose New already resolves to absDir → skip write + tidy for that module (prefer keeping relative form). Gated-but-all-equivalent → success, `replaced in 0` |
 | R1 | `--undo` only with `--dep-replace`; bare `--dep-replace` still needs a dir **or** `--undo` |
 | R2 | Undo requires git HEAD (not-git → hard error; no banner) |
-| R3 | Drop only WT OldPaths absent from HEAD go.mod; never wholesale `go.mod` restore; never re-add HEAD NewPath for existing OldPaths |
+| R3 | Drop only `ReplaceAdded` local filesystem replacements from the HEAD-to-working-tree diff; preserve `ReplaceChanged`, `ReplaceRemoved`, non-local replacements, and unrelated go.mod content |
 | R4 | Undo empty plan → soft `nothing to undo` (exit 0) |
 | R5 | Undo CLI tree: `==== dep-replace --undo ====`; `drop` / `would: drop`; tidy; summary `undid N replaces in M modules in C checkouts` |
 

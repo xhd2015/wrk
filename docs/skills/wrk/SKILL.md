@@ -105,7 +105,7 @@ wrk src --bring p1 p2
 wrk --bring <path> --no-dep
 # absolute replace on stack consumers + versioned tidy (skip when replace already ≡ target)
 wrk --dep-replace <dir>…
-# drop replaces introduced since HEAD (undo uncommitted --bring / --dep-replace)
+# drop local filesystem replaces introduced since HEAD (undo uncommitted --bring / --dep-replace)
 wrk --dep-replace --undo
 wrk --dep-replace --undo <dir>…
 ```

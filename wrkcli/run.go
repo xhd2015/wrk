@@ -1360,7 +1360,8 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		return runPinLocals(workDir, dryRun, colorFlag)
 	}
 	// --dep-replace: absolute replace on unwind-stack consumers + versioned tidy.
-	// --dep-replace --undo: drop WT-only replaces vs HEAD, then versioned tidy.
+	// --dep-replace --undo: drop local filesystem replaces added by the
+	// HEAD-to-working-tree diff, then versioned tidy.
 	if depReplaceMode {
 		if undoFlag {
 			return runDepReplaceUndo(workDir, depReplacePaths, dryRun, ctx)
@@ -1682,7 +1683,7 @@ Flags:
                                   absolute replace into gated go.mods on the unwind stack (skip when replace already ≡ target)
                                   (require or existing replace; not-git nearest; versioned tidy unless vendor/)
   --dep-replace --undo [<dir>…] [--dry-run]
-                                  drop replaces introduced since HEAD (WT OldPath absent from HEAD go.mod);
+                                  drop local filesystem replaces added by the HEAD-to-working-tree go.mod diff;
                                   optional dirs filter module paths; versioned tidy unless vendor/; requires git
   --dep-update <dir>… [--dry-run]
                                   pin latest tag into every existing requirer on the unwind stack
