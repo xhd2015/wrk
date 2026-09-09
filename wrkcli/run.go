@@ -1666,7 +1666,7 @@ Flags:
                                   (optional pre: gen or manual --commit -m on worktree; optional post-success: --sync, --tag-next, --push, --propagate-tags, --reinstall-local from main)
   --done --no-in-module-replace   block --done on ANY local replace (strict)
   --list                          list worktrees (git worktree list)
-  --status                        show status for git repos under this checkout
+  --status                        show status for git repos under this directory
   --repos                         list git repos under this checkout
   --unwind [--gen-commit-msg --commit …] [--done|--merge-back] [--sync] [--tag-next] [--push] [--reinstall-local] [--dry-run]
                                   plan free-first peel order over the checkout stack DAG

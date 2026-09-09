@@ -81,7 +81,7 @@ Compose order: gen-commit → push → pr. With `--push` on create/attach, alway
 # Inspect & deps
 
 ```sh
-# status for repos under this checkout
+# status for repos under this directory (git or plain with nested checkouts)
 wrk --status
 # list worktrees (alias --list)
 wrk -l

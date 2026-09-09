@@ -5,7 +5,7 @@
 ```
 WorkRoot/myrepo (non-git dir exists)
 saved/myrepo recorded in projects.json
-WorkRoot -> wrk myrepo --status -> is not a git repository (no fallback to saved)
+WorkRoot -> wrk myrepo --status -> scan cwd/myrepo (empty); no fallback to saved
 ```
 
 ## Steps

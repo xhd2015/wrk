@@ -1,15 +1,15 @@
 # Scenario
 
-**Feature**: wrk --status reports a clear error for non-git cwd
+**Feature**: wrk --status on an empty plain directory succeeds with no blocks
 
 ```
-# no .git ancestor exists
-plain cwd -> wrk --status -> non-zero stderr
+# no .git ancestor and no nested git checkouts
+plain empty cwd -> wrk --status -> exit 0, empty stdout
 ```
 
 ## Steps
 
-1. Create `{WorkRoot}/plain` without a `.git` directory.
+1. Create `{WorkRoot}/plain` without a `.git` directory and without nested repos.
 2. Run `wrk --status` from that directory.
 
 ```go

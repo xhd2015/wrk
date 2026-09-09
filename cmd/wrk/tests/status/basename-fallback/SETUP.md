@@ -13,6 +13,7 @@ neutral cwd -> wrk myrepo --status -> stat(cwd/myrepo) fails -> match saved proj
 
 # fallback skipped
 ./<basename> exists in cwd (even non-git) -> use cwd path, no lookup
+  (non-git cwd path: scan under it; empty nested -> empty stdout, not saved fallback)
 <dir> contains path separator -> no lookup
 ```
 

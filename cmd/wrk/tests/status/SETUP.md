@@ -6,6 +6,9 @@
 # cwd resolves to an effective git toplevel; status mode scans that root
 wrk --status from cwd -> scan_repo.Scan(root) -> status blocks
 
+# plain (non-git) cwd: still scan under abs(cwd); scan-order blocks; empty if none
+plain cwd -> wrk --status -> discoverStatusRepos(abs(cwd)) -> blocks or empty stdout
+
 # main-repo status: primary (main + ListLinked) then optional external section
 main-repo --status
   -> PartitionStatusPaths(main, scan, ListLinked)
@@ -24,7 +27,8 @@ wrk --status + other mode -> error (mutually exclusive)
 ## Steps
 
 - Tests invoke `wrk --status` by default with `req.Args = []string{"--status"}`.
-- Descendant scenarios choose whether cwd is inside a git checkout and whether another mode is also present.
+- Descendant scenarios choose whether cwd is inside a git checkout, a plain directory
+  with nested repos, or empty, and whether another mode is also present.
 
 ## Context
 

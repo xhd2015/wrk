@@ -24,7 +24,7 @@ wrk --done                       # merge back and remove worktree
 
 | Command | Purpose |
 |---------|---------|
-| `wrk --status` | Status for git repos under this checkout |
+| `wrk --status` | Status for git repos under this directory |
 | `wrk -l` | List worktrees |
 | `wrk --projects` | Recorded main repository paths |
 | `wrk --projects --github` | Same as `--projects`, only github.com origin remotes |

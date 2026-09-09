@@ -1,34 +1,40 @@
 ## Expected
 
-- Non-zero exit code.
-- Stderr mentions `is not a git repository` (cwd path used, not saved project).
-- Stdout is empty.
+- Exit code 0.
+- Stdout is empty (cwd `./myrepo` is a plain dir with no nested git repos).
+- Stderr is empty.
+- Saved project is not used (would have printed a status block for saved/myrepo).
 
-## Errors
+## Side Effects
 
 - `./myrepo` exists in cwd but is not a git repository; fallback must not run.
 
 ## Exit Code
 
-- Non-zero
+- 0
 
 ```go
 import (
-	"github.com/xhd2015/doctest/assert"
+	"strings"
 	"github.com/xhd2015/doctest/session"
 )
 
 func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
 	_ = d
 	assertErrIsNil(t, err)
-	if resp.ExitCode == 0 {
-		t.Fatalf("expected non-zero exit, got 0 stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
+	if resp.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%q stderr=%q", resp.ExitCode, resp.Stdout, resp.Stderr)
 	}
 	if resp.Stdout != "" {
-		t.Fatalf("stdout should be empty, got %q", resp.Stdout)
+		t.Fatalf("stdout should be empty (no fallback to saved), got %q", resp.Stdout)
 	}
-	assert.Output(t, resp.Stderr, `<contains>
-is not a git repository
-</contains>`)
+	if resp.Stderr != "" {
+		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
+	}
+	// Guard: saved subject must not appear (would indicate projects.json fallback).
+	if strings.Contains(resp.Stdout, "Dir:") {
+		t.Fatalf("unexpected status block (fallback ran?): %q", resp.Stdout)
+	}
+	_ = req
 }
 ```

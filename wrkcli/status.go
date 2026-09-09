@@ -57,6 +57,11 @@ func sameNormalizedPath(a, b string) bool {
 
 // runStatus prints status for statusRoot. displayCwd is the invocation work
 // directory used only for Dir: labels (kept when --main rewrites status root).
+//
+// When statusRoot is not inside a git work tree, abs(statusRoot) is still used
+// as the scan root so nested checkouts under a plain directory are reported
+// (scan-order blocks, no Remote / external partition). Zero nested repos →
+// exit 0 with empty stdout.
 func runStatus(statusRoot, displayCwd string, colorEnabled bool, fetchEnabled bool) error {
 	cwd, err := filepath.Abs(statusRoot)
 	if err != nil {
@@ -67,17 +72,17 @@ func runStatus(statusRoot, displayCwd string, colorEnabled bool, fetchEnabled bo
 		return fmt.Errorf("resolve display cwd: %w", err)
 	}
 
-	if !worktree.IsInsideWorkTree(cwd) {
-		return fmt.Errorf("%s is not a git repository", cwd)
-	}
+	checkoutRoot := cwd
+	if worktree.IsInsideWorkTree(cwd) {
+		top, err := worktree.ShowToplevel(cwd)
+		if err != nil {
+			return err
+		}
+		checkoutRoot = top
 
-	checkoutRoot, err := worktree.ShowToplevel(cwd)
-	if err != nil {
-		return err
-	}
-
-	if mainRepo, ok := linkedInTreeMainRepo(cwd); ok {
-		return runStatusLinkedInTreeCwd(displayBase, cwd, mainRepo, colorEnabled)
+		if mainRepo, ok := linkedInTreeMainRepo(cwd); ok {
+			return runStatusLinkedInTreeCwd(displayBase, cwd, mainRepo, colorEnabled)
+		}
 	}
 
 	repos, err := discoverStatusRepos(context.Background(), checkoutRoot)
@@ -95,7 +100,8 @@ func runStatus(statusRoot, displayCwd string, colorEnabled bool, fetchEnabled bo
 	showRemote := worktree.IsMainRepo(checkoutRoot)
 	effectiveFetch := fetchEnabled && showRemote
 
-	// Non-main checkouts: scan-order only (no ListLinked partition / external header).
+	// Non-main checkouts and plain (non-git) dirs: scan-order only (no
+	// ListLinked partition / external header). Plain dirs are never main repos.
 	if !showRemote {
 		scanColorEnabled := colorEnabled
 		blocksPrinted := 0
