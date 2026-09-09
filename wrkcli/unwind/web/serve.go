@@ -54,14 +54,14 @@ type server struct {
 	dir  string
 	home string
 
-	mu       sync.Mutex
-	status   string // loading | ready | error
-	snapErr  string
-	snap     *unwind.Snapshot
-	running  bool
-	logs     []string
-	subs     []chan string
-	doneCh   chan string
+	mu      sync.Mutex
+	status  string // loading | ready | error
+	snapErr string
+	snap    *unwind.Snapshot
+	running bool
+	logs    []string
+	subs    []chan string
+	doneCh  chan string
 }
 
 // Serve listens immediately, prints the URL, then collects the snapshot in the
@@ -193,8 +193,11 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	out := s.currentPlan(s.opts)
-	raw, _ := json.Marshal(pagePayload{Status: out.Status, Error: out.Error, Plan: out.JobPlan})
+	// Shell only: status + CLI flags. Full BuildJobPlan runs on /plan so the
+	// HTML paints immediately (loading spinner / async fetch).
+	status, errMsg, _ := s.snapState()
+	shell := &unwind.JobPlan{Flags: unwind.BuildJobPlan(nil, s.opts).Flags}
+	raw, _ := json.Marshal(pagePayload{Status: status, Error: errMsg, Plan: shell})
 	body := strings.Replace(indexHTML, jsonPlaceholder, "/*__UNWIND_JSON__*/"+string(raw), 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, body)
@@ -278,7 +281,7 @@ func (s *server) apply(flags unwind.UnwindFlags, snap *unwind.Snapshot) {
 	defer restore()
 	s.appendLog("==== unwind apply ====")
 	out, err := captureApplyOutput(func() error {
-		return unwind.ApplyUnwind(s.dir, s.home, snap.Inv.Members, snap.RepoEdges, snap.Peel, flags)
+		return unwind.ApplyUnwindFromSnapshot(s.dir, s.home, snap, flags)
 	})
 	for _, line := range strings.Split(out, "\n") {
 		if line != "" {
@@ -387,6 +390,7 @@ func flagsFromQuery(r *http.Request, base unwind.UnwindFlags) unwind.UnwindFlags
 	jf.GenCommitMsg = boolQ("gen_commit_msg", jf.GenCommitMsg)
 	jf.Commit = boolQ("commit", jf.Commit)
 	jf.NoVerify = boolQ("no_verify", jf.NoVerify)
+	jf.Cleanup = boolQ("cleanup", jf.Cleanup)
 	return unwind.FlagsFromJob(jf, base.GenCommitArgs)
 }
 

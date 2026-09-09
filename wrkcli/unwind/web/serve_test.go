@@ -44,18 +44,56 @@ func TestIndexAndPlan(t *testing.T) {
 		"epochNodes", `data-action-project`, "aproj",
 		"data-plan-loading", "READY_POLL_MS", "Building unwind plan",
 		`[data-plan-loading="1"]`, // spinner DOM reused across polls
+		"renderActionDAG", `data-flag="cleanup"`, "action_graph",
 		"no actions in plan", "action-arr",
+		"orderLanes", "LANE_GUTTER", `data-lane-gutter`, `data-lane-band`,
+		`data-matrix-corner`, "project",
+		"expandCommitActions", "assignTopoRanksClient",
+		"awaitingPlan", "maxIters", "renderPhases", "data-phases",
+		"phase-1 · cross-repo unwind", "phase-2 · intra-repo update", "repo-acc",
+		"no nested module requires a Phase 1 tag", "det.open = true",
+		"wrapLanes", "opts.wrapLanes",
+		"renderModuleGraphInto", `data-phase-id`, "renderSnapshotPhase",
+		`"snapshot"`, `"ship"`, "push + sync", "show replace edges",
+		"dep depth", "medge", "MNODE_W = 320",
+		"moduleShortLabel", `dir === "."`, "isRoot", "moduleIsUnchanged", "dimmed",
+		"consumer → dep", `data-module-dimmed`,
+		"arrows to unchanged deps hidden", "dimmedDep",
+
+		`data-rank-matrix`,
+		"gen-commit-msg", "add-all", "lane_levels", "laneLevels",
+		"add-all fans out to pins and gen-commit-msg", "dep-update", "pinAfterAdd", "pinJoinLast",
+		"Msg does not wait on pins",
+		"bindEdgeHover", "bindNodeHover", "applyGraphHL", "clearGraphHL",
+		"aedge-hit", "medge-hit", ".aedge.hl", ".anode.hl",
 	} {
 		if !strings.Contains(strings.ToLower(body), strings.ToLower(m)) && !strings.Contains(body, m) {
 			t.Fatalf("GET / missing %q", m)
 		}
 	}
-	// Embedded plan must expose epochs for the action DAG.
-	if !strings.Contains(body, `"epochs"`) {
-		t.Fatal("GET / embedded plan missing epochs")
+	// Shell embed: status + flags only (no full action graph).
+	const marker = "/*__UNWIND_JSON__*/"
+	mi := strings.Index(body, marker)
+	if mi < 0 {
+		t.Fatal("GET / missing INITIAL JSON marker")
 	}
-	if !strings.Contains(body, `"status":"ready"`) {
+	rest := body[mi+len(marker):]
+	end := strings.Index(rest, ";")
+	if end < 0 {
+		t.Fatal("GET / INITIAL JSON not terminated")
+	}
+	embed := rest[:end]
+	if strings.Contains(embed, `"epochs":[{`) || strings.Contains(embed, `"epochs": [{`) {
+		t.Fatal("GET / embed must not include populated epochs; use /plan")
+	}
+	if strings.Contains(embed, `"action_graph"`) {
+		t.Fatal("GET / embed must not include action_graph; use /plan")
+	}
+	if !strings.Contains(embed, `"status":"ready"`) {
 		t.Fatal("GET / sync NewHandler embed should be status ready")
+	}
+	if !strings.Contains(embed, `"flags"`) {
+		t.Fatal("GET / shell embed missing flags")
 	}
 
 	pres, err := http.Get(ts.URL + "/plan?merge_back=1")

@@ -53,6 +53,9 @@ type UnwindFlags struct {
 	// AddAll stages all changes when cascade pin commits (and gen-commit when set).
 	// Top-level --add-all is accepted with --unwind without requiring --commit.
 	AddAll bool
+	// Cleanup includes latest-drift / drop-replace pins in the action graph
+	// (web toggle / --unwind-cleanup). Apply still uses full cascade today.
+	Cleanup bool
 	// ShowGraph is the read-only inspect path (--unwind --show-graph).
 	ShowGraph bool
 	// Verify is the read-only post-job audit path (--unwind --verify).
@@ -880,29 +883,7 @@ func runUnwind(workDir, wrkHome string, flags UnwindFlags) error {
 		}
 		return runUnwindVerify(workDir, flags.JSON, colorOn)
 	}
-	snap, err := CollectSnapshot(workDir, SnapshotOpts{Cascade: flags.TagNext})
-	if err != nil {
-		return err
-	}
-	// Soft follow warnings (missing/non-git local replace targets) on stderr.
-	for _, w := range snap.Inv.Warnings {
-		msg := w
-		if !strings.HasPrefix(msg, "warning:") && !strings.HasPrefix(msg, "Warning:") {
-			msg = "warning: " + msg
-		}
-		fmt.Fprintln(os.Stderr, msg)
-	}
-	members := snap.Inv.Members
-	edges := snap.RepoEdges
-	plan := snap.Peel
-	if err := ValidateUnwindFlags(plan, flags); err != nil {
-		return err
-	}
-	if flags.DryRun {
-		_, err = fmt.Fprint(os.Stdout, formatUnwindDryRun(plan, members, workDir, flags, snap.Cascade, snap.ModuleNodes, snap.ModuleEdges))
-		return err
-	}
-	return ApplyUnwind(workDir, wrkHome, members, edges, plan, flags)
+	return runUnwindJob(workDir, wrkHome, flags)
 }
 
 // ApplyUnwind peels free-first dirty stack repos with explicit ship/land flags.

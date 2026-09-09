@@ -1,6 +1,7 @@
 package unwind
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,9 @@ import (
 
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/commands"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/mod/seed"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/mod/tidy"
+	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/withgo"
 	"github.com/xhd2015/wrk/wrkcli/storage"
 	"golang.org/x/mod/modfile"
 )
@@ -743,14 +747,14 @@ func pinReadyExternalReplacesBeforeGenCommit(checkout string, members []StackMem
 		if err := cascadePinKeepLocalReplace(consumerModDir, step.DepModulePath, step.TagOrVersion, depNode, byLabel); err != nil {
 			return pinFail(fmt.Errorf("wrk: ready-external pin %s <- %s: %w", step.ModulePath, step.DepModulePath, err))
 		}
-		if err := goModTidyForCascadePin(consumerModDir, saved, usePartial, step.DepModulePath); err != nil {
+		if err := goModTidyForCascadePin(consumerModDir, saved, usePartial, step.DepModulePath, stackMainDir(byLabel, depNode.RepoLabel)); err != nil {
 			return pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
 		}
 		_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
 		pinSum := readGoSumFile(consumerModDir)
 
 		// Selective pin commit only (D7); never scoop feature WIP into pin.
-		if err := cascadeCommitPin(checkout, consumerModDir, step.DepModulePath, step.TagOrVersion, false); err != nil {
+		if err := cascadeCommitPin(checkout, consumerModDir, step.DepModulePath, depNode.LatestTag, step.TagOrVersion, false); err != nil {
 			return pinFail(err)
 		}
 		if stats != nil {
@@ -1283,7 +1287,7 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			if err := cascadePinKeepLocalReplace(consumerModDir, step.DepModulePath, step.TagOrVersion, depNode, byLabel); err != nil {
 				return skippedTags, pinFail(fmt.Errorf("wrk: cascade pin %s <- %s: %w", step.ModulePath, step.DepModulePath, err))
 			}
-			if err := goModTidyForCascadePin(consumerModDir, saved, usePartial, step.DepModulePath); err != nil {
+			if err := goModTidyForCascadePin(consumerModDir, saved, usePartial, step.DepModulePath, stackMainDir(byLabel, depNode.RepoLabel)); err != nil {
 				return skippedTags, pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
 			}
 			_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
@@ -1294,7 +1298,7 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			// commit is always selective (addAll=false), independent of --add-all.
 			// Commit while WT still holds Base+pin (no WIP); restore WIP after.
 			// Pass consumerModDir so nested modules stage tools/go.mod, not only root.
-			if err := cascadeCommitPin(consumerCheckout, consumerModDir, step.DepModulePath, step.TagOrVersion, false); err != nil {
+			if err := cascadeCommitPin(consumerCheckout, consumerModDir, step.DepModulePath, depNode.LatestTag, step.TagOrVersion, false); err != nil {
 				return skippedTags, pinFail(err)
 			}
 			if stats != nil {
@@ -1651,13 +1655,13 @@ func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addRei
 		if err := cascadePinKeepLocalReplace(consumerModDir, job.dep, job.ver, depNode, byLabel); err != nil {
 			return pinFail(fmt.Errorf("wrk: deferred repin %s <- %s: %w", job.consumer, job.dep, err))
 		}
-		if err := goModTidyForCascadePin(consumerModDir, saved, usePartial, job.dep); err != nil {
+		if err := goModTidyForCascadePin(consumerModDir, saved, usePartial, job.dep, stackMainDir(byLabel, depNode.RepoLabel)); err != nil {
 			return pinFail(fmt.Errorf("wrk: go mod tidy in %s: %w", consumerModDir, err))
 		}
 		_ = expandGoModRequireBlocks(filepath.Join(consumerModDir, "go.mod"))
 		pinSum := readGoSumFile(consumerModDir)
 
-		if err := cascadeCommitPin(consumerCheckout, consumerModDir, job.dep, job.ver, false); err != nil {
+		if err := cascadeCommitPin(consumerCheckout, consumerModDir, job.dep, depNode.LatestTag, job.ver, false); err != nil {
 			return pinFail(err)
 		}
 		if stats != nil {
@@ -2021,7 +2025,21 @@ func saveGoModSumSnap(modDir string) (goModSumSnap, error) {
 	return s, nil
 }
 
-// goModTidyForCascadePin runs go mod tidy for a cascade/pinReady/repin step.
+// stackMainDir is the dep git toplevel for Seeded tidy (tag-next writes tags here).
+func stackMainDir(byLabel map[string]StackMember, label string) string {
+	m, ok := byLabel[label]
+	if !ok {
+		return ""
+	}
+	if m.MainRepo != "" {
+		return m.MainRepo
+	}
+	return m.Path
+}
+
+// goModTidyForCascadePin tidies a cascade/pinReady/JobPlan pin like wrk --dep-update:
+// tidy.Seeded with a local-git overlay (GOPROXY=direct + url.insteadOf), not a
+// networked plain go mod tidy.
 //
 // When usePartial, Base go.mod has stripped WIP-only droppable replaces
 // (writeBaseGoModSum). Tidy of the working-tree source would then fail to
@@ -2029,7 +2047,10 @@ func saveGoModSumSnap(modDir string) (goModSumSnap, error) {
 // openterm2). Temporarily re-apply WIP filesystem replaces except skipModule
 // (the dep this step is publishing), tidy, then drop the overlay so the pin
 // commit does not scoop them (D7).
-func goModTidyForCascadePin(modDir string, saved goModSumSnap, usePartial bool, skipModule string) error {
+func goModTidyForCascadePin(modDir string, saved goModSumSnap, usePartial bool, skipModule, depRepoDir string) error {
+	if fi, err := os.Stat(filepath.Join(modDir, "vendor")); err == nil && fi.IsDir() {
+		return nil
+	}
 	var overlayed []string
 	if usePartial {
 		var err error
@@ -2038,11 +2059,69 @@ func goModTidyForCascadePin(modDir string, saved goModSumSnap, usePartial bool, 
 			return err
 		}
 	}
-	tidyErr := goModTidy(modDir)
+	tidyErr := goModTidySeeded(modDir, skipModule, depRepoDir)
 	if len(overlayed) > 0 {
 		dropOverlayReplaces(modDir, overlayed)
 	}
 	return tidyErr
+}
+
+func goModTidySeeded(modDir, depModule, depRepoDir string) error {
+	absDir, err := filepath.Abs(modDir)
+	if err != nil {
+		absDir = modDir
+	}
+	var locals []seed.Mapping
+	if depModule != "" && depRepoDir != "" {
+		locals = []seed.Mapping{{RepoDir: depRepoDir, ModulePath: depModule}}
+	}
+	goBin, baseEnv := cascadeTidyGo(absDir)
+	var buf bytes.Buffer
+	if err := tidy.Seeded(nil, tidy.SeededRequest{
+		Dir:     absDir,
+		Locals:  locals,
+		GoCmd:   goBin,
+		Environ: baseEnv,
+		Stdout:  &buf,
+		Stderr:  &buf,
+	}); err != nil {
+		msg := strings.TrimSpace(buf.String())
+		if msg != "" {
+			return fmt.Errorf("failed to execute go mod tidy: %w\n%s", err, msg)
+		}
+		return fmt.Errorf("failed to execute go mod tidy: %w", err)
+	}
+	return nil
+}
+
+func cascadeTidyGo(modDir string) (goBin string, env []string) {
+	goBin = "go"
+	env = append([]string(nil), os.Environ()...)
+	ver, err := withgo.ModuleGoLine(modDir)
+	if err != nil {
+		return goBin, env
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return goBin, env
+	}
+	opts := withgo.ResolveOptions{InstallDir: filepath.Join(home, "installed"), Download: false}
+	goroot, err := withgo.ResolveGoroot(ver, opts)
+	if err != nil {
+		return goBin, env
+	}
+	absGoroot, err := filepath.Abs(goroot)
+	if err != nil {
+		return goBin, env
+	}
+	bin := filepath.Join(absGoroot, "bin", "go")
+	if fi, err := os.Stat(bin); err != nil || fi.IsDir() {
+		return goBin, env
+	}
+	return bin, append(env,
+		"GOROOT="+absGoroot,
+		"PATH="+filepath.Join(absGoroot, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
 }
 
 // overlayWIPReplacesExcept copies local filesystem replaces from saved WIP
@@ -2305,17 +2384,22 @@ func readHeadBlob(checkout, rel string) ([]byte, error) {
 }
 
 // cascadeCommitPin stages the consumer module's go.mod/go.sum (paths relative to
-// checkout — nested e.g. tools/go.mod) or -A with addAll, then commits with locked
-// subject prefix "wrk: cascade pin <mod> @ <ver>". No-op when nothing to commit.
+// checkout — nested e.g. tools/go.mod) or -A with addAll, then commits with
+// FormatDepUpdateCommitMsg (dep: / deps: from -> to). No-op when nothing to commit.
 //
 // Selective path (addAll=false) uses `git commit --only` so a pre-staged index of
 // feature WIP is never scooped into the pin commit (D7). Plain `git add go.mod`
 // + `git commit` would commit the entire index.
-func cascadeCommitPin(repo, modDir, depModule, ver string, addAll bool) error {
+func cascadeCommitPin(repo, modDir, depModule, fromTag, toTag string, addAll bool) error {
 	if repo == "" {
 		return nil
 	}
-	msg := "wrk: cascade pin " + depModule + " @ " + ver
+	msg := FormatDepUpdateCommitMsg([]DepUpdateBump{{
+		Module: depModule, From: fromTag, To: toTag,
+	}})
+	if msg == "" {
+		msg = "dep: " + depModule
+	}
 
 	if addAll {
 		if err := gitRunDir(repo, "add", "-A"); err != nil {

@@ -16,7 +16,7 @@ import (
 // UnwindGraphReport is the read-only unwind stack graph (repo + module + summary).
 type UnwindGraphReport struct {
 	WorkDir  string             `json:"work_dir,omitempty"`
-	Repos    UnwindGraphRepos    `json:"repos"`
+	Repos    UnwindGraphRepos   `json:"repos"`
 	Modules  UnwindGraphModules `json:"modules"`
 	Summary  UnwindGraphSummary `json:"summary"`
 	Warnings []string           `json:"warnings,omitempty"`
@@ -518,6 +518,7 @@ func attachTagScopeToModules(nodes []UnwindGraphModuleNode, members []StackMembe
 			nodes[i].OwnedChanged = true
 		}
 	}
+	clearNextTagsOnCleanRepos(nodes, members)
 }
 
 // FormatUnwindGraphHuman renders the human show-graph body (trailing newline).

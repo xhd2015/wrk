@@ -31,6 +31,74 @@
       border-radius: 12px;
       overflow: auto;
     }
+    .phases { display: flex; flex-direction: column; gap: 1rem; margin: 1rem 0 1.5rem; }
+    .phase-block {
+      background: var(--canvas);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .phase-head {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+      padding: .65rem 1rem; border-bottom: 1px solid var(--line);
+      background: #151820;
+    }
+    .phase-head h2 {
+      margin: 0; font-size: .95rem; font-weight: 650;
+    }
+    .phase-head .muted { font-size: .75rem; }
+    .phase-body { overflow: auto; }
+    .phase-body .empty { padding: 1rem; }
+    .repo-acc { border-top: 1px solid var(--line); }
+    .repo-acc:first-child { border-top: 0; }
+    .repo-acc > summary {
+      cursor: pointer; padding: .55rem 1rem; font-size: .82rem; font-weight: 600;
+      list-style: none; background: #12151a;
+    }
+    .repo-acc > summary::-webkit-details-marker { display: none; }
+    .repo-acc > summary::before { content: "▸ "; color: var(--muted); }
+    .repo-acc[open] > summary::before { content: "▾ "; }
+    .repo-acc .phase-body { border-top: 1px solid var(--line); }
+    .mnode {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-left-width: 3px;
+      border-radius: 10px;
+      padding: .4rem .55rem;
+      width: 100%;
+      box-sizing: border-box;
+      font-size: .72rem;
+      box-shadow: 0 6px 18px rgba(0,0,0,.28);
+    }
+    .mnode.dimmed { opacity: .45; }
+    .mnode .k { font-family: ui-monospace, Menlo, monospace; font-weight: 700; font-size: .68rem; word-break: break-all; line-height: 1.25; }
+    .mnode .path { margin-top: .12rem; color: var(--muted); font-size: .62rem; word-break: break-all; line-height: 1.25; }
+    .mnode .d { margin-top: .12rem; color: var(--muted); font-size: .62rem; word-break: break-all; line-height: 1.25; }
+    .medge { fill: none; stroke-width: 1.4; pointer-events: none; }
+    .medge.intra { stroke: #5a6570; }
+    .medge.cross { stroke: #e6a35a; stroke-dasharray: 5 4; }
+    .medge.replace { stroke: #6b7280; stroke-dasharray: 2 3; opacity: .55; }
+    .medge.hl { stroke: #93c5fd; stroke-width: 2.6; opacity: 1; }
+    .aedge-hit, .medge-hit {
+      fill: none; stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer;
+    }
+    .anode.hl, .mnode.hl {
+      border-color: #93c5fd;
+      box-shadow: 0 0 0 2px rgba(147,197,253,.45);
+    }
+    .mnode.dimmed.hl { opacity: 1; }
+    .mod-legend {
+      display: flex; flex-wrap: wrap; gap: .75rem 1.2rem; align-items: center;
+      padding: .5rem 1rem; font-size: .72rem; color: var(--muted);
+      border-top: 1px solid var(--line);
+    }
+    .mod-legend label { display: flex; gap: .35rem; align-items: center; cursor: pointer; }
+    .mod-legend i {
+      display: inline-block; width: 18px; height: 0; border-top: 2px solid #5a6570;
+      vertical-align: middle;
+    }
+    .mod-legend i.cross { border-top-style: dashed; border-color: #e6a35a; }
+    .mod-legend i.replace { border-top-style: dashed; border-color: #6b7280; }
     .preview-wrap .empty {
       padding: 1.25rem 1rem; color: var(--muted); font-style: italic;
     }
@@ -59,6 +127,9 @@
     .flags.disabled { opacity: .55; }
     .flags.disabled input { pointer-events: none; }
     #action-graph { width: 100%; display: block; min-width: 720px; }
+    .lane-band-even { fill: rgba(255,255,255,.02); }
+    .lane-band-odd { fill: rgba(255,255,255,.045); }
+    .lane-band-rule { stroke: #2a3038; stroke-width: 1; }
     .anode, .aproj {
       background: var(--card);
       border: 1px solid var(--line);
@@ -74,8 +145,9 @@
     }
     .anode.peel .k { color: var(--warn); }
     .anode.merge-back .k, .anode.done .k, .astep.merge-back .k, .astep.done .k { color: var(--merge); }
-    .anode.tag-next .k, .anode.pin .k, .anode.gen-commit .k,
-    .astep.tag-next .k, .astep.pin .k, .astep.gen-commit .k { color: var(--tag); }
+    .anode.tag-next .k, .anode.pin .k, .anode.dep-update .k, .anode.gen-commit .k, .anode.gen-commit-msg .k,
+    .anode.add-all .k, .anode.commit .k,
+    .astep.tag-next .k, .astep.pin .k, .astep.dep-update .k, .astep.gen-commit .k { color: var(--tag); }
     .anode.push .k, .anode.sync .k, .anode.reinstall-local .k { color: var(--ship); }
     .anode .t, .aproj .t {
       margin-top: .18rem;
@@ -104,7 +176,12 @@
     .aproj .why {
       margin-top: .3rem; color: var(--muted); font-size: .62rem;
     }
-    .aedge { fill: none; stroke: #5a6570; stroke-width: 1.5; }
+    .anode .reason, .aproj .reason {
+      margin-top: .15rem; font-size: .6rem; color: var(--muted);
+      font-family: ui-monospace, Menlo, monospace;
+    }
+    .aedge { fill: none; stroke: #5a6570; stroke-width: 1.5; pointer-events: none; }
+    .aedge.hl { stroke: #93c5fd; stroke-width: 2.6; }
   </style>
 </head>
 <body>
@@ -124,6 +201,7 @@
       <label><input type="checkbox" data-flag="commit"> --commit</label>
       <label><input type="checkbox" data-flag="add_all"> --add-all</label>
       <label><input type="checkbox" data-flag="no_verify"> --no-verify</label>
+      <label title="include latest-drift / drop-replace pins"><input type="checkbox" data-flag="cleanup"> cleanup</label>
     </div>
     <div class="muted" id="agent-runner" style="margin:.25rem 0 .5rem;font-size:.85rem"></div>
     <div>
@@ -141,6 +219,11 @@
     let snapStatus = (INITIAL && INITIAL.status) || "ready";
     let snapError = (INITIAL && INITIAL.error) || "";
     let plan = INITIAL && INITIAL.plan ? INITIAL.plan : { flags: {}, epochs: [], blockers: [], can_run: false };
+    // Shell embed has flags only; full graph arrives from /plan.
+    let awaitingPlan = !(
+      (plan.phases && plan.phases.length) ||
+      (plan.action_graph && plan.action_graph.actions && plan.action_graph.actions.length)
+    );
     let planTimer = null;
     let planAbort = null;
     let planSeq = 0;
@@ -152,6 +235,12 @@
     const NODE_GAP = 14;
     const COL_GAP = 48;
     const CHAR_PER_LINE = 42;
+    // Left gutter for project swimlane labels (topo columns sit to the right).
+    const LANE_GUTTER = 148;
+    const RANK_HEADER_H = 36;
+    const LANE_PAD = 10;
+    // Within same rank × project: serial display/run order.
+
 
     function textLines(s) {
       return Math.max(1, Math.ceil(String(s || "").length / CHAR_PER_LINE));
@@ -244,6 +333,84 @@
       const n = document.createElementNS("http://www.w3.org/2000/svg", name);
       if (attrs) Object.keys(attrs).forEach((k) => n.setAttribute(k, attrs[k]));
       return n;
+    }
+
+    function findNodeByAttr(root, attr, id) {
+      if (!id) return null;
+      const nodes = root.querySelectorAll("[" + attr + "]");
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].getAttribute(attr) === id) return nodes[i];
+      }
+      return null;
+    }
+
+    function clearGraphHL(svg) {
+      svg.querySelectorAll(".hl").forEach(function (el) { el.classList.remove("hl"); });
+    }
+
+    function applyGraphHL(svg, edges, nodeEls) {
+      clearGraphHL(svg);
+      (edges || []).forEach(function (p) { if (p) p.classList.add("hl"); });
+      (nodeEls || []).forEach(function (n) { if (n) n.classList.add("hl"); });
+    }
+
+    function nodesForEdge(svg, nodeAttr, p) {
+      const nodes = [];
+      [p.getAttribute("data-edge-from"), p.getAttribute("data-edge-to")].forEach(function (id) {
+        const n = findNodeByAttr(svg, nodeAttr, id);
+        if (n) nodes.push(n);
+      });
+      return nodes;
+    }
+
+    // Invisible fat stroke over each edge; hover highlights the edge and endpoints.
+    function bindEdgeHover(svg, edgeClass, nodeAttr) {
+      if (!svg) return;
+      const edges = svg.querySelectorAll("path." + edgeClass);
+      edges.forEach(function (p) {
+        const hit = p.cloneNode(false);
+        hit.setAttribute("class", edgeClass + "-hit");
+        hit.removeAttribute("marker-end");
+        p.parentNode.appendChild(hit);
+        hit.addEventListener("mouseenter", function () {
+          applyGraphHL(svg, [p], nodesForEdge(svg, nodeAttr, p));
+        });
+        hit.addEventListener("mouseleave", function () { clearGraphHL(svg); });
+      });
+      bindNodeHover(svg, edgeClass, nodeAttr);
+    }
+
+    // Hover a node: incident edges (both directions) plus neighbor cards.
+    function bindNodeHover(svg, edgeClass, nodeAttr) {
+      if (!svg) return;
+      const cards = svg.querySelectorAll("[" + nodeAttr + "]");
+      cards.forEach(function (card) {
+        const id = card.getAttribute(nodeAttr);
+        if (!id) return;
+        card.addEventListener("mouseenter", function () {
+          const hit = [];
+          const seen = {};
+          const nodeEls = [];
+          function addNode(n) {
+            if (!n) return;
+            const nid = n.getAttribute(nodeAttr);
+            if (!nid || seen[nid]) return;
+            seen[nid] = true;
+            nodeEls.push(n);
+          }
+          addNode(card);
+          svg.querySelectorAll("path." + edgeClass).forEach(function (p) {
+            const from = p.getAttribute("data-edge-from");
+            const to = p.getAttribute("data-edge-to");
+            if (from !== id && to !== id) return;
+            hit.push(p);
+            addNode(findNodeByAttr(svg, nodeAttr, from));
+            addNode(findNodeByAttr(svg, nodeAttr, to));
+          });
+          applyGraphHL(svg, hit, nodeEls);
+        });
+        card.addEventListener("mouseleave", function () { clearGraphHL(svg); });
+      });
     }
 
     function buildStepCard(st) {
@@ -391,6 +558,806 @@
       host.appendChild(pane);
     }
 
+    function actionCardHeight(a) {
+      const pad = 22;
+      const line = 15;
+      const t = (a.subject && a.subject.display) || "";
+      const d = a.detail || "";
+      const r = a.reason ? 1 : 0;
+      return pad + (1 + textLines(t) + (d ? textLines(d) : 0) + r) * line;
+    }
+
+    function buildActionCard(a) {
+      const div = document.createElement("div");
+      div.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+      div.className = "anode " + (a.mode || "");
+      div.setAttribute("data-action-id", a.id || "");
+      div.setAttribute("data-action-kind", a.mode || "");
+      div.setAttribute("data-action-reason", a.reason || "");
+      div.setAttribute("data-action-target", (a.subject && a.subject.display) || "");
+      const k = document.createElement("div");
+      k.className = "k";
+      k.textContent = a.mode || "?";
+      const t = document.createElement("div");
+      t.className = "t";
+      t.textContent = (a.subject && a.subject.display) || "";
+      t.title = t.textContent;
+      div.appendChild(k);
+      div.appendChild(t);
+      if (a.detail) {
+        const d = document.createElement("div");
+        d.className = "d";
+        d.textContent = a.detail;
+        d.title = a.detail;
+        div.appendChild(d);
+      }
+      if (a.reason) {
+        const r = document.createElement("div");
+        r.className = "reason";
+        r.textContent = a.reason;
+        div.appendChild(r);
+      }
+      return div;
+    }
+
+    function actionLane(a) {
+      return a.lane || (a.subject && a.subject.repo_label) || "_";
+    }
+
+    function cloneAction(a, overrides) {
+      const o = {};
+      Object.keys(a).forEach(function (k) { o[k] = a[k]; });
+      Object.keys(overrides || {}).forEach(function (k) { o[k] = overrides[k]; });
+      return o;
+    }
+
+    // Expand gen-commit: add-all fans out to pins and gen-commit-msg;
+    // commit (or merge-back if no --commit) joins both. Msg does not wait on pins.
+    function expandCommitActions(raw, flags) {
+      const f = flags || {};
+      const actions = [];
+      const idMapLast = {};
+      const pinAfterAdd = [];
+      const pinJoinLast = [];
+      raw.forEach(function (a) {
+        if (a.mode !== "gen-commit") {
+          actions.push(cloneAction(a, { deps: (a.deps || []).slice() }));
+          return;
+        }
+        const incoming = (a.deps || []).slice();
+        let addID = "";
+        if (f.add_all) {
+          const add = cloneAction(a, {
+            id: a.id + "#add-all", mode: "add-all", detail: "", deps: [],
+          });
+          actions.push(add);
+          addID = add.id;
+        }
+        if (addID && incoming.length) {
+          pinAfterAdd.push({ addID: addID, pinIDs: incoming.slice() });
+        }
+        const msg = cloneAction(a, {
+          id: a.id + "#gen-commit-msg", mode: "gen-commit-msg",
+          detail: a.detail || "", deps: addID ? [addID] : [],
+        });
+        actions.push(msg);
+        let lastID = msg.id;
+        if (f.commit) {
+          const c = cloneAction(a, {
+            id: a.id + "#commit", mode: "commit", detail: "",
+            deps: [msg.id].concat(incoming),
+          });
+          actions.push(c);
+          lastID = c.id;
+        } else if (incoming.length) {
+          pinJoinLast.push({ lastID: lastID, pinIDs: incoming.slice() });
+        }
+        idMapLast[a.id] = lastID;
+      });
+      pinAfterAdd.forEach(function (x) {
+        actions.forEach(function (a) {
+          if (x.pinIDs.indexOf(a.id) < 0) return;
+          if ((a.deps || []).indexOf(x.addID) < 0) a.deps.push(x.addID);
+        });
+      });
+      actions.forEach(function (a) {
+        a.deps = (a.deps || []).map(function (d) { return idMapLast[d] || d; });
+      });
+      pinJoinLast.forEach(function (x) {
+        actions.forEach(function (a) {
+          if ((a.deps || []).indexOf(x.lastID) < 0) return;
+          x.pinIDs.forEach(function (id) {
+            if (a.deps.indexOf(id) < 0) a.deps.push(id);
+          });
+        });
+      });
+      return actions;
+    }
+
+    // Longest-path depth over all deps (Go action-graph style). Cap iterations
+    // so a cycle cannot freeze the tab.
+    function assignTopoRanksClient(actions) {
+      const byID = {};
+      actions.forEach(function (a) {
+        byID[a.id] = a;
+        a.rank = 0;
+      });
+      let maxIters = (actions.length || 0) + 2;
+      if (maxIters < 4) maxIters = 4;
+      let changed = true;
+      for (let iters = 0; changed && iters < maxIters; iters++) {
+        changed = false;
+        actions.forEach(function (a) {
+          let best = 0;
+          (a.deps || []).forEach(function (d) {
+            const dep = byID[d];
+            if (!dep) return;
+            const need = (dep.rank || 0) + 1;
+            if (need > best) best = need;
+          });
+          if (best > (a.rank || 0)) {
+            a.rank = best;
+            changed = true;
+          }
+        });
+      }
+    }
+
+    // Order lanes by topo level then name.
+    function orderLanes(actions, laneLevels) {
+      const levels = laneLevels || {};
+      const lanes = [];
+      const seen = {};
+      actions.forEach(function (a) {
+        const lane = actionLane(a);
+        if (!seen[lane]) {
+          seen[lane] = true;
+          lanes.push(lane);
+        }
+      });
+      lanes.sort(function (a, b) {
+        const la = levels[a] || 0, lb = levels[b] || 0;
+        if (la !== lb) return la - lb;
+        return a.localeCompare(b);
+      });
+      return lanes;
+    }
+
+    function truncateLaneLabel(s, max) {
+      if (!s || s === "_") return "";
+      if (s.length <= max) return s;
+      return s.slice(0, Math.max(1, max - 1)) + "…";
+    }
+
+    const RELEASE_SUB_ORDER = {
+      "add-all": 0, "gen-commit-msg": 1, "commit": 2,
+      "merge-back": 3, "done": 3, "pin": 4, "dep-update": 4, "tag-next": 5,
+      "reinstall-local": 6, "push": 7, "sync": 8,
+    };
+
+    function sortRankCell(list) {
+      list.sort(function (a, b) {
+        const sa = RELEASE_SUB_ORDER.hasOwnProperty(a.mode) ? RELEASE_SUB_ORDER[a.mode] : 50;
+        const sb = RELEASE_SUB_ORDER.hasOwnProperty(b.mode) ? RELEASE_SUB_ORDER[b.mode] : 50;
+        if (sa !== sb) return sa - sb;
+        return (a.id || "").localeCompare(b.id || "");
+      });
+    }
+
+    function renderEmpty(host, text) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.setAttribute("data-action-empty", "1");
+      empty.textContent = text || "no actions in plan";
+      host.appendChild(empty);
+    }
+
+    // Execution DAG into host: X = longest-path depth, Y = swimlane.
+    // opts.wrapLanes: Phase 2 full module paths in the project gutter (no 16-char clip).
+    function renderActionDAGInto(host, ag, flags, opts) {
+      host.innerHTML = "";
+      const raw = (ag && ag.actions) || [];
+      if (!raw.length) {
+        renderEmpty(host, "no actions in plan");
+        return;
+      }
+      const f = flags || (plan && plan.flags) || flagsFromUI() || {};
+      const wrapLanes = !!(opts && opts.wrapLanes);
+      const gutter = wrapLanes ? 280 : LANE_GUTTER;
+      const laneLevels = (ag && ag.lane_levels) || {};
+      const actions = expandCommitActions(raw, f);
+      assignTopoRanksClient(actions);
+      const lanes = orderLanes(actions, laneLevels);
+
+      const ranks = [];
+      actions.forEach(function (a) {
+        const r = a.rank || 0;
+        if (ranks.indexOf(r) < 0) ranks.push(r);
+      });
+      ranks.sort(function (a, b) { return a - b; });
+
+      const cells = {};
+      actions.forEach(function (a) {
+        const key = (a.rank || 0) + "\0" + actionLane(a);
+        if (!cells[key]) cells[key] = [];
+        cells[key].push(a);
+      });
+      Object.keys(cells).forEach(function (k) { sortRankCell(cells[k]); });
+
+      const colW = NODE_W + COL_GAP;
+      const laneGap = 0;
+      const laneHeights = lanes.map(function (lane) {
+        let maxH = 48;
+        ranks.forEach(function (r) {
+          const list = cells[r + "\0" + lane] || [];
+          if (!list.length) return;
+          const h = list.reduce(function (sum, a) {
+            return sum + actionCardHeight(a) + NODE_GAP;
+          }, 0) - NODE_GAP;
+          if (h > maxH) maxH = h;
+        });
+        if (wrapLanes && lane && lane !== "_") {
+          const wrapH = Math.ceil(lane.length / 32) * 15 + LANE_PAD * 2;
+          if (wrapH > maxH) maxH = wrapH;
+        }
+        return maxH + LANE_PAD * 2;
+      });
+      const laneTops = [];
+      let yAcc = RANK_HEADER_H;
+      laneHeights.forEach(function (h) {
+        laneTops.push(yAcc);
+        yAcc += h + laneGap;
+      });
+      const contentW = Math.max(1, ranks.length) * colW + 24;
+      const W = Math.max(720, gutter + contentW);
+      const H = Math.max(280, yAcc + 16);
+      const svg = svgEl("svg", {
+        id: "action-graph",
+        "data-action-svg": "1",
+        "data-action-dag": "1",
+        "data-lane-gutter": String(gutter),
+        "data-rank-matrix": "1",
+      });
+      svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+      svg.style.height = Math.min(900, Math.max(320, H)) + "px";
+      svg.style.minWidth = W + "px";
+      const defs = svgEl("defs");
+      defs.innerHTML = '<marker id="action-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#5a6570"/></marker>';
+      svg.appendChild(defs);
+
+      const bandGroup = svgEl("g", { "data-lane-bands": "1" });
+      lanes.forEach(function (lane, li) {
+        const band = svgEl("rect", {
+          x: "0",
+          y: String(laneTops[li]),
+          width: String(W),
+          height: String(laneHeights[li]),
+          class: li % 2 === 0 ? "lane-band-even" : "lane-band-odd",
+          "data-lane-band": lane,
+        });
+        bandGroup.appendChild(band);
+        if (li > 0) {
+          const rule = svgEl("line", {
+            x1: "0", y1: String(laneTops[li]),
+            x2: String(W), y2: String(laneTops[li]),
+            class: "lane-band-rule",
+            "data-lane-rule": lane,
+          });
+          bandGroup.appendChild(rule);
+        }
+      });
+      svg.appendChild(bandGroup);
+
+      const gutterBg = svgEl("rect", {
+        x: "0", y: "0", width: String(gutter), height: String(H),
+        fill: "#0e0f12", "fill-opacity": "0.72",
+        "data-lane-gutter-bg": "1",
+      });
+      svg.appendChild(gutterBg);
+      svg.appendChild(svgEl("line", {
+        x1: String(gutter), y1: "0",
+        x2: String(gutter), y2: String(H),
+        class: "lane-band-rule",
+      }));
+
+      const edgeGroup = svgEl("g");
+      svg.appendChild(edgeGroup);
+
+      const corner = svgEl("text", {
+        x: "10", y: "22", fill: "#6b7280", "font-size": "11",
+        "font-family": "ui-sans-serif, system-ui, sans-serif",
+        "data-matrix-corner": "1",
+      });
+      corner.textContent = "project";
+      svg.appendChild(corner);
+
+      lanes.forEach(function (lane, li) {
+        const display = lane === "_" ? "" : lane;
+        if (wrapLanes && display) {
+          const fo = svgEl("foreignObject", {
+            x: "6", y: String(laneTops[li] + 4),
+            width: String(gutter - 12), height: String(Math.max(24, laneHeights[li] - 8)),
+          });
+          const div = document.createElement("div");
+          div.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+          div.setAttribute("data-lane-label", lane);
+          div.style.cssText = "font:11px ui-monospace,Menlo,monospace;color:#c8cdd3;word-break:break-all;line-height:1.25;padding:4px 2px;";
+          div.textContent = display;
+          fo.appendChild(div);
+          svg.appendChild(fo);
+          return;
+        }
+        const cy = laneTops[li] + laneHeights[li] / 2;
+        const lab = svgEl("text", {
+          x: "10",
+          y: String(cy + 4),
+          fill: lane === "ship" ? "#93c5fd" : "#c8cdd3",
+          "font-size": "12",
+          "font-family": "ui-monospace, Menlo, monospace",
+          "font-weight": lane === "ship" ? "600" : "500",
+          "data-lane-label": lane,
+        });
+        lab.textContent = truncateLaneLabel(display, 16);
+        if (display) {
+          const title = svgEl("title");
+          title.textContent = display;
+          lab.appendChild(title);
+        }
+        svg.appendChild(lab);
+      });
+
+      const pos = {};
+      ranks.forEach(function (r, ci) {
+        const x = gutter + 12 + ci * colW;
+        lanes.forEach(function (lane, li) {
+          const list = cells[r + "\0" + lane] || [];
+          let y = laneTops[li] + LANE_PAD;
+          list.forEach(function (a) {
+            const h = actionCardHeight(a);
+            pos[a.id] = { x: x + NODE_W / 2, y: y + h / 2, h: h, left: x, right: x + NODE_W };
+            const fo = svgEl("foreignObject", {
+              x: String(x), y: String(y), width: String(NODE_W), height: String(h),
+            });
+            fo.appendChild(buildActionCard(a));
+            svg.appendChild(fo);
+            y += h + NODE_GAP;
+          });
+        });
+      });
+
+      actions.forEach(function (a) {
+        (a.deps || []).forEach(function (depID) {
+          const from = pos[depID];
+          const to = pos[a.id];
+          if (!from || !to) return;
+          const x1 = from.right, y1 = from.y;
+          const x2 = to.left, y2 = to.y;
+          let d;
+          if (Math.abs(from.left - to.left) < 4) {
+            const midY = (y1 + y2) / 2;
+            d = "M " + from.x + " " + (from.y + from.h / 2 - 2) +
+              " C " + from.x + " " + midY + ", " + to.x + " " + midY + ", " +
+              to.x + " " + (to.y - to.h / 2 + 2);
+          } else {
+            const dx = Math.max(24, (x2 - x1) * 0.4);
+            d = "M " + x1 + " " + y1 + " C " + (x1 + dx) + " " + y1 + ", " +
+              (x2 - dx) + " " + y2 + ", " + x2 + " " + y2;
+          }
+          const p = svgEl("path", {
+            class: "aedge",
+            d: d,
+            "marker-end": "url(#action-arr)",
+            "data-edge-from": depID,
+            "data-edge-to": a.id,
+          });
+          edgeGroup.appendChild(p);
+        });
+      });
+      bindEdgeHover(svg, "aedge", "data-action-id");
+      host.appendChild(svg);
+    }
+
+    function renderActionDAG(ag, flags) {
+      const host = document.getElementById("preview");
+      host.innerHTML = "";
+      const wrap = document.createElement("div");
+      wrap.className = "phase-body";
+      host.appendChild(wrap);
+      renderActionDAGInto(wrap, ag, flags);
+    }
+
+    const REPO_COLORS = ["#5eead4", "#c084fc", "#6bcf8e", "#93c5fd", "#e6a35a", "#f9a8d4"];
+
+    function moduleDepDepths(nodes, requireEdges) {
+      const level = {};
+      (nodes || []).forEach(function (n) { if (n.path) level[n.path] = 0; });
+      let changed = true;
+      while (changed) {
+        changed = false;
+        (requireEdges || []).forEach(function (e) {
+          if (!e.from || !e.to || level[e.from] == null || level[e.to] == null) return;
+          const need = level[e.to] + 1;
+          if (need > level[e.from]) { level[e.from] = need; changed = true; }
+        });
+      }
+      return level;
+    }
+
+    function orderModuleLanes(nodes, laneLevels) {
+      const seen = {};
+      const lanes = [];
+      const levels = laneLevels || {};
+      (nodes || []).forEach(function (n) {
+        const lab = n.repo_label || "_";
+        if (seen[lab]) return;
+        seen[lab] = true;
+        lanes.push(lab);
+      });
+      lanes.sort(function (a, b) {
+        const la = levels[a], lb = levels[b];
+        const ha = la != null, hb = lb != null;
+        if (ha && hb && la !== lb) return la - lb;
+        if (ha !== hb) return ha ? -1 : 1;
+        return a.localeCompare(b);
+      });
+      return lanes;
+    }
+
+    function moduleShortLabel(n) {
+      const repo = n.repo_label || "";
+      const dir = n.dir || "";
+      const isRoot = !dir || dir === ".";
+      if (repo && !isRoot) return repo + "/" + dir;
+      if (repo) return repo;
+      if (dir && !isRoot) return dir;
+      return n.path || repo || "_";
+    }
+
+    function moduleIsUnchanged(n) {
+      if (n.next_tag) return false;
+      const skip = n.skip_reason || "";
+      if (skip === "no-changes" || skip === "same-commit") return true;
+      return !n.owned_changed;
+    }
+
+    function buildModuleCard(n, color) {
+      const div = document.createElement("div");
+      div.className = "mnode" + (moduleIsUnchanged(n) ? " dimmed" : "");
+      div.setAttribute("data-module-path", n.path || "");
+      if (moduleIsUnchanged(n)) div.setAttribute("data-module-dimmed", "1");
+      if (color) div.style.borderLeftColor = color;
+      // Row 1: repo_label/dir (colored)
+      const k = document.createElement("div");
+      k.className = "k";
+      if (color) k.style.color = color;
+      k.textContent = moduleShortLabel(n);
+      // Row 2: full Go module path (muted)
+      const p = document.createElement("div");
+      p.className = "path";
+      p.title = n.path || "";
+      p.textContent = n.path || "";
+      // Row 3: tag · status
+      const d = document.createElement("div");
+      d.className = "d";
+      const tag = n.next_tag || n.latest_tag || "—";
+      let badge = n.skip_reason || "";
+      if (!badge && n.next_tag) badge = "next";
+      else if (!badge && n.owned_changed) badge = "owned";
+      else if (!badge) badge = "ok";
+      d.textContent = tag + " · " + badge;
+      div.appendChild(k); div.appendChild(p); div.appendChild(d);
+      return div;
+    }
+
+    function moduleCardHeight(n) {
+      // MNODE_W ≈ 320 → ~38 chars/line.
+      const shortLines = Math.max(1, Math.ceil(String(moduleShortLabel(n)).length / 38));
+      const pathLines = Math.max(1, Math.ceil(String(n.path || "").length / 38));
+      return 22 + 15 * (shortLines + pathLines + 1);
+    }
+
+    // Read-only module dependency overview (plan.graph.modules).
+    function renderModuleGraphInto(host, modules, opts) {
+      host.innerHTML = "";
+      const nodes = (modules && modules.nodes) || [];
+      const edges = (modules && modules.edges) || [];
+      if (!nodes.length) {
+        renderEmpty(host, "no modules in graph");
+        return;
+      }
+      const showReplace = !!(opts && opts.showReplace);
+      const requireEdges = edges.filter(function (e) { return e.kind === "require"; });
+      const drawEdges = showReplace
+        ? edges.filter(function (e) { return e.kind === "require" || e.kind === "replace"; })
+        : requireEdges;
+      const depths = moduleDepDepths(nodes, requireEdges);
+      const laneLevels = (opts && opts.laneLevels) || {};
+      const lanes = orderModuleLanes(nodes, laneLevels);
+      const ranks = [];
+      nodes.forEach(function (n) {
+        const r = depths[n.path] || 0;
+        if (ranks.indexOf(r) < 0) ranks.push(r);
+      });
+      ranks.sort(function (a, b) { return a - b; });
+
+      const cells = {};
+      nodes.forEach(function (n) {
+        const key = (depths[n.path] || 0) + "\0" + (n.repo_label || "_");
+        if (!cells[key]) cells[key] = [];
+        cells[key].push(n);
+      });
+      Object.keys(cells).forEach(function (k) {
+        cells[k].sort(function (a, b) { return (a.path || "").localeCompare(b.path || ""); });
+      });
+
+      const MNODE_W = 320;
+      const colW = MNODE_W + COL_GAP;
+      const laneHeights = lanes.map(function (lane) {
+        let maxH = 48;
+        ranks.forEach(function (r) {
+          const list = cells[r + "\0" + lane] || [];
+          if (!list.length) return;
+          const h = list.reduce(function (sum, n) {
+            return sum + moduleCardHeight(n) + NODE_GAP;
+          }, 0) - NODE_GAP;
+          if (h > maxH) maxH = h;
+        });
+        return maxH + 2 * LANE_PAD;
+      });
+      let laneTops = [];
+      let yCursor = RANK_HEADER_H;
+      laneHeights.forEach(function (h) {
+        laneTops.push(yCursor);
+        yCursor += h;
+      });
+      const W = Math.max(640, LANE_GUTTER + 24 + ranks.length * colW);
+      const H = Math.max(200, yCursor + 8);
+      const wrap = document.createElement("div");
+      wrap.style.position = "relative";
+      wrap.style.minWidth = W + "px";
+      wrap.style.height = H + "px";
+      const svg = svgEl("svg", {
+        width: String(W), height: String(H),
+        "data-module-svg": "1",
+      });
+      const defs = svgEl("defs");
+      defs.innerHTML = '<marker id="mod-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#5a6570"/></marker>';
+      svg.appendChild(defs);
+      const edgeGroup = svgEl("g");
+      svg.appendChild(edgeGroup);
+
+      lanes.forEach(function (lane, li) {
+        const y = laneTops[li];
+        const h = laneHeights[li];
+        svg.appendChild(svgEl("rect", {
+          x: "0", y: String(y), width: String(W), height: String(h),
+          class: li % 2 === 0 ? "lane-band-even" : "lane-band-odd",
+          "data-lane-band": lane,
+        }));
+        const lab = svgEl("text", {
+          x: "10", y: String(y + h / 2 + 4),
+          fill: "#8b929a", "font-size": "12",
+          "font-family": "ui-monospace, Menlo, monospace",
+        });
+        lab.textContent = lane === "_" ? "" : lane;
+        svg.appendChild(lab);
+      });
+      ranks.forEach(function (r, ci) {
+        const x = LANE_GUTTER + 12 + ci * colW + MNODE_W / 2;
+        const lab = svgEl("text", {
+          x: String(x), y: "22", fill: "#8b929a", "font-size": "11",
+          "text-anchor": "middle",
+          "font-family": "ui-sans-serif, system-ui, sans-serif",
+        });
+        lab.textContent = "dep depth " + r;
+        svg.appendChild(lab);
+      });
+
+      const repoColor = {};
+      lanes.forEach(function (lane, i) {
+        repoColor[lane] = REPO_COLORS[i % REPO_COLORS.length];
+      });
+      const pos = {};
+      ranks.forEach(function (r, ci) {
+        const x = LANE_GUTTER + 12 + ci * colW;
+        lanes.forEach(function (lane, li) {
+          const list = cells[r + "\0" + lane] || [];
+          let y = laneTops[li] + LANE_PAD;
+          list.forEach(function (n) {
+            const h = moduleCardHeight(n);
+            pos[n.path] = {
+              x: x + MNODE_W / 2, y: y + h / 2, h: h,
+              left: x, right: x + MNODE_W, repo: lane,
+            };
+            const fo = svgEl("foreignObject", {
+              x: String(x), y: String(y), width: String(MNODE_W), height: String(h),
+            });
+            fo.appendChild(buildModuleCard(n, repoColor[lane]));
+            svg.appendChild(fo);
+            y += h + NODE_GAP;
+          });
+        });
+      });
+
+      const labelOf = {};
+      const dimmedDep = {};
+      nodes.forEach(function (n) {
+        labelOf[n.path] = n.repo_label || "_";
+        if (moduleIsUnchanged(n) && n.path) dimmedDep[n.path] = true;
+      });
+      // Require direction: consumer → dep (tip on dep): go-pkgs ← go-pkgs/cmd
+      // Hide arrows whose tip lands on an unchanged (dimmed) module.
+      drawEdges.forEach(function (e) {
+        if (dimmedDep[e.to]) return;
+        const cons = pos[e.from]; // consumer (right)
+        const dep = pos[e.to];    // dep (left)
+        if (!cons || !dep) return;
+        const x1 = cons.left, y1 = cons.y;
+        const x2 = dep.right, y2 = dep.y;
+        const dx = Math.max(24, (x1 - x2) * 0.4);
+        let cls = "medge";
+        if (e.kind === "replace") cls += " replace";
+        else if (labelOf[e.from] === labelOf[e.to]) cls += " intra";
+        else cls += " cross";
+        edgeGroup.appendChild(svgEl("path", {
+          class: cls,
+          d: "M " + x1 + " " + y1 + " C " + (x1 - dx) + " " + y1 + ", " + (x2 + dx) + " " + y2 + ", " + x2 + " " + y2,
+          "marker-end": "url(#mod-arr)",
+          "data-edge-from": e.from,
+          "data-edge-to": e.to,
+          "data-edge-kind": e.kind || "",
+        }));
+      });
+      bindEdgeHover(svg, "medge", "data-module-path");
+      wrap.appendChild(svg);
+      host.appendChild(wrap);
+    }
+
+    function findPhase(phases, id) {
+      for (let i = 0; i < (phases || []).length; i++) {
+        if (phases[i] && phases[i].id === id) return phases[i];
+      }
+      return null;
+    }
+
+    function reposLaneLevels(plan) {
+      const ph = findPhase(plan && plan.phases, "repos");
+      if (ph && ph.action_graph && ph.action_graph.lane_levels) return ph.action_graph.lane_levels;
+      return (plan && plan.action_graph && plan.action_graph.lane_levels) || {};
+    }
+
+    function renderSnapshotPhase(root, plan) {
+      const mods = plan && plan.graph && plan.graph.modules;
+      const s = plan && plan.graph && plan.graph.summary ? plan.graph.summary : {};
+      const block = document.createElement("section");
+      block.className = "phase-block";
+      block.setAttribute("data-phase-id", "snapshot");
+      const head = document.createElement("div");
+      head.className = "phase-head";
+      const h2 = document.createElement("h2");
+      h2.textContent = "snapshot";
+      head.appendChild(h2);
+      const meta = document.createElement("span");
+      meta.className = "muted";
+      const nRepo = s.repos || 0;
+      const nMod = s.modules || ((mods && mods.nodes) ? mods.nodes.length : 0);
+      meta.textContent = nRepo + " repo" + (nRepo === 1 ? "" : "s") + " · " + nMod + " module" + (nMod === 1 ? "" : "s");
+      head.appendChild(meta);
+      block.appendChild(head);
+      const body = document.createElement("div");
+      body.className = "phase-body";
+      block.appendChild(body);
+      if (mods && mods.nodes && mods.nodes.length) {
+        let showReplace = false;
+        function paint() {
+          renderModuleGraphInto(body, mods, { showReplace: showReplace, laneLevels: reposLaneLevels(plan) });
+        }
+        paint();
+        const legend = document.createElement("div");
+        legend.className = "mod-legend";
+        legend.innerHTML =
+          '<span><i></i>intra-repo require (consumer → dep)</span>' +
+          '<span><i class="cross"></i>cross-repo require</span>' +
+          '<span><i class="replace"></i>replace (optional)</span>' +
+          '<span>lanes = repos · columns = dep depth · dimmed = unchanged · arrows to unchanged deps hidden</span>';
+        const tog = document.createElement("label");
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.setAttribute("data-show-replace", "1");
+        cb.addEventListener("change", function () {
+          showReplace = !!cb.checked;
+          paint();
+        });
+        tog.appendChild(cb);
+        tog.appendChild(document.createTextNode(" show replace edges"));
+        legend.appendChild(tog);
+        block.appendChild(legend);
+      } else {
+        renderEmpty(body, "no modules in graph");
+      }
+      root.appendChild(block);
+    }
+
+    function renderPhases(phases, flags, plan) {
+      const host = document.getElementById("preview");
+      host.innerHTML = "";
+      const root = document.createElement("div");
+      root.className = "phases";
+      root.setAttribute("data-phases", String((phases || []).length || 4));
+      const defaultTitles = {
+        snapshot: "snapshot",
+        repos: "phase-1 · cross-repo unwind",
+        modules: "phase-2 · intra-repo update",
+        ship: "ship",
+      };
+      (phases || []).forEach(function (ph, idx) {
+        if (ph.id === "snapshot") {
+          renderSnapshotPhase(root, plan || {});
+          return;
+        }
+        const block = document.createElement("section");
+        block.className = "phase-block";
+        block.setAttribute("data-phase-id", ph.id || ("p" + idx));
+        const head = document.createElement("div");
+        head.className = "phase-head";
+        const h2 = document.createElement("h2");
+        h2.textContent = ph.title || defaultTitles[ph.id] || ph.id || ("Phase " + (idx + 1));
+        head.appendChild(h2);
+        const meta = document.createElement("span");
+        meta.className = "muted";
+        const grouped = ph.id === "modules" || ph.id === "ship" || (ph.by_repo && !ph.action_graph);
+        if (!grouped) {
+          const n = ((ph.action_graph && ph.action_graph.actions) || []).length;
+          meta.textContent = n + " action" + (n === 1 ? "" : "s") + " · cross-repo";
+          head.appendChild(meta);
+          block.appendChild(head);
+          const body = document.createElement("div");
+          body.className = "phase-body";
+          block.appendChild(body);
+          renderActionDAGInto(body, ph.action_graph, flags);
+        } else {
+          const repos = Object.keys(ph.by_repo || {}).sort();
+          if (ph.id === "ship") {
+            meta.textContent = repos.length + " repo" + (repos.length === 1 ? "" : "s") + " · push + sync · parallel";
+          } else {
+            meta.textContent = repos.length + " repo" + (repos.length === 1 ? "" : "s") + " · intra-repo · parallel";
+          }
+          head.appendChild(meta);
+          block.appendChild(head);
+          const emptyNote = ph.id === "ship" ? "no ship actions" : "no nested module requires a Phase 1 tag";
+          if (!repos.length) {
+            const body = document.createElement("div");
+            body.className = "phase-body";
+            renderEmpty(body, emptyNote);
+            block.appendChild(body);
+          } else {
+            repos.forEach(function (repo) {
+              const det = document.createElement("details");
+              det.className = "repo-acc";
+              det.setAttribute("data-phase-repo", repo);
+              det.open = true;
+              const sum = document.createElement("summary");
+              const ag = ph.by_repo[repo];
+              const n = ((ag && ag.actions) || []).length;
+              sum.textContent = repo + " · " + n + " action" + (n === 1 ? "" : "s");
+              det.appendChild(sum);
+              const body = document.createElement("div");
+              body.className = "phase-body";
+              det.appendChild(body);
+              if (!n) {
+                renderEmpty(body, (ag && ag.filter_note) || emptyNote);
+              } else {
+                renderActionDAGInto(body, ag, flags, { wrapLanes: ph.id === "modules" });
+              }
+              block.appendChild(det);
+            });
+          }
+        }
+        root.appendChild(block);
+      });
+      host.appendChild(root);
+    }
+
     function renderActionGraph(epochs) {
       const host = document.getElementById("preview");
       host.innerHTML = "";
@@ -484,12 +1451,18 @@
     function render() {
       const ready = snapStatus === "ready";
       setFlagsEnabled(ready);
-      if (snapStatus === "loading") {
-        document.getElementById("summary").textContent = (plan.work_dir || "…") + " · scanning stack…";
-        document.getElementById("hint").textContent = "preparing plan…";
+      if (snapStatus === "loading" || (ready && awaitingPlan)) {
+        document.getElementById("summary").textContent = ready
+          ? ((plan.work_dir || "…") + " · building action graph…")
+          : ((plan.work_dir || "…") + " · scanning stack…");
+        document.getElementById("hint").textContent = ready ? "computing plan…" : "preparing plan…";
         document.getElementById("blockers").textContent = "";
         document.getElementById("run").disabled = true;
+        // Reuse loading pane; force status attr for spinner while awaiting /plan.
+        const prev = snapStatus;
+        if (ready && awaitingPlan) snapStatus = "loading";
         renderLoadingPane();
+        snapStatus = prev;
         return;
       }
       if (snapStatus === "error") {
@@ -514,7 +1487,32 @@
         const name = plan.flags && plan.flags.agent_runner;
         ar.textContent = name ? ("--agent-runner=" + name) : "";
       }
-      renderActionGraph(plan.epochs);
+      if (plan.phases && plan.phases.length) {
+        renderPhases(plan.phases, plan.flags || flagsFromUI(), plan);
+      } else if (plan.action_graph && plan.action_graph.actions && plan.action_graph.actions.length) {
+        const host = document.getElementById("preview");
+        host.innerHTML = "";
+        const root = document.createElement("div");
+        root.className = "phases";
+        root.setAttribute("data-phases", "1");
+        renderSnapshotPhase(root, plan);
+        const block = document.createElement("section");
+        block.className = "phase-block";
+        const head = document.createElement("div");
+        head.className = "phase-head";
+        const h2 = document.createElement("h2");
+        h2.textContent = "Actions";
+        head.appendChild(h2);
+        block.appendChild(head);
+        const body = document.createElement("div");
+        body.className = "phase-body";
+        block.appendChild(body);
+        root.appendChild(block);
+        host.appendChild(root);
+        renderActionDAGInto(body, plan.action_graph, plan.flags || flagsFromUI());
+      } else {
+        renderActionGraph(plan.epochs);
+      }
     }
 
     async function reloadPlan(opts) {
@@ -538,6 +1536,7 @@
           return;
         }
         ingestPlanResponse(await res.json());
+        if (snapStatus === "ready") awaitingPlan = false;
         render();
         if (seq === planSeq) status.textContent = "";
         if (snapStatus === "loading") scheduleReadyPoll();
@@ -585,7 +1584,7 @@
 
     document.getElementById("run").addEventListener("click", async () => {
       if (snapStatus !== "ready" || !plan.can_run) return;
-      if (!confirm("Run this unwind? It will merge-back/done, tag, pin, and/or push according to the preview.")) return;
+      if (!confirm("Run this unwind?\n[1/4] snapshot\n[2/4] phase-1 · cross-repo unwind\n[3/4] phase-2 · intra-repo update\n[4/4] ship")) return;
       document.getElementById("run").disabled = true;
       document.getElementById("log").textContent = "";
       const res = await fetch("/run", {
@@ -615,6 +1614,7 @@
     applyFlagsToUI(plan.flags || {});
     render();
     if (snapStatus === "loading") scheduleReadyPoll();
+    else if (snapStatus === "ready" && awaitingPlan) reloadPlan({ silent: true });
   </script>
 </body>
 </html>

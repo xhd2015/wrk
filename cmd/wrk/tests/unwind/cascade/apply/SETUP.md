@@ -43,7 +43,7 @@ dirty/clean stack + --unwind --tag-next [+ --push/--done/--add-all/--reinstall-l
 
 - Apply asserts prefer **side effects** (tags, go.mod, git log) over multi-stage
   stdout templates.
-- Cascade pin commit message (locked): `wrk: cascade pin <mod> @ <ver>`.
+- Cascade pin commit message (locked): `dep: <mod> <from> -> <to>` (or `deps:` when several).
 - Replace policy: if consumer already has `replace dep => local path`, **keep**
   it; only bump require version.
 - **Partial edit (P3, no `--add-all`, dirty go.mod/go.sum vs Base):**
@@ -65,8 +65,8 @@ import (
 )
 
 const (
-	// Cascade pin commit subject prefix (full form: wrk: cascade pin <mod> @ <ver>).
-	cascadePinCommitPrefix = "wrk: cascade pin "
+	// Cascade pin commit subject prefix (full form: dep: <mod> <from> -> <to>).
+	cascadePinCommitPrefix = "dep: "
 
 	// cascadeGoModWIPMarker is the uncommitted go.mod comment line used by dirty
 	// WIP fixtures (C-AP5 / partial-edit). Must survive partial-edit restore.

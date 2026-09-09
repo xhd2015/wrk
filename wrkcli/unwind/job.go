@@ -1,7 +1,6 @@
 package unwind
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -34,17 +33,22 @@ type JobFlags struct {
 	Commit         bool   `json:"commit"` // --commit in GenCommitArgs (required with gen-commit-msg)
 	NoVerify       bool   `json:"no_verify"`
 	AgentRunner    string `json:"agent_runner,omitempty"` // display/passthrough from CLI peel
+	Cleanup        bool   `json:"cleanup"`                // include latest-drift / drop-replace pins
 }
 
 // JobPlan is the action preview for --unwind --web (and dry-run epochs).
 type JobPlan struct {
-	WorkDir   string             `json:"work_dir"`
-	Flags     JobFlags           `json:"flags"`
-	Graph     *UnwindGraphReport `json:"graph,omitempty"`
-	Epochs    []JobEpoch         `json:"epochs"`
-	Blockers  []string           `json:"blockers"`
-	CanRun    bool               `json:"can_run"`
-	ApplyHint string             `json:"apply_hint,omitempty"`
+	WorkDir     string             `json:"work_dir"`
+	Flags       JobFlags           `json:"flags"`
+	Graph       *UnwindGraphReport `json:"graph,omitempty"`
+	ActionGraph *ActionGraph       `json:"action_graph,omitempty"`
+	// Phases is snapshot, repos (cross-repo), modules (intra), ship (push+sync).
+	// Apply and --dry-run walk this DAG. Web is the execution model.
+	Phases    []JobPhase `json:"phases,omitempty"`
+	Epochs    []JobEpoch `json:"epochs"`
+	Blockers  []string   `json:"blockers"`
+	CanRun    bool       `json:"can_run"`
+	ApplyHint string     `json:"apply_hint,omitempty"`
 }
 
 func flagsFromUnwind(f UnwindFlags) JobFlags {
@@ -61,6 +65,7 @@ func flagsFromUnwind(f UnwindFlags) JobFlags {
 		Commit:         genArgsHasFlag(f.GenCommitArgs, "--commit"),
 		NoVerify:       genArgsHasFlag(f.GenCommitArgs, "--no-verify"),
 		AgentRunner:    genArgsFlagValue(f.GenCommitArgs, "--agent-runner"),
+		Cleanup:        f.Cleanup,
 	}
 }
 
@@ -82,6 +87,7 @@ func unwindFlagsFromJob(j JobFlags, baseGenArgs []string) UnwindFlags {
 		AddAll:         j.AddAll,
 		GenCommitMsg:   j.GenCommitMsg,
 		GenCommitArgs:  jobGenCommitArgs(j, baseGenArgs),
+		Cleanup:        j.Cleanup,
 	}
 }
 
@@ -157,106 +163,31 @@ func BuildJobPlan(snap *Snapshot, flags UnwindFlags) *JobPlan {
 	if plan == nil {
 		plan = &UnwindPlan{}
 	}
-	members := snap.Inv.Members
-	byLabel := pickPeelMembersByLabel(members)
-	cascade := snap.Cascade
-	if cascade == nil {
-		cascade = &UnwindCascadePlan{}
-	}
 
-	var early, deferred []string
-	if flags.TagNext {
-		early, deferred = splitPeelOrderB1(plan.PeelOrder, members, cascade, snap.ModuleNodes, snap.ModuleEdges)
+	// Re-attach NextTag from worktree tip (staged / add-all) using current flags.
+	snap = applyTipAwareTags(snap, flags)
+
+	opts := ActionGraphOpts{Cleanup: flags.Cleanup}
+	phases := buildJobPhases(snap, flags, opts)
+	out.Phases = phases
+	// action_graph stays phase-1 (repos) for older clients / epochs bridge.
+	if ph := phaseByID(phases, "repos"); ph != nil && ph.ActionGraph != nil {
+		out.ActionGraph = ph.ActionGraph
 	} else {
-		early = append([]string(nil), plan.PeelOrder...)
+		out.ActionGraph = BuildActionGraph(snap, flags, opts)
 	}
-
-	peelSteps := func(labels []string) []JobStep {
-		var steps []JobStep
-		for _, label := range labels {
-			display := label
-			m, ok := byLabel[label]
-			if ok {
-				display = peelDisplayPath(snap.WorkDir, m.Path)
-			}
-			why := "dirty stack checkout"
-			steps = append(steps, JobStep{Kind: "peel", Target: display, Why: why})
-			if flags.GenCommitMsg {
-				steps = append(steps, JobStep{Kind: "gen-commit", Target: display, Why: "unstaged or staged feature work"})
-			}
-			if ok && m.Linked && (flags.Done || flags.MergeBack) {
-				if flags.Done {
-					steps = append(steps, JobStep{
-						Kind: "done", Target: display,
-						Detail: "merge-back and remove worktree", Why: "linked worktree",
-					})
-				} else {
-					steps = append(steps, JobStep{
-						Kind: "merge-back", Target: display,
-						Detail: "keep worktree", Why: "linked worktree",
-					})
-				}
-			}
-		}
-		return steps
-	}
-
-	if flags.TagNext {
-		if steps := peelSteps(early); len(steps) > 0 {
-			out.Epochs = append(out.Epochs, JobEpoch{ID: "early-peel", Title: "early peels", Steps: steps})
-		}
-		var cas []JobStep
-		for _, s := range cascade.Steps {
-			switch s.Kind {
-			case CascadeTagNext:
-				cas = append(cas, JobStep{
-					Kind:   "tag-next",
-					Target: s.ModulePath,
-					Detail: s.TagOrVersion,
-					Why:    "owned changes",
-				})
-			case CascadePin:
-				cas = append(cas, JobStep{
-					Kind:   "pin",
-					Target: s.ModulePath,
-					Detail: fmt.Sprintf("<- %s @ %s", s.DepModulePath, s.TagOrVersion),
-					Why:    "require drift or droppable replace",
-				})
-			}
-		}
-		if len(cas) > 0 {
-			out.Epochs = append(out.Epochs, JobEpoch{ID: "cascade", Title: "cascade", Steps: cas})
-		}
-		if steps := peelSteps(deferred); len(steps) > 0 {
-			out.Epochs = append(out.Epochs, JobEpoch{ID: "deferred-peel", Title: "deferred peels", Steps: steps})
-		}
-	} else if steps := peelSteps(plan.PeelOrder); len(steps) > 0 {
-		out.Epochs = append(out.Epochs, JobEpoch{ID: "peel", Title: "peels", Steps: steps})
-	}
-
-	var ship []JobStep
-	if flags.Push {
-		ship = append(ship, JobStep{Kind: "push", Target: "touched mains", Why: "publish branch and tags"})
-	}
-	if flags.Sync {
-		ship = append(ship, JobStep{Kind: "sync", Target: "linked worktrees", Why: "fast-forward after merge-back"})
-	}
-	if len(ship) > 0 {
-		out.Epochs = append(out.Epochs, JobEpoch{ID: "ship", Title: "ship", Steps: ship})
-	}
-	if flags.ReinstallLocal {
-		out.Epochs = append(out.Epochs, JobEpoch{
-			ID:    "reinstall",
-			Title: "reinstall",
-			Steps: []JobStep{{Kind: "reinstall-local", Target: "touched mains", Why: "local binaries"}},
-		})
-	}
+	out.Epochs = epochsFromActionGraph(out.ActionGraph)
 
 	if err := ValidateUnwindFlags(plan, flags); err != nil {
 		out.Blockers = []string{err.Error()}
 	}
 	out.CanRun = len(out.Blockers) == 0
 	out.ApplyHint = buildApplyHintRemaining(plan, flags)
+	if out.ActionGraph != nil && out.ActionGraph.FilterNote != "" && out.ApplyHint == "" {
+		out.ApplyHint = out.ActionGraph.FilterNote
+	} else if out.ActionGraph != nil && out.ActionGraph.FilterNote != "" {
+		out.ApplyHint = out.ApplyHint + "; " + out.ActionGraph.FilterNote
+	}
 	if g, err := graphFromSnapshot(snap); err == nil {
 		out.Graph = g
 	}
