@@ -56,6 +56,8 @@ type UnwindFlags struct {
 	// Cleanup includes latest-drift / drop-replace pins in the action graph
 	// (web toggle / --unwind-cleanup). Apply still uses full cascade today.
 	Cleanup bool
+	// Jobs is max concurrent DAG actions. 0 = GOMAXPROCS; 1 = serial.
+	Jobs int
 	// ShowGraph is the read-only inspect path (--unwind --show-graph).
 	ShowGraph bool
 	// Verify is the read-only post-job audit path (--unwind --verify).
@@ -1015,7 +1017,7 @@ func ApplyUnwind(workDir, wrkHome string, members []StackMember, edges []RepoEdg
 
 	if flags.ReinstallLocal {
 		for _, mainPath := range reinstallMainPaths {
-			n, err := runUnwindReinstallLocal(mainPath, flags.Color, flags.NoColor)
+			n, err := runUnwindReinstallLocal(mainPath, flags.Color, flags.NoColor, HostIO{})
 			if err != nil {
 				return err
 			}
@@ -1054,7 +1056,7 @@ func applyUnwindShipTail(mainPaths []string, flags UnwindFlags, stats *UnwindApp
 		}
 		if flags.Push {
 			fmt.Println()
-			if err := runPushMain(mainPath, false, flags.Force, nil); err != nil {
+			if err := runPushMain(mainPath, false, flags.Force, nil, HostIO{}); err != nil {
 				if isNoPushRemoteErr(err) {
 					fmt.Fprintf(os.Stderr, "warning: skip push %s: %v\n", mainPath, err)
 					// Still run sync for this main when requested.
@@ -1069,7 +1071,7 @@ func applyUnwindShipTail(mainPaths []string, flags UnwindFlags, stats *UnwindApp
 		}
 		if flags.Sync {
 			fmt.Println("---- sync linked worktrees ----")
-			if _, err := runSyncWithColor(mainPath, false, flags.Color, flags.NoColor); err != nil {
+			if _, err := runSyncWithColor(mainPath, false, flags.Color, flags.NoColor, HostIO{}); err != nil {
 				return err
 			}
 		}
@@ -1130,7 +1132,7 @@ func applyUnwindPeelOne(
 			// untracked dirt is not forced into the AI commit.
 			// allowEmptySkip=false so this path still receives "no staged" and
 			// can auto-commit remaining porcelain before land.
-			if err := runGenCommitMsgStage(m.Path, flags.GenCommitArgs, false, false); err != nil {
+			if err := runGenCommitMsgStage(m.Path, flags.GenCommitArgs, false, false, HostIO{}); err != nil {
 				// Empty index after pinReady (or no feature dirt): soft-skip
 				// gen-commit even with --add-all when worktree is clean so land
 				// can proceed. If still dirty, auto-commit remaining porcelain.
@@ -1319,18 +1321,18 @@ func dirtyDroppableReplaceTargetLabels(members []StackMember, nodes []UnwindGrap
 // runUnwindReinstallLocal executes one unwind tail entry. A repository without
 // modules is not an error for a successful unwind, matching the compose tail.
 // Returns the reinstalled binary count for the summary rollup.
-func runUnwindReinstallLocal(mainPath string, colorFlag, noColor bool) (int, error) {
+func runUnwindReinstallLocal(mainPath string, colorFlag, noColor bool, io HostIO) (int, error) {
 	h := currentHost()
 	if h.ReinstallLocal == nil {
 		return 0, hostErr("ReinstallLocal")
 	}
-	n, err := h.ReinstallLocal(mainPath, colorFlag, noColor)
+	n, err := h.ReinstallLocal(mainPath, colorFlag, noColor, io)
 	if err == nil {
 		return n, nil
 	}
 	if strings.Contains(err.Error(), "no go.mod modules found") ||
 		strings.Contains(err.Error(), "no go.mod found") {
-		fmt.Fprintf(os.Stderr, "skip reinstall-local: %s\n", err.Error())
+		fmt.Fprintf(io.Err(), "skip reinstall-local: %s\n", err.Error())
 		return 0, nil
 	}
 	return 0, err

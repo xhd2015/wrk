@@ -2,6 +2,7 @@ package wrkcli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,9 @@ type syncOpts struct {
 	// uses three-mode resolveStdoutColor.
 	Color   bool
 	NoColor bool
+	// Out/Err override os.Stdout/os.Stderr for summary and warnings (nil → default).
+	Out io.Writer
+	Err io.Writer
 }
 
 // runSync performs FF-only bi-directional sync between the main checkout and
@@ -62,9 +66,23 @@ func runSyncWithColor(workDir string, dryRun, color, noColor bool) (SyncResult, 
 	return runSyncOpts(workDir, syncOpts{DryRun: dryRun, Color: color, NoColor: noColor})
 }
 
+// runSyncWithColorTo is runSyncWithColor with custom writers for unwind HostIO.
+func runSyncWithColorTo(workDir string, dryRun, color, noColor bool, out, errW io.Writer) (SyncResult, error) {
+	return runSyncOpts(workDir, syncOpts{
+		DryRun: dryRun, Color: color, NoColor: noColor, Out: out, Err: errW,
+	})
+}
+
 func runSyncOpts(workDir string, opts syncOpts) (SyncResult, error) {
 	var empty SyncResult
 	dryRun := opts.DryRun
+	outW, errW := opts.Out, opts.Err
+	if outW == nil {
+		outW = os.Stdout
+	}
+	if errW == nil {
+		errW = os.Stderr
+	}
 	cwd, err := filepath.Abs(workDir)
 	if err != nil {
 		return empty, fmt.Errorf("resolve cwd: %w", err)
@@ -112,7 +130,7 @@ func runSyncOpts(workDir string, opts syncOpts) (SyncResult, error) {
 		key := syncEntryKey(entry)
 		if worktree.IsDead(entry.Path) {
 			if _, seen := skipOnce[key]; !seen {
-				fmt.Fprintf(os.Stderr, "warning: skip %s: dead worktree\n", entry.Path)
+				fmt.Fprintf(errW, "warning: skip %s: dead worktree\n", entry.Path)
 				skipOnce[key] = struct{}{}
 				skipped++
 			}
@@ -120,7 +138,7 @@ func runSyncOpts(workDir string, opts syncOpts) (SyncResult, error) {
 		}
 		if entry.Branch == "" {
 			if _, seen := skipOnce[key]; !seen {
-				fmt.Fprintf(os.Stderr, "warning: skip %s: detached HEAD\n", entry.Path)
+				fmt.Fprintf(errW, "warning: skip %s: detached HEAD\n", entry.Path)
 				skipOnce[key] = struct{}{}
 				skipped++
 			}
@@ -138,7 +156,7 @@ func runSyncOpts(workDir string, opts syncOpts) (SyncResult, error) {
 			continue
 		case git.BranchRelationDiverged:
 			if _, seen := skipOnce[key]; !seen {
-				fmt.Fprintf(os.Stderr, "warning: skip %s: diverged from main\n", entry.Branch)
+				fmt.Fprintf(errW, "warning: skip %s: diverged from main\n", entry.Branch)
 				skipOnce[key] = struct{}{}
 				skipped++
 			}
@@ -151,7 +169,7 @@ func runSyncOpts(workDir string, opts syncOpts) (SyncResult, error) {
 
 		if err := worktree.IsClean(mainRepo); err != nil {
 			if _, seen := skipOnce[key]; !seen {
-				fmt.Fprintf(os.Stderr, "warning: skip %s: dirty main\n", entry.Branch)
+				fmt.Fprintf(errW, "warning: skip %s: dirty main\n", entry.Branch)
 				skipOnce[key] = struct{}{}
 				skipped++
 			}
@@ -162,7 +180,7 @@ func runSyncOpts(workDir string, opts syncOpts) (SyncResult, error) {
 			return empty, err
 		} else if ok {
 			if _, seen := skipOnce[key]; !seen {
-				fmt.Fprintf(os.Stderr, "warning: skip %s: wip commit in range (%s %s)\n", entry.Branch, short, subject)
+				fmt.Fprintf(errW, "warning: skip %s: wip commit in range (%s %s)\n", entry.Branch, short, subject)
 				skipOnce[key] = struct{}{}
 				skipped++
 			}
@@ -188,13 +206,13 @@ func runSyncOpts(workDir string, opts syncOpts) (SyncResult, error) {
 			continue
 		}
 		if worktree.IsDead(entry.Path) {
-			fmt.Fprintf(os.Stderr, "warning: skip %s: dead worktree\n", entry.Path)
+			fmt.Fprintf(errW, "warning: skip %s: dead worktree\n", entry.Path)
 			skipOnce[key] = struct{}{}
 			skipped++
 			continue
 		}
 		if entry.Branch == "" {
-			fmt.Fprintf(os.Stderr, "warning: skip %s: detached HEAD\n", entry.Path)
+			fmt.Fprintf(errW, "warning: skip %s: detached HEAD\n", entry.Path)
 			skipOnce[key] = struct{}{}
 			skipped++
 			continue
@@ -209,7 +227,7 @@ func runSyncOpts(workDir string, opts syncOpts) (SyncResult, error) {
 			// Identical or wt still ahead of main: silent no-op for pass 2.
 			continue
 		case git.BranchRelationDiverged:
-			fmt.Fprintf(os.Stderr, "warning: skip %s: diverged from main\n", entry.Branch)
+			fmt.Fprintf(errW, "warning: skip %s: diverged from main\n", entry.Branch)
 			skipOnce[key] = struct{}{}
 			skipped++
 			continue
@@ -220,7 +238,7 @@ func runSyncOpts(workDir string, opts syncOpts) (SyncResult, error) {
 		}
 
 		if err := worktree.IsClean(entry.Path); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: skip %s: dirty worktree\n", entry.Branch)
+			fmt.Fprintf(errW, "warning: skip %s: dirty worktree\n", entry.Branch)
 			skipOnce[key] = struct{}{}
 			skipped++
 			continue
@@ -237,7 +255,7 @@ func runSyncOpts(workDir string, opts syncOpts) (SyncResult, error) {
 	}
 
 	colorOn := resolveStdoutColor(opts.Color, opts.NoColor)
-	writeSyncStdout(details, intoMain, intoWT, skipped, dryRun, colorOn)
+	writeSyncStdoutTo(outW, details, intoMain, intoWT, skipped, dryRun, colorOn)
 	return SyncResult{IntoMain: intoMain, IntoWT: intoWT, Skipped: skipped}, nil
 }
 
@@ -264,6 +282,13 @@ func syncDetailPass2Line(branch string, n int) string {
 }
 
 func writeSyncStdout(details []string, intoMain, intoWT, skipped int, dryRun bool, colorOn bool) {
+	writeSyncStdoutTo(os.Stdout, details, intoMain, intoWT, skipped, dryRun, colorOn)
+}
+
+func writeSyncStdoutTo(out io.Writer, details []string, intoMain, intoWT, skipped int, dryRun bool, colorOn bool) {
+	if out == nil {
+		out = os.Stdout
+	}
 	prefix := ""
 	if dryRun {
 		prefix = "would: "
@@ -280,7 +305,7 @@ func writeSyncStdout(details []string, intoMain, intoWT, skipped int, dryRun boo
 	b.WriteString(prefix)
 	b.WriteString(formatSyncSummaryLine(intoMain, intoWT, skipped, colorOn))
 	b.WriteByte('\n')
-	fmt.Fprint(os.Stdout, b.String())
+	fmt.Fprint(out, b.String())
 }
 
 // findFirstWipInRange walks commits in mainBranch..wtBranch oldest-first and

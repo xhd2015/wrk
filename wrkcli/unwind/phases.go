@@ -71,6 +71,7 @@ func phaseByID(phases []JobPhase, id string) *JobPhase {
 //	ship     — push then sync (parallel per repo)
 func buildJobPhases(snap *Snapshot, flags UnwindFlags, opts ActionGraphOpts) []JobPhase {
 	full := BuildActionGraph(snap, flags, opts)
+	full = expandLandGraph(full, flags)
 	if full == nil || len(full.Actions) == 0 {
 		return emptyJobPhases(full)
 	}
@@ -309,6 +310,54 @@ func appendPhase2Commit(g *ActionGraph, repo string, nodes map[string]UnwindGrap
 		Deps:    deps,
 		Lane:    lane,
 	})
+}
+
+// expandLandGraph splits bundled gen-commit into add-all / gen-commit-msg / commit
+// so JobPlan and apply match the web DAG.
+func expandLandGraph(g *ActionGraph, flags UnwindFlags) *ActionGraph {
+	if g == nil || len(g.Actions) == 0 {
+		return g
+	}
+	wantCommit := genArgsHasFlag(flags.GenCommitArgs, "--commit")
+	wantAddAll := flags.AddAll || genArgsHasFlag(flags.GenCommitArgs, "--add-all")
+	expanded := ExpandLandActions(g.Actions, wantAddAll, wantCommit)
+	if len(expanded) == len(g.Actions) {
+		same := true
+		for i := range expanded {
+			if expanded[i] == nil || g.Actions[i] == nil || expanded[i].ID != g.Actions[i].ID || expanded[i].Mode != g.Actions[i].Mode {
+				same = false
+				break
+			}
+		}
+		if same {
+			return g
+		}
+	}
+	out := &ActionGraph{
+		WorkDir:    g.WorkDir,
+		Cleanup:    g.Cleanup,
+		Artifacts:  map[string]*Artifact{},
+		LaneLevels: g.LaneLevels,
+		Excluded:   g.Excluded,
+		FilterNote: g.FilterNote,
+	}
+	for id, art := range g.Artifacts {
+		out.Artifacts[id] = art
+	}
+	for _, a := range expanded {
+		if a == nil || a.Mode != ModeGenCommitMsg {
+			continue
+		}
+		artID := landMessageArtifactID(a.Lane)
+		if out.Artifacts[artID] == nil {
+			out.Artifacts[artID] = &Artifact{ID: artID, Kind: ArtMessage, Repo: a.Lane}
+		}
+	}
+	out.Actions = expanded
+	assignRanksByBand(out.Actions, out.LaneLevels)
+	stretchRanksFromBand(out.Actions)
+	out.Waves = deriveWaves(out.Actions)
+	return out
 }
 
 func cloneAction(a *Action) *Action {

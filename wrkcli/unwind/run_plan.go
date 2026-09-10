@@ -1,12 +1,15 @@
 package unwind
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 	"github.com/xhd2015/wrk/wrkcli/storage"
@@ -191,9 +194,77 @@ type jobRunner struct {
 	stats            *UnwindApplyStats
 	shipMains        []string
 	seenMain         map[string]struct{}
+
+	mu       sync.Mutex
+	pathMu   map[string]*sync.Mutex // serialize git ops per checkout/main path
+	messages map[string]string      // message:<lane> → commit message
+	quietRan bool                   // suppress emitRan (progress UI owns status lines)
+	prog     *actionProgress
 }
 
 func (r *jobRunner) run() error {
+	if r.dryRun {
+		return r.runDryPhases()
+	}
+	full := r.fullApplyGraph()
+	actions := []*Action{}
+	if full != nil {
+		actions = full.Actions
+	}
+	jobs := resolveJobs(r.flags.Jobs, runtime.GOMAXPROCS(0))
+
+	r.st.mark(2, "apply · action graph")
+	r.st.detail(fmt.Sprintf("%d actions · jobs=%d", len(actions), jobs))
+	if len(actions) == 0 {
+		r.st.skipped("no actions")
+		r.st.mark(3, "phase-2 · intra-repo update")
+		r.st.skipped("included in graph")
+		r.st.mark(4, "ship")
+		r.st.skipped("included in graph")
+		return nil
+	}
+
+	if err := r.preflightAutonomous(actions); err != nil {
+		return err
+	}
+
+	prog := newActionProgress(progressConfig{
+		W:      os.Stderr,
+		Color:  resolveProgressColor(r.flags.Color, r.flags.NoColor),
+		Indent: r.st.indent,
+		LaneDisplay: func(lane string) string {
+			return r.laneDisplay(lane)
+		},
+	}, actions)
+	r.prog = prog
+	prog.Begin(jobs)
+
+	r.messages = map[string]string{}
+	r.pathMu = map[string]*sync.Mutex{}
+	r.quietRan = true
+
+	err := runActionGraph(context.Background(), actions, jobs, graphExecOpts{
+		OnStart: func(a *Action) { prog.Start(a.ID) },
+		OnDone:  func(a *Action, err error) { prog.Finish(a.ID, err) },
+	}, func(ctx context.Context, a *Action) error {
+		return r.applyActionLocked(a)
+	})
+	prog.Close()
+	prog.DumpFailures()
+	r.prog = nil
+	if err != nil {
+		// Durable error after progress lines (not truncated into a status cell).
+		return err
+	}
+	r.st.mark(3, "phase-2 · intra-repo update")
+	r.st.detail("included in graph")
+	r.st.mark(4, "ship")
+	r.st.detail("included in graph")
+	return nil
+}
+
+// runDryPhases keeps the phase-grouped would: listing for --dry-run readability.
+func (r *jobRunner) runDryPhases() error {
 	p1, _, _ := splitJobPlanActions(r.job)
 	r.st.mark(2, "phase-1 · cross-repo unwind")
 	if len(p1) == 0 {
@@ -202,18 +273,91 @@ func (r *jobRunner) run() error {
 		return err
 	}
 	r.st.mark(3, "phase-2 · intra-repo update")
-	if r.dryRun {
-		r.printPhase2DryRun()
-	} else if err := r.applyPhase2(); err != nil {
-		return err
-	}
+	r.printPhase2DryRun()
 	r.st.mark(4, "ship")
-	if r.dryRun {
-		r.printShipDryRun()
-	} else if err := r.applyShipPhase(); err != nil {
-		return err
+	r.printShipDryRun()
+	return nil
+}
+
+// fullApplyGraph rebuilds the expanded DAG with intact cross-phase deps.
+func (r *jobRunner) fullApplyGraph() *ActionGraph {
+	if r.snap == nil {
+		return nil
+	}
+	opts := ActionGraphOpts{Cleanup: r.flags.Cleanup}
+	return expandLandGraph(BuildActionGraph(r.snap, r.flags, opts), r.flags)
+}
+
+// preflightAutonomous refuses apply when merge-back would need a human prompt
+// path that cannot run autonomously. Current merge-back uses auto-confirm;
+// this still probes DryRun plans so ahead/diverged relations are visible in
+// logs and future interactive-only cases can hard-fail here.
+func (r *jobRunner) preflightAutonomous(actions []*Action) error {
+	for _, a := range actions {
+		if a == nil || (a.Mode != ModeMergeBack && a.Mode != ModeDone) {
+			continue
+		}
+		m, ok := r.byLabel[a.Lane]
+		if !ok || !m.Linked {
+			continue
+		}
+		// Probe only: DryRun never mutates. NeedsConfirm (ahead/diverged) is
+		// auto-approved at apply time; refuse only when the probe itself errors.
+		_, err := worktree.MergeBack(worktree.MergeBackOptions{
+			SourcePath: m.Path,
+			Remove:     a.Mode == ModeDone,
+			DryRun:     true,
+			TmpDir:     filepath.Join(r.wrkHome, "worktrees"),
+			StashLabel: "wrk-unwind",
+			Stdout:     io.Discard,
+		})
+		if err != nil {
+			return fmt.Errorf("wrk: preflight merge-back %s: %w", a.Lane, err)
+		}
 	}
 	return nil
+}
+
+func (r *jobRunner) lockPath(path string) func() {
+	path = storage.NormalizePath(path)
+	if path == "" {
+		return func() {}
+	}
+	r.mu.Lock()
+	if r.pathMu == nil {
+		r.pathMu = map[string]*sync.Mutex{}
+	}
+	m := r.pathMu[path]
+	if m == nil {
+		m = &sync.Mutex{}
+		r.pathMu[path] = m
+	}
+	r.mu.Unlock()
+	m.Lock()
+	return m.Unlock
+}
+
+func (r *jobRunner) applyActionLocked(a *Action) error {
+	dir := r.resourcePath(a)
+	unlock := r.lockPath(dir)
+	defer unlock()
+	io := HostIO{}
+	if r.prog != nil && a != nil {
+		io = r.prog.HostIOFor(a.ID)
+	}
+	return r.applyAction(a, io)
+}
+
+func (r *jobRunner) resourcePath(a *Action) string {
+	if a == nil {
+		return ""
+	}
+	switch a.Mode {
+	case ModeTagNext, ModePush, ModeSync, ModeReinstall, ModeMergeBack, ModeDone:
+		return r.mainOf(a.Lane)
+	default:
+		return r.checkoutOf(a.Lane)
+	}
 }
 
 func (r *jobRunner) phaseByRepo(id string) map[string]*ActionGraph {
@@ -317,7 +461,7 @@ func (r *jobRunner) applyPhase2() error {
 			continue
 		}
 		for _, a := range topoActions(g.Actions) {
-			if err := r.applyAction(a); err != nil {
+			if err := r.applyAction(a, HostIO{}); err != nil {
 				return err
 			}
 		}
@@ -337,7 +481,7 @@ func (r *jobRunner) applyShipPhase() error {
 		any = true
 		r.st.repo(r.laneDisplay(repo))
 		for _, a := range topoActions(g.Actions) {
-			if err := r.applyAction(a); err != nil {
+			if err := r.applyAction(a, HostIO{}); err != nil {
 				return err
 			}
 		}
@@ -387,7 +531,7 @@ func (r *jobRunner) runGrouped(actions []*Action) error {
 				r.printWould(a)
 				continue
 			}
-			if err := r.applyAction(a); err != nil {
+			if err := r.applyAction(a, HostIO{}); err != nil {
 				return err
 			}
 		}
@@ -489,6 +633,9 @@ func (r *jobRunner) printWould(a *Action) {
 }
 
 func (r *jobRunner) emitRan(a *Action) {
+	if r.quietRan {
+		return
+	}
 	for _, line := range r.actionLines(a) {
 		r.st.ran(line)
 	}
@@ -509,6 +656,10 @@ func (r *jobRunner) actionLines(a *Action) []string {
 			out = append(out, "commit")
 		}
 		return out
+	case ModeAddAll:
+		return []string{"git add -A"}
+	case ModeGenCommitMsg:
+		return []string{"gen-commit-msg"}
 	case ModeMergeBack:
 		return []string{"merge-back"}
 	case ModeDone:
@@ -525,7 +676,13 @@ func (r *jobRunner) actionLines(a *Action) []string {
 		}
 		return []string{"dep-update " + msg, "go mod tidy  (local git)"}
 	case ModeCommit:
-		return []string{"git commit -m '" + a.Detail + "'"}
+		if len(a.Consumes) > 0 {
+			return []string{"commit"}
+		}
+		if a.Detail != "" {
+			return []string{"git commit -m '" + a.Detail + "'"}
+		}
+		return []string{"commit"}
 	case ModePush:
 		return []string{"push"}
 	case ModeSync:
@@ -561,33 +718,103 @@ func (r *jobRunner) bumpVersions(a *Action) (from, to string) {
 	return from, to
 }
 
-func (r *jobRunner) applyAction(a *Action) error {
+func (r *jobRunner) applyAction(a *Action, io HostIO) error {
 	if a == nil {
 		return nil
 	}
-	if a.Mode != ModeCommit {
-		r.emitRan(a)
+	// Phase-2 compose commit cards are display-only (pin already committed).
+	if a.Mode == ModeCommit && len(a.Consumes) == 0 && a.Reason == ReasonPropagate {
+		return nil
 	}
+	r.emitRan(a)
 	switch a.Mode {
 	case ModeGenCommit:
-		return r.applyGenCommit(a.Lane)
+		return r.applyGenCommit(a.Lane, io)
+	case ModeAddAll:
+		return r.applyAddAll(a.Lane)
+	case ModeGenCommitMsg:
+		return r.applyGenCommitMsgOnly(a, io)
 	case ModeMergeBack:
-		return r.applyMergeBack(a.Lane, false)
+		return r.applyMergeBack(a.Lane, false, io)
 	case ModeDone:
-		return r.applyMergeBack(a.Lane, true)
+		return r.applyMergeBack(a.Lane, true, io)
 	case ModeTagNext:
 		return r.applyTag(a)
 	case ModeDepUpdate, ModePin:
 		return r.applyPin(a)
 	case ModeCommit:
-		// Per-pin cascadeCommitPin already created the git commit; the card is
-		// the composed subject for dry-run / UI. Skip a second commit.
-		return nil
+		return r.applyLandCommit(a, io)
 	case ModePush, ModeSync, ModeReinstall:
-		return r.applyShip(a)
+		return r.applyShip(a, io)
 	default:
 		return nil
 	}
+}
+
+func (r *jobRunner) applyAddAll(label string) error {
+	dir := r.checkoutOf(label)
+	if dir == "" {
+		return fmt.Errorf("wrk: add-all %s: no checkout", label)
+	}
+	if err := gitRunDir(dir, "add", "-A"); err != nil {
+		return fmt.Errorf("wrk: git add -A in %s: %w", dir, err)
+	}
+	return nil
+}
+
+func (r *jobRunner) applyGenCommitMsgOnly(a *Action, io HostIO) error {
+	label := a.Lane
+	dir := r.checkoutOf(label)
+	if dir == "" {
+		return fmt.Errorf("wrk: gen-commit-msg %s: no checkout", label)
+	}
+	// Strip staging/commit flags — those are separate meta nodes.
+	genArgs := stripGenCommitBoolFlags(r.flags.GenCommitArgs)
+	msg, err := runGenerateCommitMsg(dir, genArgs, io)
+	if err != nil {
+		if isNoStagedCommitErr(err) || strings.Contains(err.Error(), "no staged") {
+			return nil
+		}
+		return err
+	}
+	art := landMessageArtifactID(label)
+	r.mu.Lock()
+	if r.messages == nil {
+		r.messages = map[string]string{}
+	}
+	r.messages[art] = msg
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *jobRunner) applyLandCommit(a *Action, io HostIO) error {
+	if len(a.Consumes) == 0 {
+		return nil
+	}
+	label := a.Lane
+	dir := r.checkoutOf(label)
+	if dir == "" {
+		return fmt.Errorf("wrk: commit %s: no checkout", label)
+	}
+	staged, err := gitOutputDir(dir, "diff", "--cached", "--name-only")
+	if err != nil {
+		return fmt.Errorf("wrk: commit %s: check staged: %w", label, err)
+	}
+	if strings.TrimSpace(staged) == "" {
+		// Pin may have already committed go.mod via --only; feature WIP may be
+		// empty. Soft-skip like legacy allowEmptySkip rather than failing apply.
+		return nil
+	}
+	art := a.Consumes[0]
+	r.mu.Lock()
+	msg := r.messages[art]
+	r.mu.Unlock()
+	if strings.TrimSpace(msg) == "" {
+		// Empty message after soft-skip gen-commit-msg: try auto-commit if dirty.
+		return autoCommitIfDirty(dir)
+	}
+	noVerify := genArgsHasFlag(r.flags.GenCommitArgs, "--no-verify")
+	return runGitCommitWithMsg(dir, msg, noVerify, io)
 }
 
 func (r *jobRunner) checkoutOf(label string) string {
@@ -611,7 +838,7 @@ func (r *jobRunner) mainOf(label string) string {
 	return m.Path
 }
 
-func (r *jobRunner) applyGenCommit(label string) error {
+func (r *jobRunner) applyGenCommit(label string, io HostIO) error {
 	dir := r.checkoutOf(label)
 	if dir == "" {
 		return fmt.Errorf("wrk: gen-commit %s: no checkout", label)
@@ -621,7 +848,7 @@ func (r *jobRunner) applyGenCommit(label string) error {
 			return fmt.Errorf("wrk: git add -A in %s: %w", dir, err)
 		}
 	}
-	if err := runGenCommitMsgStage(dir, r.flags.GenCommitArgs, false, false); err != nil {
+	if err := runGenCommitMsgStage(dir, r.flags.GenCommitArgs, false, false, io); err != nil {
 		if !isNoStagedCommitErr(err) {
 			return err
 		}
@@ -632,7 +859,7 @@ func (r *jobRunner) applyGenCommit(label string) error {
 	return nil
 }
 
-func (r *jobRunner) applyMergeBack(label string, remove bool) error {
+func (r *jobRunner) applyMergeBack(label string, remove bool, io HostIO) error {
 	m, ok := r.byLabel[label]
 	if !ok {
 		return fmt.Errorf("wrk: merge-back %s: unknown lane", label)
@@ -648,8 +875,10 @@ func (r *jobRunner) applyMergeBack(label string, remove bool) error {
 		DryRun:     false,
 		TmpDir:     filepath.Join(r.wrkHome, "worktrees"),
 		StashLabel: "wrk-unwind",
+		Stdout:     io.Out(),
+		// Autonomous: never prompt (assume yes for NeedsConfirm plans).
 		Confirm: func(plan worktree.MergeBackPlan) (bool, error) {
-			return worktree.PromptConfirmPlan(plan, false, true)
+			return true, nil
 		},
 	})
 	if err != nil {
@@ -659,7 +888,7 @@ func (r *jobRunner) applyMergeBack(label string, remove bool) error {
 		return fmt.Errorf("wrk: merge-back aborted during unwind %s", label)
 	}
 	if result.Message != "" {
-		fmt.Fprintln(os.Stdout, result.Message)
+		fmt.Fprintln(io.Out(), result.Message)
 	}
 	main := result.TargetPath
 	if main == "" {
@@ -754,7 +983,7 @@ func (r *jobRunner) applyPin(a *Action) error {
 	return nil
 }
 
-func (r *jobRunner) applyShip(a *Action) error {
+func (r *jobRunner) applyShip(a *Action, io HostIO) error {
 	m, ok := r.byLabel[a.Lane]
 	if !ok {
 		return nil
@@ -766,9 +995,9 @@ func (r *jobRunner) applyShip(a *Action) error {
 	main = storage.NormalizePath(main)
 	switch a.Mode {
 	case ModePush:
-		if err := runPushMain(main, false, r.flags.Force, nil); err != nil {
+		if err := runPushMain(main, false, r.flags.Force, nil, io); err != nil {
 			if isNoPushRemoteErr(err) {
-				fmt.Fprintf(os.Stderr, "warning: skip push %s: %v\n", main, err)
+				fmt.Fprintf(io.Err(), "warning: skip push %s: %v\n", main, err)
 				return nil
 			}
 			return err
@@ -777,10 +1006,10 @@ func (r *jobRunner) applyShip(a *Action) error {
 			r.stats.Pushed++
 		}
 	case ModeSync:
-		_, err := runSyncWithColor(main, false, r.flags.Color, r.flags.NoColor)
+		_, err := runSyncWithColor(main, false, r.flags.Color, r.flags.NoColor, io)
 		return err
 	case ModeReinstall:
-		n, err := runUnwindReinstallLocal(main, r.flags.Color, r.flags.NoColor)
+		n, err := runUnwindReinstallLocal(main, r.flags.Color, r.flags.NoColor, io)
 		if err != nil {
 			return err
 		}

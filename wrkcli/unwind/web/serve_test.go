@@ -63,7 +63,7 @@ func TestIndexAndPlan(t *testing.T) {
 		`data-rank-matrix`,
 		"gen-commit-msg", "add-all", "lane_levels", "laneLevels",
 		"add-all fans out to pins and gen-commit-msg", "dep-update", "pinAfterAdd", "pinJoinLast",
-		"Msg does not wait on pins",
+		"Msg also waits on pins",
 		"bindEdgeHover", "bindNodeHover", "applyGraphHL", "clearGraphHL",
 		"aedge-hit", "medge-hit", ".aedge.hl", ".anode.hl",
 	} {

@@ -8,14 +8,19 @@ import (
 // Host is the CLI-owned ops bundle injected by wrkcli so this package does
 // not import wrkcli (cycle: wrkcli → unwind).
 type Host struct {
-	GitRun            func(repoPath string, args ...string) error
-	GitOutput         func(repoPath string, args ...string) (string, error)
-	ShortHEAD         func(repo string) (string, error)
-	GoModTidy         func(dir string) error
-	PushMain          func(mainRepo string, dryRun, force bool, tags []string) error
-	Sync              func(workDir string, dryRun, color, noColor bool) error
-	GenCommit         func(workDir string, genArgs []string, dryRun, allowEmptySkip bool) error
-	ReinstallLocal    func(mainPath string, color, noColor bool) (int, error)
+	GitRun    func(repoPath string, args ...string) error
+	GitOutput func(repoPath string, args ...string) (string, error)
+	ShortHEAD func(repo string) (string, error)
+	GoModTidy func(dir string) error
+	PushMain  func(mainRepo string, dryRun, force bool, tags []string, io HostIO) error
+	Sync      func(workDir string, dryRun, color, noColor bool, io HostIO) error
+	// GenCommit is the legacy bundled path (add-all/commit flags inside genArgs).
+	GenCommit func(workDir string, genArgs []string, dryRun, allowEmptySkip bool, io HostIO) error
+	// GenerateCommitMsg is Generate-only (no add-all / no commit); used by DAG apply.
+	GenerateCommitMsg func(workDir string, genArgs []string, io HostIO) (string, error)
+	// GitCommit commits with an existing message (wrk-owned commit meta node).
+	GitCommit         func(workDir, message string, noVerify bool, io HostIO) error
+	ReinstallLocal    func(mainPath string, color, noColor bool, io HostIO) (int, error)
 	MapMergeBackError func(err error, op string) error
 	IsNoPushRemote    func(error) bool
 	IsNoStagedCommit  func(error) bool
@@ -53,28 +58,44 @@ func hostErr(name string) error {
 	return fmt.Errorf("unwind: %s host not configured", name)
 }
 
-func runPushMain(mainRepo string, dryRun, force bool, tags []string) error {
+func runPushMain(mainRepo string, dryRun, force bool, tags []string, io HostIO) error {
 	h := currentHost()
 	if h.PushMain == nil {
 		return hostErr("PushMain")
 	}
-	return h.PushMain(mainRepo, dryRun, force, tags)
+	return h.PushMain(mainRepo, dryRun, force, tags, io)
 }
 
-func runSyncWithColor(workDir string, dryRun, color, noColor bool) (struct{}, error) {
+func runSyncWithColor(workDir string, dryRun, color, noColor bool, io HostIO) (struct{}, error) {
 	h := currentHost()
 	if h.Sync == nil {
 		return struct{}{}, hostErr("Sync")
 	}
-	return struct{}{}, h.Sync(workDir, dryRun, color, noColor)
+	return struct{}{}, h.Sync(workDir, dryRun, color, noColor, io)
 }
 
-func runGenCommitMsgStage(workDir string, genArgs []string, dryRun, allowEmptySkip bool) error {
+func runGenCommitMsgStage(workDir string, genArgs []string, dryRun, allowEmptySkip bool, io HostIO) error {
 	h := currentHost()
 	if h.GenCommit == nil {
 		return hostErr("GenCommit")
 	}
-	return h.GenCommit(workDir, genArgs, dryRun, allowEmptySkip)
+	return h.GenCommit(workDir, genArgs, dryRun, allowEmptySkip, io)
+}
+
+func runGenerateCommitMsg(workDir string, genArgs []string, io HostIO) (string, error) {
+	h := currentHost()
+	if h.GenerateCommitMsg == nil {
+		return "", hostErr("GenerateCommitMsg")
+	}
+	return h.GenerateCommitMsg(workDir, genArgs, io)
+}
+
+func runGitCommitWithMsg(workDir, message string, noVerify bool, io HostIO) error {
+	h := currentHost()
+	if h.GitCommit == nil {
+		return hostErr("GitCommit")
+	}
+	return h.GitCommit(workDir, message, noVerify, io)
 }
 
 func mapMergeBackSharedError(err error, op string) error {

@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// Action graph IR (Go build-action inspired). Preview + dry-run share this DAG;
-// apply still bridges through existing peel/cascade helpers (M1/M2).
+// Action graph IR (Go build-action inspired). Preview, dry-run, and concurrent
+// apply share this DAG (land expands to add-all / gen-commit-msg / commit).
 
 // ArtifactKind is a typed output flowing between actions.
 type ArtifactKind string
@@ -16,6 +16,7 @@ const (
 	ArtTag     ArtifactKind = "tag"
 	ArtVersion ArtifactKind = "version"
 	ArtTree    ArtifactKind = "tree"
+	ArtMessage ArtifactKind = "message"
 )
 
 // Artifact is produced or consumed by actions.
@@ -51,11 +52,13 @@ type Subject struct {
 type ActionMode string
 
 const (
-	ModeGenCommit ActionMode = "gen-commit"
-	ModeMergeBack ActionMode = "merge-back"
-	ModeDone      ActionMode = "done"
-	ModeTagNext   ActionMode = "tag-next"
-	ModePin       ActionMode = "pin"
+	ModeGenCommit    ActionMode = "gen-commit" // bundled; ExpandLandActions splits it
+	ModeAddAll       ActionMode = "add-all"
+	ModeGenCommitMsg ActionMode = "gen-commit-msg"
+	ModeMergeBack    ActionMode = "merge-back"
+	ModeDone         ActionMode = "done"
+	ModeTagNext      ActionMode = "tag-next"
+	ModePin          ActionMode = "pin"
 	// ModeDepUpdate is a cross-repo pin of a newly tagged (or drifted) dep.
 	// Same payload as pin; Phase 1 preview uses this name.
 	ModeDepUpdate ActionMode = "dep-update"
@@ -109,7 +112,7 @@ type ActionWave struct {
 	ActionIDs []string `json:"action_ids"`
 }
 
-// ActionGraph is the plan DAG for preview / debug / (later) apply.
+// ActionGraph is the plan DAG for preview / debug / concurrent apply.
 type ActionGraph struct {
 	WorkDir   string               `json:"work_dir"`
 	Cleanup   bool                 `json:"cleanup"`
@@ -722,7 +725,7 @@ func projectLevels(peelLabels []string, nodes []UnwindGraphModuleNode, edges []U
 }
 
 // assignRanksByBand sets layout rank floors: prep=0, fast release=1+L, slow ship=2+L.
-// ModeGenCommit is prep (UI expands commit into the release band).
+// add-all / gen-commit-msg are prep; land commit joins the release band.
 func assignRanksByBand(actions []*Action, levels map[string]int) {
 	for _, a := range actions {
 		L := 0
@@ -730,9 +733,9 @@ func assignRanksByBand(actions []*Action, levels map[string]int) {
 			L = levels[a.Lane]
 		}
 		switch a.Mode {
-		case ModeGenCommit:
+		case ModeGenCommit, ModeAddAll, ModeGenCommitMsg:
 			a.Rank = 0
-		case ModeMergeBack, ModeDone, ModePin, ModeDepUpdate, ModeTagNext:
+		case ModeMergeBack, ModeDone, ModePin, ModeDepUpdate, ModeTagNext, ModeCommit:
 			a.Rank = 1 + L
 		case ModePush, ModeSync, ModeReinstall:
 			a.Rank = 2 + L
@@ -743,7 +746,7 @@ func assignRanksByBand(actions []*Action, levels map[string]int) {
 }
 
 // stretchRanksFromBand raises non-prep ranks so each action sits after its
-// non-prep deps (max(floor, max(dep)+1)). Prep stays at 0 for UI expand.
+// non-prep deps (max(floor, max(dep)+1)). Prep stays at 0 for layout.
 // Iteration is capped so a dependency cycle cannot spin forever.
 func stretchRanksFromBand(actions []*Action) {
 	byID := make(map[string]*Action, len(actions))
@@ -751,7 +754,7 @@ func stretchRanksFromBand(actions []*Action) {
 		byID[a.ID] = a
 	}
 	isPrep := func(a *Action) bool {
-		return a != nil && a.Mode == ModeGenCommit
+		return a != nil && (a.Mode == ModeGenCommit || a.Mode == ModeAddAll || a.Mode == ModeGenCommitMsg)
 	}
 	maxIters := len(actions) + 2
 	if maxIters < 4 {
@@ -860,9 +863,9 @@ func deriveWaves(actions []*Action) []ActionWave {
 	}
 	for _, a := range actions {
 		switch a.Mode {
-		case ModeGenCommit, ModeMergeBack, ModeDone:
+		case ModeGenCommit, ModeAddAll, ModeGenCommitMsg, ModeMergeBack, ModeDone:
 			add(&land, a)
-		case ModeTagNext, ModePin, ModeDepUpdate:
+		case ModeTagNext, ModePin, ModeDepUpdate, ModeCommit:
 			add(&release, a)
 		default:
 			add(&ship, a)

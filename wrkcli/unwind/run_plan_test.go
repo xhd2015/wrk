@@ -213,7 +213,7 @@ func TestApplyMergeBackUnlinkedUsesMain(t *testing.T) {
 		st:             st,
 		stats:          &UnwindApplyStats{},
 	}
-	if err := r.applyMergeBack("app", false); err != nil {
+	if err := r.applyMergeBack("app", false, HostIO{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := r.checkoutOf("app"); got != "/main" {

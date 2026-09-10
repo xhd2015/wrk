@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -641,7 +642,18 @@ func runReinstallLocal(workDir string, dryRun bool, useMain bool, colorFlag bool
 
 // runReinstallLocalEx is runReinstallLocal with NoColor and returned execute stats.
 func runReinstallLocalEx(workDir string, dryRun bool, useMain bool, colorFlag, noColor bool, names []string) (ReinstallExecStats, error) {
+	return runReinstallLocalExTo(workDir, dryRun, useMain, colorFlag, noColor, names, os.Stdout, os.Stderr)
+}
+
+// runReinstallLocalExTo is runReinstallLocalEx with custom writers (unwind HostIO).
+func runReinstallLocalExTo(workDir string, dryRun bool, useMain bool, colorFlag, noColor bool, names []string, out, errW io.Writer) (ReinstallExecStats, error) {
 	var empty ReinstallExecStats
+	if out == nil {
+		out = os.Stdout
+	}
+	if errW == nil {
+		errW = os.Stderr
+	}
 	binDir, err := resolveLocalReinstallBinDir()
 	if err != nil {
 		return empty, err
@@ -661,7 +673,7 @@ func runReinstallLocalEx(workDir string, dryRun bool, useMain bool, colorFlag, n
 	if dryRun {
 		return empty, printMultiLocalReinstallDryRun(plan, diagColor)
 	}
-	return executeMultiLocalReinstalls(plan, diagColor, stdoutColor)
+	return executeMultiLocalReinstallsTo(plan, diagColor, stdoutColor, out, errW)
 }
 
 // filterNamedReinstallPlan keeps only the requested bin names from a multi plan.
@@ -1022,19 +1034,29 @@ func executeLocalReinstalls(plan *LocalReinstallPlan, diagColor, stdoutColor boo
 // lines and summary as single-module execute. Continues after failures.
 // Soft: failed > 0 → stderr warning, exit 0 (hard plan errors still fail).
 func executeMultiLocalReinstalls(plan *MultiLocalReinstallPlan, diagColor, stdoutColor bool) (ReinstallExecStats, error) {
+	return executeMultiLocalReinstallsTo(plan, diagColor, stdoutColor, os.Stdout, os.Stderr)
+}
+
+func executeMultiLocalReinstallsTo(plan *MultiLocalReinstallPlan, diagColor, stdoutColor bool, out, errW io.Writer) (ReinstallExecStats, error) {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errW == nil {
+		errW = os.Stderr
+	}
 	var st ReinstallExecStats
 	for _, mod := range plan.Modules {
 		printReinstallDiagnostics(mod.Diagnostics, diagColor)
 	}
 	nReinstalled, nSkip, nFailed := 0, 0, 0
 	for _, mod := range plan.Modules {
-		if err := executePlanItems(mod.ModuleRoot, plan.BinDir, mod.Items, stdoutColor, &nReinstalled, &nSkip, &nFailed); err != nil {
+		if err := executePlanItemsTo(mod.ModuleRoot, plan.BinDir, mod.Items, stdoutColor, out, errW, &nReinstalled, &nSkip, &nFailed); err != nil {
 			return st, err
 		}
 	}
-	fmt.Println(formatReinstallSummaryLine(nReinstalled, nSkip, nFailed, stdoutColor))
+	fmt.Fprintln(out, formatReinstallSummaryLine(nReinstalled, nSkip, nFailed, stdoutColor))
 	if nFailed > 0 {
-		printReinstallFailedWarning(nFailed, diagColor)
+		printReinstallFailedWarningTo(errW, nFailed, diagColor)
 	}
 	st = ReinstallExecStats{Reinstalled: nReinstalled, Skipped: nSkip, Failed: nFailed}
 	return st, nil
@@ -1043,11 +1065,18 @@ func executeMultiLocalReinstalls(plan *MultiLocalReinstallPlan, diagColor, stdou
 // printReinstallFailedWarning emits a soft-failure notice when installs fail.
 // Install failures do not fail the process (exit 0); hard plan errors still do.
 func printReinstallFailedWarning(nFailed int, colorOn bool) {
+	printReinstallFailedWarningTo(os.Stderr, nFailed, colorOn)
+}
+
+func printReinstallFailedWarningTo(errW io.Writer, nFailed int, colorOn bool) {
+	if errW == nil {
+		errW = os.Stderr
+	}
 	prefix := "warning:"
 	if colorOn {
 		prefix = colorize(prefix, ansiOrange)
 	}
-	fmt.Fprintf(os.Stderr, "%s reinstall finished with %d failed\n", prefix, nFailed)
+	fmt.Fprintf(errW, "%s reinstall finished with %d failed\n", prefix, nFailed)
 }
 
 // executePlanItems runs install/skip actions for one module's items.
@@ -1056,6 +1085,16 @@ func printReinstallFailedWarning(nFailed int, colorOn bool) {
 // (progress lines and cmd.Dir use the post-re-root path/root).
 // stdoutColor greens the go install/run verb when true.
 func executePlanItems(moduleRoot, binDir string, items []PlanItem, stdoutColor bool, nReinstalled, nSkip, nFailed *int) error {
+	return executePlanItemsTo(moduleRoot, binDir, items, stdoutColor, os.Stdout, os.Stderr, nReinstalled, nSkip, nFailed)
+}
+
+func executePlanItemsTo(moduleRoot, binDir string, items []PlanItem, stdoutColor bool, out, errW io.Writer, nReinstalled, nSkip, nFailed *int) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errW == nil {
+		errW = os.Stderr
+	}
 	for _, it := range items {
 		switch it.Action {
 		case ActionInstall:
@@ -1067,11 +1106,11 @@ func executePlanItems(moduleRoot, binDir string, items []PlanItem, stdoutColor b
 			}
 			switch it.Method {
 			case MethodGoInstall:
-				fmt.Println(formatGoInstallProgressLine(MethodGoInstall, ownRel, stdoutColor))
-				err = runGoInModule(ownRoot, "install", ownRel)
+				fmt.Fprintln(out, formatGoInstallProgressLine(MethodGoInstall, ownRel, stdoutColor))
+				err = runGoInModuleTo(ownRoot, "install", ownRel, out, errW)
 			case MethodGoRunInstall:
-				fmt.Println(formatGoInstallProgressLine(MethodGoRunInstall, ownRel, stdoutColor))
-				err = runGoInModule(ownRoot, "run", ownRel)
+				fmt.Fprintln(out, formatGoInstallProgressLine(MethodGoRunInstall, ownRel, stdoutColor))
+				err = runGoInModuleTo(ownRoot, "run", ownRel, out, errW)
 			default:
 				return fmt.Errorf("unknown reinstall method %q for %s", it.Method, it.BinName)
 			}
@@ -1082,7 +1121,7 @@ func executePlanItems(moduleRoot, binDir string, items []PlanItem, stdoutColor b
 			}
 		case ActionSkip:
 			*nSkip++
-			fmt.Printf("skip: %s (not in %s)\n", it.BinName, binDir)
+			fmt.Fprintf(out, "skip: %s (not in %s)\n", it.BinName, binDir)
 		default:
 			return fmt.Errorf("unknown reinstall action %q for %s", it.Action, it.BinName)
 		}
@@ -1158,10 +1197,20 @@ func pathIsUnderOrEqual(path, root string) bool {
 // (including GOBIN). Streams child stdout/stderr to the process.
 // moduleRoot/relPath should already be post-re-root (nearest go.mod + rebased path).
 func runGoInModule(moduleRoot, subcmd, relPath string) error {
+	return runGoInModuleTo(moduleRoot, subcmd, relPath, os.Stdout, os.Stderr)
+}
+
+func runGoInModuleTo(moduleRoot, subcmd, relPath string, stdout, stderr io.Writer) error {
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	if stderr == nil {
+		stderr = os.Stderr
+	}
 	cmd := exec.Command("go", subcmd, relPath)
 	cmd.Dir = moduleRoot
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	// Env is inherited (GOBIN, PATH, etc.) so installs land in the caller's bin dir.
 	return cmd.Run()
 }

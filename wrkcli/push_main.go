@@ -3,6 +3,8 @@ package wrkcli
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -44,6 +46,15 @@ func runPushMain(mainRepo string, dryRun, force bool, tags []string) error {
 // --tag-next --push --json), git push still runs but stdout stays clean of
 // human would:/pushed lines so JSON output is not mixed with confirmations.
 func runPushMainWithOutput(mainRepo string, dryRun, force bool, tags []string, printOutput bool) error {
+	return runPushMainWrite(mainRepo, dryRun, force, tags, printOutput, os.Stdout)
+}
+
+// runPushMainWrite is runPushMainWithOutput with a custom confirm writer
+// (nil → os.Stdout). Used by unwind HostIO so progress can roll the oneliner.
+func runPushMainWrite(mainRepo string, dryRun, force bool, tags []string, printOutput bool, out io.Writer) error {
+	if out == nil {
+		out = os.Stdout
+	}
 	branch, err := gitOutputDir(mainRepo, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return fmt.Errorf("wrk: resolve current branch for push: %w", err)
@@ -62,7 +73,7 @@ func runPushMainWithOutput(mainRepo string, dryRun, force bool, tags []string, p
 			remote = "origin"
 			remoteBranch = branch
 			if printOutput {
-				printWouldPushLines(remote, branch, tags, force)
+				printWouldPushLinesTo(out, remote, branch, tags, force)
 			}
 			// workops.Push DryRun also no-ops when remote missing.
 			return workops.Push(context.Background(), workops.PushOptions{
@@ -77,7 +88,7 @@ func runPushMainWithOutput(mainRepo string, dryRun, force bool, tags []string, p
 
 	if dryRun {
 		if printOutput {
-			printWouldPushLines(remote, branch, tags, force)
+			printWouldPushLinesTo(out, remote, branch, tags, force)
 		}
 		return workops.Push(context.Background(), workops.PushOptions{
 			Checkout: mainRepo,
@@ -99,7 +110,7 @@ func runPushMainWithOutput(mainRepo string, dryRun, force bool, tags []string, p
 
 	if printOutput {
 		// Stable confirm line — never "force-pushed" (D3).
-		fmt.Printf("pushed %s → %s/%s\n", branch, remote, remoteBranch)
+		fmt.Fprintf(out, "pushed %s → %s/%s\n", branch, remote, remoteBranch)
 	}
 	return nil
 }
@@ -107,13 +118,20 @@ func runPushMainWithOutput(mainRepo string, dryRun, force bool, tags []string, p
 // printWouldPushLines emits dry-run plan lines for branch (force-with-lease when
 // force) and non-force tag pushes.
 func printWouldPushLines(remote, branch string, tags []string, force bool) {
+	printWouldPushLinesTo(os.Stdout, remote, branch, tags, force)
+}
+
+func printWouldPushLinesTo(out io.Writer, remote, branch string, tags []string, force bool) {
+	if out == nil {
+		out = os.Stdout
+	}
 	if force {
-		fmt.Printf("would: git push --force-with-lease %s %s\n", remote, branch)
+		fmt.Fprintf(out, "would: git push --force-with-lease %s %s\n", remote, branch)
 	} else {
-		fmt.Printf("would: git push %s %s\n", remote, branch)
+		fmt.Fprintf(out, "would: git push %s %s\n", remote, branch)
 	}
 	for _, tag := range tags {
-		fmt.Printf("would: git push %s %s\n", remote, tag)
+		fmt.Fprintf(out, "would: git push %s %s\n", remote, tag)
 	}
 }
 

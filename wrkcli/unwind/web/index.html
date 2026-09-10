@@ -612,7 +612,7 @@
     }
 
     // Expand gen-commit: add-all fans out to pins and gen-commit-msg;
-    // commit (or merge-back if no --commit) joins both. Msg does not wait on pins.
+    // commit joins msg + pins. Msg also waits on pins (same-repo index safety).
     function expandCommitActions(raw, flags) {
       const f = flags || {};
       const actions = [];
@@ -638,7 +638,7 @@
         }
         const msg = cloneAction(a, {
           id: a.id + "#gen-commit-msg", mode: "gen-commit-msg",
-          detail: a.detail || "", deps: addID ? [addID] : [],
+          detail: a.detail || "", deps: (addID ? [addID] : []).concat(incoming),
         });
         actions.push(msg);
         let lastID = msg.id;

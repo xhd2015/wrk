@@ -560,7 +560,7 @@ func applyEarlyPeelTagWave(label string, members []StackMember, flags UnwindFlag
 		return nil
 	}
 	fmt.Println()
-	if err := runPushMain(mainPath, false, flags.Force, created); err != nil {
+	if err := runPushMain(mainPath, false, flags.Force, created, HostIO{}); err != nil {
 		if isNoPushRemoteErr(err) {
 			fmt.Fprintf(os.Stderr, "warning: skip push %s: %v\n", mainPath, err)
 			return nil
@@ -1092,13 +1092,13 @@ func applyUnwindCascade(members []StackMember, flags UnwindFlags, addReinstallMa
 			}
 			// Branch may have advanced after an early tag push (nested pin commit).
 			fmt.Println()
-			if err := runPushMain(main, false, flags.Force, nil); err != nil {
+			if err := runPushMain(main, false, flags.Force, nil, HostIO{}); err != nil {
 				return err
 			}
 			return nil
 		}
 		fmt.Println()
-		if err := runPushMain(main, false, flags.Force, unpushed); err != nil {
+		if err := runPushMain(main, false, flags.Force, unpushed, HostIO{}); err != nil {
 			return err
 		}
 		for _, t := range unpushed {
@@ -1449,7 +1449,7 @@ func applyDeferredCascadeTags(members []StackMember, steps []UnwindCascadeStep, 
 				continue
 			}
 			fmt.Println()
-			if err := runPushMain(main, false, flags.Force, tags); err != nil {
+			if err := runPushMain(main, false, flags.Force, tags, HostIO{}); err != nil {
 				if isNoPushRemoteErr(err) {
 					// Pin-only / consumer mains often lack origin in fixtures and
 					// multi-repo stacks; do not fail the whole unwind (ship free OK).
@@ -1572,7 +1572,7 @@ func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addRei
 		if !ok || depMain == "" {
 			return nil
 		}
-		if err := runPushMain(depMain, false, flags.Force, nil); err != nil {
+		if err := runPushMain(depMain, false, flags.Force, nil, HostIO{}); err != nil {
 			if isNoPushRemoteErr(err) {
 				return nil
 			}
@@ -1689,7 +1689,7 @@ func applyDeferredCascadeRepins(members []StackMember, flags UnwindFlags, addRei
 			addReinstallMainPath(consumerMain)
 		}
 		if flags.Push && consumerMain != "" {
-			if err := runPushMain(consumerMain, false, flags.Force, nil); err != nil {
+			if err := runPushMain(consumerMain, false, flags.Force, nil, HostIO{}); err != nil {
 				if !isNoPushRemoteErr(err) {
 					return err
 				}

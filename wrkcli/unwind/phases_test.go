@@ -73,7 +73,7 @@ func TestBuildJobPhasesSplitsCrossAndIntraPins(t *testing.T) {
 	if cross.Mode != ModeDepUpdate {
 		t.Fatalf("phase1 cross mode=%s want dep-update", cross.Mode)
 	}
-	if findAction(p1, "gen-commit:dep") == nil || findAction(p1, "tag-next:example.com/dep") == nil {
+	if findAction(p1, "gen-commit:dep#gen-commit-msg") == nil || findAction(p1, "tag-next:example.com/dep") == nil {
 		t.Fatalf("phase1 missing land/tag, actions=%v", actionIDs(p1))
 	}
 	depMods := modsPh.ByRepo["dep"]

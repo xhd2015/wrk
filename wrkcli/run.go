@@ -244,6 +244,8 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var webDev bool
 	// *int target: nil = --port absent; non-nil = present (0 allowed → auto later).
 	var portFlag *int
+	// --jobs: nil/0 = GOMAXPROCS; 1 = serial concurrent DAG apply.
+	var jobsFlag *int
 	var scanGitRepos bool
 	var noCache bool
 	var includeWorktrees bool
@@ -265,6 +267,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--web", &webFlag).
 		Bool("--dev", &webDev).
 		Int("--port", &portFlag).
+		Int("--jobs", &jobsFlag).
 		Bool("--scan-git-repos", &scanGitRepos).
 		Bool("--no-cache", &noCache).
 		Bool("--include-worktrees", &includeWorktrees).
@@ -1242,6 +1245,10 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			if portFlagSet {
 				port = *portFlag
 			}
+			jobs := 0
+			if jobsFlag != nil {
+				jobs = *jobsFlag
+			}
 			return mapUnwindError(unwindweb.Serve(unwindweb.Options{
 				WorkDir: workDir,
 				WrkHome: wrkHome,
@@ -1259,6 +1266,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 					GenCommitMsg:   genCommitMsg,
 					GenCommitArgs:  genCommitArgs,
 					AddAll:         addAll,
+					Jobs:           jobs,
 				},
 				Host: newUnwindHost(),
 			}))
@@ -1336,6 +1344,10 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 				return fmt.Errorf("wrk: --verify is mutually exclusive with --propagate-tags")
 			}
 		}
+		jobs := 0
+		if jobsFlag != nil {
+			jobs = *jobsFlag
+		}
 		return mapUnwindError(unwindpkg.Run(workDir, wrkHome, unwindpkg.UnwindFlags{
 			DryRun:         dryRun,
 			TagNext:        tagNext,
@@ -1350,6 +1362,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			GenCommitMsg:   genCommitMsg,
 			GenCommitArgs:  genCommitArgs,
 			AddAll:         addAll,
+			Jobs:           jobs,
 			ShowGraph:      showGraph,
 			Verify:         verify,
 			JSON:           jsonFlag,
@@ -1715,9 +1728,9 @@ Flags:
   --list                          list worktrees (git worktree list)
   --status                        show status for git repos under this directory
   --repos                         list git repos under this checkout
-  --unwind [--gen-commit-msg --commit …] [--done|--merge-back] [--sync] [--tag-next] [--push] [--reinstall-local] [--dry-run]
-                                  plan free-first peel order over the checkout stack DAG
-                                  (linked peels: optional generated commit → land → sync → tag/push → pin)
+  --unwind [--gen-commit-msg --commit …] [--done|--merge-back] [--sync] [--tag-next] [--push] [--reinstall-local] [--jobs N] [--dry-run]
+                                  apply free-first action DAG over the checkout stack
+                                  (linked peels: add-all → gen-commit-msg → commit → land → tag/push/pin; concurrent by --jobs)
   --unwind --show-graph [--json] [--color|--no-color]
                                   read-only: print repo + module stack graph and peel order
                                   (mutually exclusive with --dry-run and apply/land/pin partners)
@@ -1837,6 +1850,7 @@ Flags:
 
   --web                           start local web UI (React SPA + API; listen :PORT)
   --port PORT                     listen port for --web or --unwind --web (default: free :port from 8080)
+  --jobs N                        with --unwind: max concurrent DAG actions (default: GOMAXPROCS; 1 = serial)
   --dev                           with --web: proxy UI to Vite (wrk-react/) for HMR
   --version                       print version and exit
   --help, -h                      show this help and exit
