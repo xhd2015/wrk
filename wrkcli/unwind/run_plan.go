@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/xhd2015/dot-pkgs/go-pkgs/git/tagscope"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
 	"github.com/xhd2015/wrk/wrkcli/storage"
 	"golang.org/x/term"
@@ -198,6 +199,7 @@ type jobRunner struct {
 	mu       sync.Mutex
 	pathMu   map[string]*sync.Mutex // serialize git ops per checkout/main path
 	messages map[string]string      // message:<lane> → commit message
+	createdTags map[string][]string // lane → tags created by ModeTagNext this run
 	quietRan bool                   // suppress emitRan (progress UI owns status lines)
 	prog     *actionProgress
 }
@@ -267,8 +269,13 @@ func (r *jobRunner) run() error {
 func (r *jobRunner) runDryPhases() error {
 	p1, _, _ := splitJobPlanActions(r.job)
 	r.st.mark(2, "phase-1 · cross-repo unwind")
+	// Always surface inventory peels that have no land actions (follow-local-replace
+	// display paths) even when pin/tag actions exist on other lanes.
+	peels := r.printPendingPeelsDryRun(p1)
 	if len(p1) == 0 {
-		r.st.skipped("no phase-1 actions")
+		if !peels {
+			r.st.skipped("no phase-1 actions")
+		}
 	} else if err := r.runGrouped(p1); err != nil {
 		return err
 	}
@@ -277,6 +284,34 @@ func (r *jobRunner) runDryPhases() error {
 	r.st.mark(4, "ship")
 	r.printShipDryRun()
 	return nil
+}
+
+// printPendingPeelsDryRun emits would: peel <display> for PeelOrder labels that
+// have no land actions in phase-1. Returns true if at least one peel was printed.
+func (r *jobRunner) printPendingPeelsDryRun(p1 []*Action) bool {
+	if r.snap == nil || r.snap.Peel == nil || len(r.snap.Peel.PeelOrder) == 0 {
+		return false
+	}
+	// Skip peels for lanes that already appear as action groups in phase-1.
+	hasLane := map[string]bool{}
+	for _, a := range p1 {
+		if a != nil && a.Lane != "" {
+			hasLane[a.Lane] = true
+		}
+	}
+	printed := false
+	for _, lab := range r.snap.Peel.PeelOrder {
+		if hasLane[lab] {
+			continue
+		}
+		display := lab
+		if m, ok := r.byLabel[lab]; ok {
+			display = peelDisplayPath(r.workDir, m.Path)
+		}
+		r.st.would("peel " + display)
+		printed = true
+	}
+	return printed
 }
 
 // fullApplyGraph rebuilds the expanded DAG with intact cross-phase deps.
@@ -293,12 +328,29 @@ func (r *jobRunner) fullApplyGraph() *ActionGraph {
 // this still probes DryRun plans so ahead/diverged relations are visible in
 // logs and future interactive-only cases can hard-fail here.
 func (r *jobRunner) preflightAutonomous(actions []*Action) error {
+	landCleans := map[string]bool{} // lane → gen-commit/add-all will clear porcelain first
+	for _, a := range actions {
+		if a == nil {
+			continue
+		}
+		switch a.Mode {
+		case ModeGenCommit, ModeAddAll, ModeGenCommitMsg, ModeCommit:
+			if a.Lane != "" {
+				landCleans[a.Lane] = true
+			}
+		}
+	}
 	for _, a := range actions {
 		if a == nil || (a.Mode != ModeMergeBack && a.Mode != ModeDone) {
 			continue
 		}
 		m, ok := r.byLabel[a.Lane]
 		if !ok || !m.Linked {
+			continue
+		}
+		// Skip dirty-WT probe when gen-commit/add-all is planned, or when
+		// merge-back/done will autoCommitIfDirty before landing.
+		if landCleans[a.Lane] || a.Mode == ModeMergeBack || a.Mode == ModeDone {
 			continue
 		}
 		// Probe only: DryRun never mutates. NeedsConfirm (ahead/diverged) is
@@ -803,6 +855,11 @@ func (r *jobRunner) applyLandCommit(a *Action, io HostIO) error {
 	if strings.TrimSpace(staged) == "" {
 		// Pin may have already committed go.mod via --only; feature WIP may be
 		// empty. Soft-skip like legacy allowEmptySkip rather than failing apply.
+		// With --add-all, commit leftover surgical go.mod/go.sum dirt from
+		// partial-edit so pin-only consumers do not leave porcelain.
+		if r.flags.AddAll || genArgsHasFlag(r.flags.GenCommitArgs, "--add-all") {
+			return autoCommitIfDirty(dir)
+		}
 		return nil
 	}
 	art := a.Consumes[0]
@@ -868,6 +925,14 @@ func (r *jobRunner) applyMergeBack(label string, remove bool, io HostIO) error {
 		r.checkoutByLane[label] = r.mainOf(label)
 		return nil
 	}
+	// --done/--merge-back without gen-commit: stage+commit tracked porcelain so
+	// MergeBack can run. Skip when gen-commit already ran (must not scoop
+	// untracked leftovers that --add-all did not request).
+	if !r.flags.GenCommitMsg {
+		if err := autoCommitIfDirty(m.Path); err != nil {
+			return err
+		}
+	}
 	result, err := worktree.MergeBack(worktree.MergeBackOptions{
 		SourcePath: m.Path,
 		TargetPath: "",
@@ -900,6 +965,68 @@ func (r *jobRunner) applyMergeBack(label string, remove bool, io HostIO) error {
 	if r.stats != nil {
 		r.stats.Peeled++
 	}
+	// Pure pin-consumers often had empty NextTag at plan time (HEAD==LatestTag +
+	// WIP only). After feature land, tip is ahead — catch up tagscope next tag.
+	if err := r.catchUpTagsAfterLand(label, main); err != nil {
+		return err
+	}
+	return nil
+}
+
+// catchUpTagsAfterLand creates next release tags for lane modules whose main HEAD
+// advanced past LatestTag when no tag-next action was planned for that module.
+func (r *jobRunner) catchUpTagsAfterLand(label, main string) error {
+	if !r.flags.TagNext || r.snap == nil || main == "" || label == "" {
+		return nil
+	}
+	planned := map[string]bool{}
+	if g := r.fullApplyGraph(); g != nil {
+		for _, a := range g.Actions {
+			if a != nil && a.Mode == ModeTagNext && a.Lane == label && a.Subject.Module != "" {
+				planned[a.Subject.Module] = true
+			}
+		}
+	}
+	main = storage.NormalizePath(main)
+	head, err := gitOutputDir(main, "rev-parse", "HEAD")
+	if err != nil {
+		return nil
+	}
+	head = strings.TrimSpace(head)
+	for _, n := range r.snap.ModuleNodes {
+		if n.RepoLabel != label || n.LatestTag == "" || n.Path == "" || planned[n.Path] {
+			continue
+		}
+		tagCommit, terr := gitOutputDir(main, "rev-parse", n.LatestTag+"^{commit}")
+		if terr != nil {
+			tagCommit, terr = gitOutputDir(main, "rev-parse", n.LatestTag)
+		}
+		if terr != nil || strings.TrimSpace(tagCommit) == "" || strings.TrimSpace(tagCommit) == head {
+			continue
+		}
+		next, ierr := tagscope.IncrementTag(n.LatestTag)
+		if ierr != nil || next == "" {
+			continue
+		}
+		if _, verr := gitOutputDir(main, "rev-parse", "--verify", "--quiet", "refs/tags/"+next); verr == nil {
+			continue
+		}
+		if err := cascadeCreateOneTag(main, next); err != nil {
+			if _, verr := gitOutputDir(main, "rev-parse", "--verify", "--quiet", "refs/tags/"+next); verr == nil {
+				continue
+			}
+			return err
+		}
+		r.mu.Lock()
+		if r.createdTags == nil {
+			r.createdTags = map[string][]string{}
+		}
+		r.createdTags[label] = append(r.createdTags[label], next)
+		r.mu.Unlock()
+		if r.stats != nil {
+			r.stats.Tagged++
+		}
+	}
 	return nil
 }
 
@@ -917,13 +1044,50 @@ func (r *jobRunner) applyTag(a *Action) error {
 		main = m.Path
 	}
 	if err := cascadeCreateOneTag(main, tag); err != nil {
-		return err
+		// Idempotent: catch-up or a prior action may have created the tag.
+		if _, verr := gitOutputDir(main, "rev-parse", "--verify", "--quiet", "refs/tags/"+tag); verr != nil {
+			return err
+		}
 	}
+	r.mu.Lock()
+	if r.createdTags == nil {
+		r.createdTags = map[string][]string{}
+	}
+	r.createdTags[a.Lane] = append(r.createdTags[a.Lane], tag)
+	r.mu.Unlock()
 	if r.stats != nil {
 		r.stats.Tagged++
 	}
 	r.addMain(main)
 	return nil
+}
+
+// tagsForLane returns release tags to publish with push for this lane:
+// tags created this run, else planned tag-next Detail from the full graph.
+func (r *jobRunner) tagsForLane(lane string) []string {
+	r.mu.Lock()
+	created := append([]string(nil), r.createdTags[lane]...)
+	r.mu.Unlock()
+	if len(created) > 0 {
+		return created
+	}
+	g := r.fullApplyGraph()
+	if g == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var tags []string
+	for _, a := range g.Actions {
+		if a == nil || a.Mode != ModeTagNext || a.Lane != lane || a.Detail == "" {
+			continue
+		}
+		if seen[a.Detail] {
+			continue
+		}
+		seen[a.Detail] = true
+		tags = append(tags, a.Detail)
+	}
+	return tags
 }
 
 func (r *jobRunner) applyPin(a *Action) error {
@@ -947,7 +1111,17 @@ func (r *jobRunner) applyPin(a *Action) error {
 	if !ok {
 		return fmt.Errorf("wrk: dep-update %s: no stack member", cons.RepoLabel)
 	}
-	checkout := r.checkoutOf(cons.RepoLabel)
+	// Prefer inventory checkout, but pin clean linked Path on MainRepo
+	// (C-RI3 nested cmd←parent; reinstall useMain sees pin+tidy).
+	checkout := cascadePinCheckout(m)
+	if a.Mode == ModePin && m.Linked && m.MainRepo != "" && m.Path != "" {
+		if err := worktree.IsClean(m.Path); err == nil {
+			checkout = storage.NormalizePath(m.MainRepo)
+		}
+	}
+	if checkout == "" {
+		checkout = r.checkoutOf(cons.RepoLabel)
+	}
 	if checkout == "" {
 		checkout = m.MainRepo
 	}
@@ -956,9 +1130,6 @@ func (r *jobRunner) applyPin(a *Action) error {
 		modDir = filepath.Join(checkout, filepath.FromSlash(cons.Dir))
 	}
 	ver := a.PinVersion
-	if err := cascadePinKeepLocalReplace(modDir, a.DepModule, ver, dep, r.byLabel); err != nil {
-		return err
-	}
 	depDir := ""
 	if dm, ok := r.byLabel[dep.RepoLabel]; ok {
 		depDir = dm.MainRepo
@@ -966,12 +1137,52 @@ func (r *jobRunner) applyPin(a *Action) error {
 			depDir = dm.Path
 		}
 	}
-	if err := goModTidyForCascadePin(modDir, goModSumSnap{}, false, a.DepModule, depDir); err != nil {
+	// Partial-edit when go.mod/go.sum dirty: pin on Base, selective commit,
+	// restore WIP + surgical require bump (same as cascade pin path).
+	saved, err := saveGoModSumSnap(modDir)
+	if err != nil {
+		return fmt.Errorf("wrk: dep-update save go.mod/go.sum in %s: %w", modDir, err)
+	}
+	usePartial := false
+	dirty, err := goModSumUncommittedAt(checkout, modDir)
+	if err != nil {
 		return err
 	}
-	_ = expandGoModRequireBlocks(filepath.Join(modDir, "go.mod"))
-	if err := cascadeCommitPin(checkout, modDir, a.DepModule, dep.LatestTag, ver, false); err != nil {
+	if dirty {
+		usePartial = true
+		if err := writeBaseGoModSum(checkout, modDir); err != nil {
+			_ = restoreGoModSumSnap(modDir, saved)
+			return fmt.Errorf("wrk: dep-update restore Base go.mod/go.sum in %s: %w", modDir, err)
+		}
+	}
+	pinFail := func(err error) error {
+		_ = restoreGoModSumSnap(modDir, saved)
 		return err
+	}
+	if err := cascadePinKeepLocalReplace(modDir, a.DepModule, ver, dep, r.byLabel); err != nil {
+		return pinFail(err)
+	}
+	if err := goModTidyForCascadePin(modDir, saved, usePartial, a.DepModule, depDir); err != nil {
+		return pinFail(err)
+	}
+	_ = expandGoModRequireBlocks(filepath.Join(modDir, "go.mod"))
+	pinSum := readGoSumFile(modDir)
+	if err := cascadeCommitPin(checkout, modDir, a.DepModule, dep.LatestTag, ver, false); err != nil {
+		return pinFail(err)
+	}
+	if usePartial {
+		if err := restoreGoModSumSnap(modDir, saved); err != nil {
+			return fmt.Errorf("wrk: dep-update restore WIP go.mod/go.sum in %s: %w", modDir, err)
+		}
+		if err := cascadePinKeepLocalReplace(modDir, a.DepModule, ver, dep, r.byLabel); err != nil {
+			_ = restoreGoModSumSnap(modDir, saved)
+			return fmt.Errorf("wrk: dep-update surgical pin in %s: %w", modDir, err)
+		}
+		_ = expandGoModRequireBlocks(filepath.Join(modDir, "go.mod"))
+		if err := mergePinGoSumHashes(modDir, pinSum, a.DepModule, ver); err != nil {
+			_ = restoreGoModSumSnap(modDir, saved)
+			return fmt.Errorf("wrk: dep-update surgical go.sum in %s: %w", modDir, err)
+		}
 	}
 	if r.stats != nil {
 		r.stats.Pinned++
@@ -995,7 +1206,8 @@ func (r *jobRunner) applyShip(a *Action, io HostIO) error {
 	main = storage.NormalizePath(main)
 	switch a.Mode {
 	case ModePush:
-		if err := runPushMain(main, false, r.flags.Force, nil, io); err != nil {
+		tags := r.tagsForLane(a.Lane)
+		if err := runPushMain(main, false, r.flags.Force, tags, io); err != nil {
 			if isNoPushRemoteErr(err) {
 				fmt.Fprintf(io.Err(), "warning: skip push %s: %v\n", main, err)
 				return nil

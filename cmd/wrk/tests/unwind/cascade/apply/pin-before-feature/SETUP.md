@@ -2150,34 +2150,81 @@ func setupApplyPinBeforeFeatureAbsolutePathReplace(t *testing.T, req *Request) {
 	setPeelOrderDisplays(t, req, leafExt, wtDir)
 }
 
+// indexPhaseTagNext returns the byte index of a free tag-next plan/progress
+// line for nextTag. Accepts legacy "tag-next <module> @ <tag>" and phase
+// progress "tag-next  <tag>" (module path omitted from the label).
+func indexPhaseTagNext(out, modulePath, nextTag string) int {
+	for _, needle := range []string{
+		"tag-next " + modulePath + " @ " + nextTag,
+		"tag-next  " + nextTag,
+		"·  tag-next  " + nextTag,
+		"✓  tag-next  " + nextTag,
+	} {
+		if i := strings.Index(out, needle); i >= 0 {
+			return i
+		}
+	}
+	// Looser: any tag-next line that mentions the next tag version.
+	for _, line := range strings.Split(out, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.Contains(trim, "tag-next") && strings.Contains(trim, nextTag) {
+			if i := strings.Index(out, line); i >= 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// indexPhasePinOfDep returns the byte index of a pin/dep-update of dep @ nextTag.
+func indexPhasePinOfDep(out, depLabel, nextTag string) (int, string) {
+	candidates := []string{
+		"pin " + labelRoot + " <- " + depLabel + " @ " + nextTag,
+		"pin " + labelAgentPro + " <- " + depLabel + " @ " + nextTag,
+		"<- " + depLabel + " @ " + nextTag,
+		"<- " + unwindDotPkgsModule + " @ " + nextTag,
+		"dep-update ",
+	}
+	for _, needle := range candidates[:4] {
+		if i := strings.Index(out, needle); i >= 0 {
+			return i, needle
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		trim := strings.TrimSpace(line)
+		if !strings.Contains(trim, " <- ") || !strings.Contains(trim, nextTag) {
+			continue
+		}
+		if strings.Contains(trim, "pin") || strings.Contains(trim, "dep-update") {
+			if strings.Contains(trim, depLabel) || strings.Contains(trim, unwindDotPkgsModule) {
+				if i := strings.Index(out, line); i >= 0 {
+					return i, trim
+				}
+			}
+		}
+	}
+	_ = candidates
+	return -1, "pin/dep-update … <- " + depLabel + " @ " + nextTag
+}
+
 // assertFreeTagNextBeforeConsumerPinOfFree locks free tag-next before consumer
 // pin of free @ next (T-spl / T2 order). free must be tagged before pin drops
 // replace onto the next version.
 func assertFreeTagNextBeforeConsumerPinOfFree(t *testing.T, out string) {
 	t.Helper()
-	tagNeedle := "tag-next " + unwindDotPkgsModule + " @ " + unwindApplyNextTag
-	// pin log uses stack repo labels (not module paths).
-	pinNeedle := "pin " + labelRoot + " <- " + labelDotPkgs + " @ " + unwindApplyNextTag
-	tagIdx := strings.Index(out, tagNeedle)
-	pinIdx := strings.Index(out, pinNeedle)
-	if pinIdx < 0 {
-		alt := "<- " + labelDotPkgs + " @ " + unwindApplyNextTag
-		pinIdx = strings.Index(out, alt)
-		if pinIdx >= 0 {
-			pinNeedle = alt
-		}
-	}
+	tagIdx := indexPhaseTagNext(out, unwindDotPkgsModule, unwindApplyNextTag)
+	pinIdx, pinNeedle := indexPhasePinOfDep(out, labelDotPkgs, unwindApplyNextTag)
 	if tagIdx < 0 {
-		t.Fatalf("T-spl: missing free tag-next line %q (free must be tagged before consumer pin)\nout:\n%s",
-			tagNeedle, out)
+		t.Fatalf("T-spl: missing free tag-next for %s @ %s (legacy module path or phase \"tag-next  %s\")\nout:\n%s",
+			unwindDotPkgsModule, unwindApplyNextTag, unwindApplyNextTag, out)
 	}
 	if pinIdx < 0 {
-		t.Fatalf("T-spl: missing consumer pin of free @ next (want %q or pin … <- %s @ %s)\nout:\n%s",
-			pinNeedle, labelDotPkgs, unwindApplyNextTag, out)
+		t.Fatalf("T-spl: missing consumer pin of free @ next (want %q)\nout:\n%s",
+			pinNeedle, out)
 	}
 	if pinIdx < tagIdx {
-		t.Fatalf("T-spl: free tag-next must precede consumer pin of free @ next\ntag@%d pin@%d\nneedles: %q then %q\nout:\n%s",
-			tagIdx, pinIdx, tagNeedle, pinNeedle, out)
+		t.Fatalf("T-spl: free tag-next must precede consumer pin of free @ next\ntag@%d pin@%d\nout:\n%s",
+			tagIdx, pinIdx, out)
 	}
 }
 
@@ -2198,30 +2245,19 @@ func assertNoLocalReplaceGenCommitFail(t *testing.T, out string) {
 // exists (production: unknown revision when tidy resolves untagged next).
 func assertFreeTagNextBeforeMidPinOfFree(t *testing.T, out string) {
 	t.Helper()
-	tagNeedle := "tag-next " + unwindDotPkgsModule + " @ " + unwindApplyNextTag
-	// pin log uses stack repo labels (not module paths).
-	pinNeedle := "pin " + labelAgentPro + " <- " + labelDotPkgs + " @ " + unwindApplyNextTag
-	tagIdx := strings.Index(out, tagNeedle)
-	pinIdx := strings.Index(out, pinNeedle)
-	if pinIdx < 0 {
-		// Tolerate label basename drift; require free pin @ next somewhere.
-		alt := "<- " + labelDotPkgs + " @ " + unwindApplyNextTag
-		pinIdx = strings.Index(out, alt)
-		if pinIdx >= 0 {
-			pinNeedle = alt
-		}
-	}
+	tagIdx := indexPhaseTagNext(out, unwindDotPkgsModule, unwindApplyNextTag)
+	pinIdx, pinNeedle := indexPhasePinOfDep(out, labelDotPkgs, unwindApplyNextTag)
 	if tagIdx < 0 {
-		t.Fatalf("T-tag1: missing free tag-next line %q (free must be tagged before mid pin)\nout:\n%s",
-			tagNeedle, out)
+		t.Fatalf("T-tag1: missing free tag-next for %s @ %s\nout:\n%s",
+			unwindDotPkgsModule, unwindApplyNextTag, out)
 	}
 	if pinIdx < 0 {
-		t.Fatalf("T-tag1: missing mid pin of free @ next (want %q or pin … <- %s @ %s)\nout:\n%s",
-			pinNeedle, labelDotPkgs, unwindApplyNextTag, out)
+		t.Fatalf("T-tag1: missing mid pin of free @ next (want %q)\nout:\n%s",
+			pinNeedle, out)
 	}
 	if pinIdx < tagIdx {
-		t.Fatalf("T-tag1: free tag-next must precede mid pin of free @ next (pinReady must skip untagged NextTag)\ntag@%d pin@%d\nneedles: %q then %q\nout:\n%s",
-			tagIdx, pinIdx, tagNeedle, pinNeedle, out)
+		t.Fatalf("T-tag1: free tag-next must precede mid pin of free @ next\ntag@%d pin@%d\nout:\n%s",
+			tagIdx, pinIdx, out)
 	}
 }
 
@@ -2230,28 +2266,19 @@ func assertFreeTagNextBeforeMidPinOfFree(t *testing.T, out string) {
 // not pin @ LatestTag after leaf land and before the next tag exists.
 func assertFreeTagNextBeforeSkillsPinOfFree(t *testing.T, out string) {
 	t.Helper()
-	tagNeedle := "tag-next " + unwindDotPkgsModule + " @ " + unwindApplyNextTag
-	pinNeedle := "pin " + labelSkills + " <- " + labelDotPkgs + " @ " + unwindApplyNextTag
-	tagIdx := strings.Index(out, tagNeedle)
-	pinIdx := strings.Index(out, pinNeedle)
-	if pinIdx < 0 {
-		alt := "<- " + labelDotPkgs + " @ " + unwindApplyNextTag
-		pinIdx = strings.Index(out, alt)
-		if pinIdx >= 0 {
-			pinNeedle = alt
-		}
-	}
+	tagIdx := indexPhaseTagNext(out, unwindDotPkgsModule, unwindApplyNextTag)
+	pinIdx, pinNeedle := indexPhasePinOfDep(out, labelDotPkgs, unwindApplyNextTag)
 	if tagIdx < 0 {
-		t.Fatalf("CS-pin-old-tag: missing free tag-next line %q (free must be tagged before mid pin)\nout:\n%s",
-			tagNeedle, out)
+		t.Fatalf("CS-pin-old-tag: missing free tag-next for %s @ %s\nout:\n%s",
+			unwindDotPkgsModule, unwindApplyNextTag, out)
 	}
 	if pinIdx < 0 {
-		t.Fatalf("CS-pin-old-tag: missing mid pin of free @ next (want %q or pin … <- %s @ %s)\nout:\n%s",
-			pinNeedle, labelDotPkgs, unwindApplyNextTag, out)
+		t.Fatalf("CS-pin-old-tag: missing mid pin of free @ next (want %q)\nout:\n%s",
+			pinNeedle, out)
 	}
 	if pinIdx < tagIdx {
-		t.Fatalf("CS-pin-old-tag: free tag-next must precede skills pin of free @ next\ntag@%d pin@%d\nneedles: %q then %q\nout:\n%s",
-			tagIdx, pinIdx, tagNeedle, pinNeedle, out)
+		t.Fatalf("CS-pin-old-tag: free tag-next must precede skills pin of free @ next\ntag@%d pin@%d\nout:\n%s",
+			tagIdx, pinIdx, out)
 	}
 }
 

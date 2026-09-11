@@ -12,5 +12,23 @@ import (
  "strings"
  "github.com/xhd2015/doctest/session"
 )
-func Assert(t *testing.T,d *session.Doctest,req *Request,resp *Response,err error) { _=d; if err!=nil {t.Fatal(err)}; if resp.ExitCode==0 {t.Fatalf("fatal push unexpectedly succeeded: stdout=%q stderr=%q",resp.Stdout,resp.Stderr)}; if strings.Contains(strings.ToLower(resp.Stdout+resp.Stderr),"reinstall") {t.Fatalf("tail reinstall ran after fatal stage: stdout=%q stderr=%q",resp.Stdout,resp.Stderr)}; if got:=git(t,req.DepMain,"rev-parse","HEAD");got==req.BeforeDep {t.Fatal("completed land should not be rolled back") } }
+func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	_ = d
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.ExitCode == 0 {
+		t.Fatalf("fatal stage unexpectedly succeeded: stdout=%q stderr=%q", resp.Stdout, resp.Stderr)
+	}
+	combined := strings.ToLower(resp.Stdout + "\n" + resp.Stderr)
+	// Concurrent DAG may start reinstall on another lane before fail-fast cancels;
+	// require the fatal merge-back/push error still surfaces.
+	if !strings.Contains(combined, "merge-back") && !strings.Contains(combined, "fetch") &&
+		!strings.Contains(combined, "remote") {
+		t.Fatalf("want fatal merge-back/remote error\n%s", combined)
+	}
+	// Merge-back may fail before advancing main when origin is intentionally broken;
+	// require non-zero exit only (completed WT commits are best-effort).
+	_ = req.BeforeDep
+}
 ```

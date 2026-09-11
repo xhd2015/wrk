@@ -78,6 +78,8 @@ func seedMain(t *testing.T, req *Request) {
 	mainRemote := filepath.Join(req.WorkRoot, "app-origin.git")
 	git(t, req.WorkRoot, "init", "--bare", mainRemote)
 	setOrigin(t, req.MainRepo, mainRemote)
+	// Merge-back main-sync fetches origin/main; bare must have the branch.
+	git(t, req.MainRepo, "push", "-u", "origin", "main")
 	req.RepoDir = req.MainRepo
 }
 
@@ -95,6 +97,7 @@ func seedLinkedDep(t *testing.T, req *Request) {
 	depRemote := filepath.Join(req.WorkRoot, "dep-origin.git")
 	git(t, req.WorkRoot, "init", "--bare", depRemote)
 	setOrigin(t, req.DepMain, depRemote)
+	git(t, req.DepMain, "push", "-u", "origin", "main")
 	req.DepWorktree = filepath.Join(req.MainRepo, "external", "dep")
 	os.MkdirAll(filepath.Dir(req.DepWorktree), 0o755)
 	git(t, req.DepMain, "worktree", "add", "-b", "feature-dep", req.DepWorktree)

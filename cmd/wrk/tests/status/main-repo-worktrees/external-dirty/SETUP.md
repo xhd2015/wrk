@@ -19,6 +19,8 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	req.InProcess = true
 	mainRepo, wtDir, _ := createExternalWrkWorktree(t, req)
 	dirtyWorktreeFile(t, wtDir, "README.md", "# dirty external\n")
+	// Stage so status counts match helper/product (1 staged).
+	runGitIsolated(t, wtDir, "add", "--", "README.md")
 	req.RepoDir = mainRepo
 	return nil
 }

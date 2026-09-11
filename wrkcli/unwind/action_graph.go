@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/xhd2015/dot-pkgs/go-pkgs/git/tagscope"
 )
 
 // Action graph IR (Go build-action inspired). Preview, dry-run, and concurrent
@@ -137,11 +139,12 @@ func defaultReasons(cleanup bool) map[ActionReason]bool {
 		ReasonOwnedRelease: true,
 		ReasonPropagate:    true,
 		ReasonPinBeforeTag: true,
-		ReasonShip:         true,
+		// Droppable external replaces must pin before gen-commit (B1 / no-local-replace hook).
+		ReasonDropReplace: true,
+		ReasonShip:        true,
 	}
 	if cleanup {
 		m[ReasonLatestDrift] = true
-		m[ReasonDropReplace] = true
 	}
 	return m
 }
@@ -182,15 +185,53 @@ func BuildActionGraph(snap *Snapshot, flags UnwindFlags, opts ActionGraphOpts) *
 	}
 
 	dirty := dirtyLabels(members)
+	roots := planRootsByLabel(members)
+	addAllTip := willUseAddAllTip(flags)
+	// Safety net: per-module tip dirt vs LatestTag (not whole-lane dirty) so
+	// consumers pin @ next; co-located clean nested modules stay untagged.
+	bumpedNext := false
+	for i := range nodes {
+		n := &nodes[i]
+		if n.Path == "" || n.LatestTag == "" || n.NextTag != "" {
+			continue
+		}
+		if n.RepoLabel == "" || !dirty[n.RepoLabel] {
+			continue
+		}
+		repo := roots[n.RepoLabel]
+		if repo == "" {
+			continue
+		}
+		tipDirty, err := tipScopeDirty(repo, n.LatestTag, scopeGitPathspec(n.Dir), addAllTip)
+		if err != nil || !tipDirty {
+			continue
+		}
+		next, err := tagscope.IncrementTag(n.LatestTag)
+		if err != nil || next == "" {
+			continue
+		}
+		n.NextTag = next
+		n.OwnedChanged = true
+		n.SkipReason = ""
+		nodeByPath[n.Path] = *n
+		bumpedNext = true
+	}
 	willTag := make(map[string]struct{})
 	for _, n := range nodes {
 		if !cascadeModuleShouldTag(n) {
 			continue
 		}
-		if n.RepoLabel != "" && !dirty[n.RepoLabel] {
+		if n.RepoLabel != "" && !dirty[n.RepoLabel] && n.NextTag == "" {
 			continue
 		}
 		willTag[n.Path] = struct{}{}
+	}
+	// Rebuild cascade only when we tip-bumped NextTags (preserve explicit test
+	// cascades otherwise).
+	if bumpedNext {
+		if rebuilt, err := planUnwindCascadeFromGraph(nodes, edges); err == nil && rebuilt != nil {
+			cascade = rebuilt
+		}
 	}
 	droppable := droppableExternalPairs(nodes, edges)
 
@@ -324,12 +365,18 @@ func BuildActionGraph(snap *Snapshot, flags UnwindFlags, opts ActionGraphOpts) *
 			var reason ActionReason
 			switch {
 			case depTags:
+				// Dep is tagging this run (cmd←parent, tools←shared, cross-repo).
 				reason = ReasonPropagate
 			case drop && !drift:
 				reason = ReasonDropReplace
+			case drift && pinIsIntraRepo(nodeByPath, s.ModulePath, s.DepModulePath):
+				// Same-repo require drift is core cascade (cmd←parent @ existing
+				// LatestTag, parent←nested tool catch-up like CS-openterm2),
+				// not optional --cleanup latest-drift.
+				reason = ReasonPropagate
 			case drift:
-				// Catch-up to LatestTag of an untagged dep is latest-drift even
-				// when the consumer itself is tagging (don't promote to pin-before-tag).
+				// Cross-repo catch-up to LatestTag of an untagged dep.
+				// Optional --cleanup only.
 				reason = ReasonLatestDrift
 			case consTags:
 				reason = ReasonPinBeforeTag
@@ -354,7 +401,9 @@ func BuildActionGraph(snap *Snapshot, flags UnwindFlags, opts ActionGraphOpts) *
 			continue
 		}
 		n := nodeByPath[s.ModulePath]
-		if n.RepoLabel != "" && !dirty[n.RepoLabel] {
+		// Skip porcelain-clean lanes with no planned next tag. Committed
+		// HEAD-ahead releases keep NextTag after clearNextTagsOnCleanRepos.
+		if n.RepoLabel != "" && !dirty[n.RepoLabel] && n.NextTag == "" {
 			continue
 		}
 		lane := n.RepoLabel
@@ -565,12 +614,35 @@ func BuildActionGraph(snap *Snapshot, flags UnwindFlags, opts ActionGraphOpts) *
 	}
 
 	// Per-project ship (slow band): after that project's fast release.
+	// Include peel lanes and tag-only lanes (already-on-main: tag-next with no land).
 	peelLabels := append(append([]string{}, early...), deferred...)
+	shipLanes := append([]string{}, peelLabels...)
+	seenShip := make(map[string]bool, len(peelLabels)+len(tagActionByModule))
 	for _, lab := range peelLabels {
-		last := lastLandByLabel[lab]
-		if last == "" {
+		seenShip[lab] = true
+	}
+	for mod, tid := range tagActionByModule {
+		if tid == "" {
 			continue
 		}
+		lab := nodeByPath[mod].RepoLabel
+		if lab == "" || seenShip[lab] {
+			continue
+		}
+		seenShip[lab] = true
+		shipLanes = append(shipLanes, lab)
+	}
+	// Pin-only clean free (C-RI3 nested cmd←parent) still needs reinstall/push.
+	for _, a := range actions {
+		if a == nil || !pinLike(a.Mode) || a.Lane == "" || seenShip[a.Lane] {
+			continue
+		}
+		seenShip[a.Lane] = true
+		shipLanes = append(shipLanes, a.Lane)
+	}
+	sort.Strings(shipLanes[len(peelLabels):]) // stable extras only; keep peel order prefix
+	for _, lab := range shipLanes {
+		last := lastLandByLabel[lab]
 		m, ok := byLabel[lab]
 		display := lab
 		if ok {
@@ -580,13 +652,32 @@ func BuildActionGraph(snap *Snapshot, flags UnwindFlags, opts ActionGraphOpts) *
 			Kind: SubCheckout, ID: "checkout:" + lab, Display: display,
 			RepoLabel: lab, Linked: ok && m.Linked,
 		}
+		// Ship waits on every non-ship action for this lane (tag, pin, land,
+		// commit) so push publishes tip after cascade pin commits.
 		var preds []string
+		seenPred := map[string]bool{}
+		addPred := func(id string) {
+			if id == "" || seenPred[id] || byID[id] == nil {
+				return
+			}
+			seenPred[id] = true
+			preds = append(preds, id)
+		}
+		for _, a := range actions {
+			if a == nil || a.Lane != lab || isShipMode(a.Mode) {
+				continue
+			}
+			addPred(a.ID)
+		}
 		for mod, tid := range tagActionByModule {
 			if nodeByPath[mod].RepoLabel == lab {
-				preds = append(preds, tid)
+				addPred(tid)
 			}
 		}
 		if len(preds) == 0 {
+			if last == "" {
+				continue
+			}
 			preds = []string{last}
 		}
 		// reinstall-local stays on the cross-repo lane (after tag).

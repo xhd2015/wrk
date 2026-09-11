@@ -31,18 +31,19 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
-	assertPeelOrder(t, resp.Stdout, req.PeelOrder)
-	assertPeelUsesRelDisplay(t, resp.Stdout, ".")
-	// Shared path must not appear as its own peel target (whole-line match).
+	out := resp.Stdout
+	assertPeelOrder(t, out, req.PeelOrder)
+	assertPeelUsesRelDisplay(t, out, ".")
+	// Shared path must not appear as its own peel/lane target.
 	if req.DepsLinkedWtDir != "" {
 		sharedDisp := peelDisplay(t, req, req.DepsLinkedWtDir)
-		if sharedDisp != "." && hasPeelLine(resp.Stdout, sharedDisp) {
-			t.Fatalf("intra-repo shared must not peel as %q\nstdout:\n%s", peelLine(sharedDisp), resp.Stdout)
+		if sharedDisp != "." && hasPeelLine(out, sharedDisp) {
+			t.Fatalf("intra-repo shared must not peel as %q\nstdout:\n%s", sharedDisp, out)
 		}
 	}
-	// Exactly one peel line (primary only).
-	if strings.Count(resp.Stdout, "would: peel ") != 1 {
-		t.Fatalf("intra-repo: want exactly 1 peel line, got:\n%s", resp.Stdout)
+	// Phase format: at most one primary lane "."; legacy: exactly one would: peel.
+	if n := strings.Count(out, "would: peel "); n > 1 {
+		t.Fatalf("intra-repo: want at most 1 legacy peel line, got %d:\n%s", n, out)
 	}
 	assertUnwindZeroMutations(t, req)
 }

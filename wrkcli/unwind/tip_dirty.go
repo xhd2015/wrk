@@ -10,10 +10,15 @@ import (
 	"github.com/xhd2015/wrk/wrkcli/storage"
 )
 
-// willUseAddAllTip is true when unwind will gen-commit with --add-all --commit,
-// so NextTag planning must include unstaged/untracked worktree paths.
+// willUseAddAllTip is true when unwind will include unstaged/untracked tip paths
+// in NextTag planning: gen-commit with --add-all --commit, or --done/--merge-back
+// without gen-commit (autoCommitIfDirty scoops porcelain before land).
 func willUseAddAllTip(f UnwindFlags) bool {
-	return f.AddAll && f.GenCommitMsg && genArgsHasFlag(f.GenCommitArgs, "--commit")
+	addAll := f.AddAll || genArgsHasFlag(f.GenCommitArgs, "--add-all")
+	if addAll && f.GenCommitMsg && genArgsHasFlag(f.GenCommitArgs, "--commit") {
+		return true
+	}
+	return (f.Done || f.MergeBack) && !f.GenCommitMsg
 }
 
 // scopeGitPathspec maps module Dir to a git pathspec under the checkout root.
@@ -56,6 +61,7 @@ func tipScopeDirtyStaged(repoRoot, releaseTag, pathspec string) (bool, error) {
 }
 
 func tipScopeDirtyAddAll(repoRoot, releaseTag, pathspec string) (bool, error) {
+	// Worktree vs release (includes unstaged).
 	args := []string{"diff", "--name-only", releaseTag}
 	if pathspec != "" {
 		args = append(args, "--", pathspec)
@@ -65,6 +71,17 @@ func tipScopeDirtyAddAll(repoRoot, releaseTag, pathspec string) (bool, error) {
 		return false, err
 	}
 	names := splitNonEmptyLines(out)
+
+	// Index vs release (staged-only additions that match WT still need this when
+	// comparing some git versions / pathspecs; keep union with WT diff).
+	cargs := []string{"diff", "--name-only", "--cached", releaseTag}
+	if pathspec != "" {
+		cargs = append(cargs, "--", pathspec)
+	}
+	cout, cerr := gitOutputDir(repoRoot, cargs...)
+	if cerr == nil {
+		names = append(names, splitNonEmptyLines(cout)...)
+	}
 
 	uargs := []string{"ls-files", "-o", "--exclude-standard"}
 	if pathspec != "" {
@@ -190,10 +207,12 @@ func dirtyLabels(members []StackMember) map[string]bool {
 	return out
 }
 
-// clearNextTagsOnCleanRepos drops tagscope NextTag / owned-changed on porcelain-clean
-// stack members. Unwind does not land, tag, or ship a clean worktree.
+// clearNextTagsOnCleanRepos drops tip-only NextTag / owned-changed on porcelain-clean
+// stack members whose HEAD still sits on LatestTag. Committed releases ahead of
+// LatestTag keep tagscope NextTag so verify / --tag-next still see owned-changed.
 func clearNextTagsOnCleanRepos(nodes []UnwindGraphModuleNode, members []StackMember) {
 	dirty := dirtyLabels(members)
+	roots := planRootsByLabel(members)
 	for i := range nodes {
 		lab := nodes[i].RepoLabel
 		if lab == "" || dirty[lab] {
@@ -201,6 +220,19 @@ func clearNextTagsOnCleanRepos(nodes []UnwindGraphModuleNode, members []StackMem
 		}
 		if nodes[i].NextTag == "" && !nodes[i].OwnedChanged {
 			continue
+		}
+		repo := roots[lab]
+		if repo != "" && nodes[i].LatestTag != "" {
+			head, herr := gitOutputDir(repo, "rev-parse", "HEAD")
+			tag, terr := gitOutputDir(repo, "rev-parse", nodes[i].LatestTag+"^{commit}")
+			if terr != nil {
+				tag, terr = gitOutputDir(repo, "rev-parse", nodes[i].LatestTag)
+			}
+			head, tag = strings.TrimSpace(head), strings.TrimSpace(tag)
+			if herr == nil && terr == nil && head != "" && tag != "" && head != tag {
+				// HEAD ahead of latest release tag: keep tagscope next.
+				continue
+			}
 		}
 		nodes[i].NextTag = ""
 		nodes[i].OwnedChanged = false
@@ -228,9 +260,28 @@ func refreshNextTagsFromWorktreeTip(nodes []UnwindGraphModuleNode, members []Sta
 			continue
 		}
 		prefix := scopeGitPathspec(n.Dir)
-		dirty, err := tipScopeDirty(repo, n.LatestTag, prefix, addAll)
-		if err != nil || !dirty {
+		tipDirty, err := tipScopeDirty(repo, n.LatestTag, prefix, addAll)
+		if err != nil {
 			continue
+		}
+		// Dirty stack members with a release tag always get a next tag when the
+		// tip looks release-dirty, or when HEAD still equals LatestTag (staged /
+		// unpublished packages that pathspec classification may miss).
+		if !tipDirty {
+			// Without add-all, only staged tip dirt counts (Mode A already tried).
+			if !addAll {
+				continue
+			}
+			head, herr := gitOutputDir(repo, "rev-parse", "HEAD")
+			tag, terr := gitOutputDir(repo, "rev-parse", n.LatestTag+"^{commit}")
+			if terr != nil {
+				tag, terr = gitOutputDir(repo, "rev-parse", n.LatestTag)
+			}
+			if herr != nil || terr != nil ||
+				strings.TrimSpace(head) == "" ||
+				strings.TrimSpace(head) != strings.TrimSpace(tag) {
+				continue
+			}
 		}
 		next, err := tagscope.IncrementTag(n.LatestTag)
 		if err != nil || next == "" {

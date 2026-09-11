@@ -52,14 +52,20 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if !hasCascadePin(out, unwindRootModule, unwindDotPkgsModule) {
 		t.Fatalf("cascade pin root <- leaf required\nstdout:\n%s", out)
 	}
-	reinstallLine := "would: reinstall local binaries"
-	if !strings.Contains(out, reinstallLine) {
-		t.Fatalf("missing reinstall tail %q\nstdout:\n%s", reinstallLine, out)
+	// Phase format: would: reinstall-local; legacy: would: reinstall local binaries.
+	reinstallOK := strings.Contains(out, "would: reinstall-local") ||
+		strings.Contains(out, "would: reinstall local binaries")
+	if !reinstallOK {
+		t.Fatalf("missing reinstall tail\nstdout:\n%s", out)
 	}
 	// Tail after cascade tag when both present.
+	reinstallNeedle := "would: reinstall-local"
+	if !strings.Contains(out, reinstallNeedle) {
+		reinstallNeedle = "would: reinstall local binaries"
+	}
 	assertContainsInOrder(t, out,
 		"would: tag-next "+unwindDotPkgsModule+" @",
-		reinstallLine,
+		reinstallNeedle,
 	)
 	combined := strings.ToLower(resp.Stdout + "\n" + resp.Stderr)
 	if strings.Contains(combined, "mutually exclusive") {

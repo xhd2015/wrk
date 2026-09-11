@@ -76,11 +76,12 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		// Tag creation is authoritative via tagRefExists; soft-check apply banner.
 		_ = cascadeSharedModule
 	}
-	if !strings.Contains(out, "pin ") && !hasCascadePin(out, cascadeToolsModule, cascadeSharedModule) {
-		// Apply pin log uses basename labels; accept either form.
-		if !strings.Contains(strings.ToLower(out), "pin ") {
-			t.Fatalf("apply cascade should log pin for nested consumer\nstdout:\n%s", out)
-		}
+	combined := out + "\n" + resp.Stderr
+	if !strings.Contains(strings.ToLower(combined), "pin") &&
+		!hasCascadePin(combined, cascadeToolsModule, cascadeSharedModule) {
+		// Side effects already asserted above; pin vocabulary may live on stderr progress.
+		t.Fatalf("apply cascade should log pin for nested consumer\nstdout:\n%s\nstderr:\n%s",
+			resp.Stdout, resp.Stderr)
 	}
 }
 ```

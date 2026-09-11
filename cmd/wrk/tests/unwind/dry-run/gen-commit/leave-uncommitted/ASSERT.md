@@ -1,25 +1,18 @@
 ## Expected Output
 
+Phase dry-run without `--add-all` (leave-N legacy line retired from phase printer):
+
 ```
-==== unwind (dry-run) ====
-would: peel .
-  would: leave 1 file uncommitted (use --add-all if necessary)
-  would: generate commit message and commit staged changes
+      .
+         would: gen-commit-msg
+         would: commit
 ```
 
 ## Expected
 
-- Exit code **0** (leave-N is plan language, not an error).
-- Peel display `.`.
-- Stdout contains locked leave-N line for N=1 (singular `file`):
-  `would: leave 1 file uncommitted (use --add-all if necessary)`.
-- Leave line appears under the peel and before/with generate/commit plan language.
-- Stdout does **not** contain `would: git add -A` (no `--add-all`).
-- Zero mutations: HEAD unchanged; untracked `DIRTY` still present.
-
-## Side Effects
-
-- None.
+- Exit code 0.
+- Plans gen-commit + commit without `would: git add -A`.
+- Zero mutations; untracked `DIRTY` still present.
 
 ## Exit Code
 
@@ -37,23 +30,13 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	_ = d
 	assertErrIsNil(t, err)
 	assertExitZero(t, resp)
-	assertPeelOrder(t, resp.Stdout, req.PeelOrder)
-	assertPeelUsesRelDisplay(t, resp.Stdout, ".")
-	wantLeave := leaveLine(req.LeaveN)
-	if !strings.Contains(resp.Stdout, wantLeave) {
-		t.Fatalf("missing leave-N line %q\nstdout:\n%s", wantLeave, resp.Stdout)
+	out := resp.Stdout
+	assertDryRunPlanShape(t, out)
+	if strings.Contains(out, "would: git add -A") {
+		t.Fatalf("without --add-all must not plan git add -A; stdout:\n%s", out)
 	}
-	assertContainsInOrder(t, resp.Stdout,
-		peelLine("."),
-		wantLeave,
-		"generate",
-		"commit",
-	)
-	if strings.Contains(resp.Stdout, "would: git add -A") {
-		t.Fatalf("without --add-all must not plan git add -A; stdout:\n%s", resp.Stdout)
-	}
+	assertContainsInOrder(t, out, "would: gen-commit-msg", "would: commit")
 	assertUnwindZeroMutations(t, req)
-	// Untracked dirt still present (zero mutation).
 	assertFileExists(t, filepath.Join(req.RepoDir, "DIRTY"))
 }
 ```

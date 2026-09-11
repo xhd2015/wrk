@@ -62,14 +62,15 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		t.Fatalf("missing cascade pin root <- shared\nwant substring pin %s <- %s\nstdout:\n%s",
 			unwindRootModule, cascadeSharedModule, out)
 	}
-	// Order: tag shared before pin root (free-first).
+	// Order: tag shared before pin/dep-update root (free-first).
 	assertContainsInOrder(t, out,
 		"would: tag-next "+cascadeSharedModule+" @",
-		"would: pin "+unwindRootModule+" <- "+cascadeSharedModule,
+		cascadePinNeedle(unwindRootModule, cascadeSharedModule),
 	)
-	// Prefer exact pin version vocabulary when present.
-	if !strings.Contains(out, pinRoot) && !strings.Contains(out, " @ "+unwindApplyNextTag) {
-		t.Fatalf("pin line should include version %s\nstdout:\n%s", unwindApplyNextTag, out)
+	// Prefer version vocabulary when present.
+	if !strings.Contains(out, pinRoot) && !strings.Contains(out, unwindApplyNextTag) &&
+		!strings.Contains(out, "v0.0.2") {
+		t.Fatalf("pin/dep-update line should include version %s\nstdout:\n%s", unwindApplyNextTag, out)
 	}
 	assertCascadeAfterPeels(t, out, req.PeelOrder)
 	assertUnwindZeroMutations(t, req)

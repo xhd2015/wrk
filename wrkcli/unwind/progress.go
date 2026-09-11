@@ -32,13 +32,15 @@ const (
 var progressSpinnerFrames = []string{"|", "/", "-", "\\"}
 
 type actionProgressRow struct {
-	ID      string
-	Lane    string
-	Label   string // action name under the repo group (mode [+ short detail])
-	Status  actionProgressStatus
-	Oneline string // rolling last log line
-	Detail  string // terminal status detail (fail/skip)
-	Capture bytes.Buffer
+	ID        string
+	Lane      string
+	Label     string // action name under the repo group (mode [+ short detail])
+	Status    actionProgressStatus
+	Oneline   string // rolling last log line
+	Detail    string // terminal status detail (fail/skip)
+	StartedAt time.Time
+	Elapsed   time.Duration // set on Finish; running rows use time.Since(StartedAt)
+	Capture   bytes.Buffer
 }
 
 type progressGroup struct {
@@ -264,6 +266,8 @@ func (p *actionProgress) Start(id string) {
 		return
 	}
 	row.Status = progRunning
+	row.StartedAt = time.Now()
+	row.Elapsed = 0
 	p.emitLocked(id)
 }
 
@@ -273,6 +277,9 @@ func (p *actionProgress) Finish(id string, err error) {
 	row := p.rows[id]
 	if row == nil {
 		return
+	}
+	if !row.StartedAt.IsZero() {
+		row.Elapsed = time.Since(row.StartedAt)
 	}
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "skipped:") {
@@ -310,8 +317,8 @@ func (p *actionProgress) setOneline(id, line string) {
 }
 
 func (p *actionProgress) onelineBudgetLocked() int {
-	// indent + "   " + glyph + "  " + label(~20) + "  "
-	used := len(p.indent) + 3 + 1 + 2 + 20 + 2
+	// indent + "   " + glyph + "  " + label(~20) + "  " + elapsed(~8)
+	used := len(p.indent) + 3 + 1 + 2 + 20 + 2 + 8
 	budget := p.termWidth - used
 	if budget < 16 {
 		return 16
@@ -454,7 +461,52 @@ func (p *actionProgress) formatRowLineLocked(row *actionProgressRow) string {
 		}
 		line += "  " + tail
 	}
+	if elapsed := formatActionElapsed(row); elapsed != "" {
+		line += "  " + paint(elapsed, ansiGrey, p.color)
+	}
 	return line
+}
+
+// formatActionElapsed returns a compact duration for running/finished rows.
+// Waiting rows stay blank. Shape: 850ms / 4.8s / 1m02s.
+func formatActionElapsed(row *actionProgressRow) string {
+	if row == nil || row.StartedAt.IsZero() {
+		return ""
+	}
+	var d time.Duration
+	switch row.Status {
+	case progRunning:
+		d = time.Since(row.StartedAt)
+	case progDone, progFailed, progSkipped:
+		d = row.Elapsed
+		if d <= 0 {
+			d = time.Since(row.StartedAt)
+		}
+	default:
+		return ""
+	}
+	return formatProgressElapsed(d)
+}
+
+func formatProgressElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Second {
+		ms := d.Milliseconds()
+		if ms < 1 && d > 0 {
+			ms = 1
+		}
+		return fmt.Sprintf("%dms", ms)
+	}
+	if d < time.Minute {
+		// One decimal place for sub-minute seconds.
+		sec := float64(d) / float64(time.Second)
+		return fmt.Sprintf("%.1fs", sec)
+	}
+	mins := int(d / time.Minute)
+	secs := int((d % time.Minute) / time.Second)
+	return fmt.Sprintf("%dm%02ds", mins, secs)
 }
 
 func (p *actionProgress) glyphLocked(row *actionProgressRow) string {

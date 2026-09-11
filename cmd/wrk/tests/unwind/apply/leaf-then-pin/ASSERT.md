@@ -38,19 +38,14 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 		}
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
-	// Banner display path for nested leaf external (statusDirLine vs RepoDir).
+	// Phase progress uses lane header with relative display (legacy peel banner retired).
 	display := peelDisplay(t, req, req.DepsLinkedWtDir)
-	banner := applyBannerLine(display)
 	out := resp.Stdout + "\n" + resp.Stderr
-	if !strings.Contains(out, banner) {
-		t.Fatalf("apply banner missing %q\ncombined:\n%s", banner, out)
+	if !strings.Contains(out, display) && !strings.Contains(out, applyBannerLine(display)) {
+		t.Fatalf("apply output missing leaf display %q\ncombined:\n%s", display, out)
 	}
-	if strings.HasPrefix(display, "external/") && !strings.Contains(out, "==== unwind: peel external/") {
-		t.Fatalf("apply banner must use external/ relative display; got:\n%s", out)
-	}
-	// Must not satisfy only with bare MainRepo basename peel banner.
-	if strings.Contains(out, applyBannerLine(labelDotPkgs)) && !strings.Contains(out, banner) {
-		t.Fatalf("banner must not be bare basename only; want %q\ngot:\n%s", banner, out)
+	if strings.HasPrefix(display, "external/") && !strings.Contains(out, "external/") {
+		t.Fatalf("apply output must use external/ relative display; got:\n%s", out)
 	}
 	// pin-when-primary-is-main: primary Path is MainRepo (in scope).
 	if req.RepoDir == "" || req.MainRepo == "" {

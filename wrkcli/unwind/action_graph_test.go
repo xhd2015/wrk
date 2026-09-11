@@ -504,6 +504,80 @@ func TestBuildActionGraphPinBeforeTagLandCovers(t *testing.T) {
 	}
 }
 
+func TestBuildActionGraphIntraRequireDriftIsPropagate(t *testing.T) {
+	t.Parallel()
+	// Both directions of same-repo LatestTag catch-up must pin without --cleanup:
+	// nested←ancestor (agent-pro cmd←parent) and parent←nested (CS-openterm2).
+	snap := &Snapshot{
+		WorkDir: "/tmp/stack",
+		Inv: StackInventory{Members: []StackMember{
+			{Path: "/tmp/free", MainRepo: "/tmp/free-main", Label: "free", Dirty: true, Linked: true},
+			{Path: "/tmp/app", MainRepo: "/tmp/app-main", Label: "app", Dirty: true, Linked: true},
+		}},
+		Peel: &UnwindPlan{PeelOrder: []string{"free", "app"}, NeedsLand: true},
+		ModuleNodes: []UnwindGraphModuleNode{
+			{Path: "example.com/dot-pkgs", RepoLabel: "free", LatestTag: "v0.0.2"},
+			{Path: "example.com/dot-pkgs/cmd-harness", RepoLabel: "free", LatestTag: "v0.0.1"},
+			{Path: "example.com/app", RepoLabel: "app", NextTag: "v1.0.1", LatestTag: "v1.0.0", OwnedChanged: true},
+			{Path: "example.com/app/pkgs/log", RepoLabel: "app", LatestTag: "v0.0.2"},
+		},
+		ModuleEdges: []UnwindGraphModuleEdge{
+			{From: "example.com/dot-pkgs/cmd-harness", To: "example.com/dot-pkgs", Kind: "require", Version: "v0.0.1"},
+			{From: "example.com/app", To: "example.com/dot-pkgs", Kind: "require", Version: "v0.0.1"},
+			{From: "example.com/app", To: "example.com/app/pkgs/log", Kind: "require", Version: "v0.0.1"},
+		},
+		Cascade: &UnwindCascadePlan{Steps: []UnwindCascadeStep{
+			{Kind: CascadePin, ModulePath: "example.com/dot-pkgs/cmd-harness", DepModulePath: "example.com/dot-pkgs", TagOrVersion: "v0.0.2"},
+			{Kind: CascadePin, ModulePath: "example.com/app", DepModulePath: "example.com/dot-pkgs", TagOrVersion: "v0.0.2"},
+			{Kind: CascadePin, ModulePath: "example.com/app", DepModulePath: "example.com/app/pkgs/log", TagOrVersion: "v0.0.2"},
+			{Kind: CascadeTagNext, ModulePath: "example.com/app", TagOrVersion: "v1.0.1"},
+		}},
+	}
+	flags := UnwindFlags{MergeBack: true, TagNext: true, GenCommitMsg: true}
+	g := BuildActionGraph(snap, flags, ActionGraphOpts{})
+	cmdPin := findAction(g, "pin:example.com/dot-pkgs/cmd-harness<example.com/dot-pkgs")
+	logPin := findAction(g, "pin:example.com/app<example.com/app/pkgs/log")
+	if cmdPin == nil || logPin == nil {
+		t.Fatalf("intra catch-up pins must be included without cleanup, actions=%v", actionIDs(g))
+	}
+	if cmdPin.Reason != ReasonPropagate || logPin.Reason != ReasonPropagate {
+		t.Fatalf("cmd reason=%s log reason=%s want propagate", cmdPin.Reason, logPin.Reason)
+	}
+	// Cross-repo catch-up to already-released free stays latest-drift (omitted).
+	if findAction(g, "pin:example.com/app<example.com/dot-pkgs") != nil {
+		t.Fatal("cross-repo LatestTag catch-up must be omitted without cleanup")
+	}
+}
+
+func TestBuildActionGraphPushForTagOnlyAlreadyMain(t *testing.T) {
+	t.Parallel()
+	// Already on main: dirty + NextTag, no linked land — ship must still push tags.
+	snap := &Snapshot{
+		WorkDir: "/tmp/root",
+		Inv: StackInventory{Members: []StackMember{
+			{Path: "/tmp/root", MainRepo: "/tmp/root", Label: "root", Dirty: true, Linked: false},
+		}},
+		Peel: &UnwindPlan{PeelOrder: []string{"root"}, NeedsLand: false},
+		ModuleNodes: []UnwindGraphModuleNode{
+			{Path: "example.com/root", RepoLabel: "root", NextTag: "v0.0.2", LatestTag: "v0.0.1", OwnedChanged: true},
+		},
+		Cascade: &UnwindCascadePlan{Steps: []UnwindCascadeStep{
+			{Kind: CascadeTagNext, ModulePath: "example.com/root", TagOrVersion: "v0.0.2"},
+		}},
+	}
+	g := BuildActionGraph(snap, UnwindFlags{TagNext: true, Push: true}, ActionGraphOpts{})
+	if findAction(g, "tag-next:example.com/root") == nil {
+		t.Fatalf("missing tag-next, actions=%v", actionIDs(g))
+	}
+	push := findAction(g, "push:root")
+	if push == nil {
+		t.Fatalf("tag-only already-main must emit push, actions=%v", actionIDs(g))
+	}
+	if !depsContain(push.Deps, "tag-next:example.com/root") {
+		t.Fatalf("push deps=%v want tag-next", push.Deps)
+	}
+}
+
 func TestJobPlanUsesActionGraphEpochs(t *testing.T) {
 	t.Parallel()
 	snap := &Snapshot{

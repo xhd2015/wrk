@@ -83,9 +83,17 @@ func cascadeTagNextLine(modulePath, nextTag string) string {
 	return "would: tag-next " + modulePath + " @ " + nextTag
 }
 
-// cascadePinLine is the locked dry-run vocabulary for a module pin step.
+// cascadePinLine is the preferred phase-format dry-run vocabulary for a pin
+// (ModeDepUpdate / ModePin print as dep-update). ver is kept for call-site
+// compatibility; matching uses consumer<-dep (+ optional version separately).
 func cascadePinLine(consumerMod, depMod, ver string) string {
-	return "would: pin " + consumerMod + " <- " + depMod + " @ " + ver
+	_ = ver
+	return "would: dep-update " + consumerMod + " <- " + depMod
+}
+
+// cascadePinNeedle is the stable consumer<-dep substring for pin/dep-update lines.
+func cascadePinNeedle(consumerMod, depMod string) string {
+	return consumerMod + " <- " + depMod
 }
 
 // hasCascadeTagNext reports whether stdout has a cascade tag-next line for modulePath
@@ -108,25 +116,36 @@ func assertNoCascadeTagNextForModule(t *testing.T, stdout, modulePath string) {
 	}
 }
 
-// hasCascadePin reports a top-level cascade pin (consumer <- dep), not under-peel
+// hasCascadePin reports a cascade pin/dep-update (consumer <- dep), not under-peel
 // "would: pin stack consumers".
 func hasCascadePin(stdout, consumerMod, depMod string) bool {
-	needle := "would: pin " + consumerMod + " <- " + depMod
-	return strings.Contains(stdout, needle)
+	needle := cascadePinNeedle(consumerMod, depMod)
+	for _, line := range strings.Split(stdout, "\n") {
+		trim := strings.TrimSpace(line)
+		if !strings.Contains(trim, needle) {
+			continue
+		}
+		if strings.HasPrefix(trim, "would: pin ") || strings.HasPrefix(trim, "would: dep-update ") {
+			return true
+		}
+	}
+	return false
 }
 
 // assertNoCascadeModuleLines fails if dry-run stdout contains cascade tag-next
-// or cascade pin (… <- …) lines.
+// or cascade pin/dep-update (… <- …) lines.
 func assertNoCascadeModuleLines(t *testing.T, stdout string) {
 	t.Helper()
 	if strings.Contains(stdout, "would: tag-next ") {
 		t.Fatalf("cascade tag-next lines must be absent\nstdout:\n%s", stdout)
 	}
-	// Cascade pin form uses " <- "; under-peel "  would: pin stack consumers" does not.
 	for _, line := range strings.Split(stdout, "\n") {
 		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "would: pin ") && strings.Contains(trim, " <- ") {
-			t.Fatalf("cascade pin line must be absent; found %q\nstdout:\n%s", trim, stdout)
+		if !strings.Contains(trim, " <- ") {
+			continue
+		}
+		if strings.HasPrefix(trim, "would: pin ") || strings.HasPrefix(trim, "would: dep-update ") {
+			t.Fatalf("cascade pin/dep-update line must be absent; found %q\nstdout:\n%s", trim, stdout)
 		}
 	}
 }
@@ -152,6 +171,15 @@ func assertNoSuccessfulCascadeBody(t *testing.T, stdout string) {
 // after the last peel line when peels are non-empty.
 func assertCascadeAfterPeels(t *testing.T, stdout string, peelDisplays []string) {
 	t.Helper()
+	// Phase-format dry-run interleaves lane headers with would: tag-next/pin;
+	// legacy required cascade lines strictly after all would: peel lines.
+	if !strings.Contains(stdout, "would: peel ") {
+		if !strings.Contains(stdout, "would: tag-next ") && !strings.Contains(stdout, "would: pin ") &&
+			!strings.Contains(stdout, "would: dep-update ") {
+			t.Fatalf("phase dry-run missing cascade would: lines\nstdout:\n%s", stdout)
+		}
+		return
+	}
 	if len(peelDisplays) == 0 {
 		return
 	}

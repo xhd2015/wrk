@@ -38,6 +38,22 @@ func TestWillUseAddAllTip(t *testing.T) {
 	if willUseAddAllTip(UnwindFlags{GenCommitMsg: true, GenCommitArgs: []string{"--commit"}}) {
 		t.Fatal("want false without AddAll")
 	}
+	// --gen-commit-msg peels --add-all into GenCommitArgs; top-level AddAll stays false.
+	if willUseAddAllTip(UnwindFlags{GenCommitMsg: true, GenCommitArgs: []string{"--add-all", "--commit"}}) != true {
+		t.Fatal("want true for peeled --add-all + --commit")
+	}
+	if willUseAddAllTip(UnwindFlags{GenCommitMsg: true, GenCommitArgs: []string{"--add-all"}}) {
+		t.Fatal("want false for peeled --add-all without --commit")
+	}
+	if willUseAddAllTip(UnwindFlags{Done: true}) != true {
+		t.Fatal("want true for --done auto-commit tip (no gen-commit)")
+	}
+	if willUseAddAllTip(UnwindFlags{MergeBack: true}) != true {
+		t.Fatal("want true for --merge-back auto-commit tip (no gen-commit)")
+	}
+	if willUseAddAllTip(UnwindFlags{Done: true, GenCommitMsg: true}) {
+		t.Fatal("want false for --done when gen-commit owns staging")
+	}
 }
 
 func initTipRepo(t *testing.T) (repo, releaseTag string) {
@@ -192,6 +208,23 @@ func TestRefreshNextTagsAndJobPlanAddAll(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("BuildJobPlan with add-all want tag-next for go-pkgs, actions=%v", actionIDs(job.ActionGraph))
+	}
+
+	// Peeled --add-all (top-level AddAll false) must still tip-plan tag-next.
+	peeled := UnwindFlags{
+		TagNext: true, MergeBack: true, GenCommitMsg: true,
+		GenCommitArgs: []string{"--add-all", "--commit"},
+	}
+	job2 := BuildJobPlan(snap, peeled)
+	found = false
+	for _, a := range job2.ActionGraph.Actions {
+		if a.Mode == ModeTagNext && strings.Contains(a.ID, "go-pkgs") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("BuildJobPlan with peeled --add-all want tag-next for go-pkgs, actions=%v", actionIDs(job2.ActionGraph))
 	}
 }
 

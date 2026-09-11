@@ -307,7 +307,8 @@ unwind/
 │   │   │   ├── skip-testdata-scope/      # C-DR4: no tag-next for testdata scopes
 │   │   │   ├── reinstall-local-tail/     # C-DR6: cascade + reinstall tail; zero mut
 │   │   │   ├── replace-only-external-clean-dep/ # C-DR7: external replace ⇒ pin @ current
-│   │   │   └── replace-only-intra-no-pin/       # C-DR8: intra replace alone ⇒ no pin
+│   │   │   ├── replace-only-intra-no-pin/       # C-DR8: intra replace alone ⇒ no pin
+│   │   │   └── head-at-tag-unstaged-add-all/    # tip-dirty: HEAD@LatestTag + unstaged + peeled --add-all → tag-next
 │   │   ├── without-tag-next/             # C-DR3: peel-only; no cascade tag/pin
 │   │   │   └── peel-only-no-cascade/
 │   │   └── cycle/                        # C-DR5: cycle reject; no cascade body

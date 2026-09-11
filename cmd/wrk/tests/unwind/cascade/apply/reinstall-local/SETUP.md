@@ -439,18 +439,24 @@ func assertReinstallTailNoHardFail(t *testing.T, resp *Response) {
 // seeded nested tools binary (stricter C-RI1 path).
 func assertReinstallInstalledAtLeastOne(t *testing.T, resp *Response) {
 	t.Helper()
-	out := resp.Stdout
+	// Progress UI writes install lines to stderr; summary also on stderr/stdout.
+	out := resp.Stdout + "\n" + resp.Stderr
 	if !strings.Contains(out, "go install") && !strings.Contains(out, "reinstalled ") {
 		t.Fatalf("expected reinstall-local to run installs (go install / reinstalled summary)\nstdout:\n%s\nstderr:\n%s",
 			resp.Stdout, resp.Stderr)
 	}
-	// Summary preferred when present.
+	// Summary preferred when present (phase progress or unwind: rollup).
 	if strings.Contains(out, "reinstalled ") {
 		ok := false
 		for _, line := range strings.Split(out, "\n") {
 			line = strings.TrimSpace(line)
+			// Strip progress glyphs / "reinstall-local  " prefixes.
+			if i := strings.Index(line, "reinstalled "); i >= 0 {
+				line = strings.TrimSpace(line[i:])
+			}
 			if strings.HasPrefix(line, "reinstalled ") &&
 				!strings.HasPrefix(line, "reinstalled 0,") &&
+				!strings.HasPrefix(line, "reinstalled 0 ") &&
 				strings.Contains(line, "failed 0") {
 				ok = true
 				break

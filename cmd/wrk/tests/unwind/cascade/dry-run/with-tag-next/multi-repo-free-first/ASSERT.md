@@ -55,18 +55,18 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if !hasCascadePin(out, unwindRootModule, unwindDotPkgsModule) {
 		t.Fatalf("missing cascade pin root <- leaf\nwant %q\nstdout:\n%s", pinRoot, out)
 	}
-	// Free-first across stack: leaf module before consumer pin.
+	// Free-first across stack: leaf module before consumer pin/dep-update.
 	assertContainsInOrder(t, out,
 		"would: tag-next "+unwindDotPkgsModule+" @",
-		"would: pin "+unwindRootModule+" <- "+unwindDotPkgsModule,
+		cascadePinNeedle(unwindRootModule, unwindDotPkgsModule),
 	)
-	// B1 interleave: free peel → cascade free tag/pin → deferred consumer peel.
+	// B1 interleave: free lane → cascade free tag/pin → deferred consumer lane.
 	if len(req.PeelOrder) >= 2 {
 		assertContainsInOrder(t, out,
-			peelLine(req.PeelOrder[0]),
+			req.PeelOrder[0],
 			"would: tag-next "+unwindDotPkgsModule+" @",
-			"would: pin "+unwindRootModule+" <- "+unwindDotPkgsModule,
-			peelLine(req.PeelOrder[1]),
+			cascadePinNeedle(unwindRootModule, unwindDotPkgsModule),
+			req.PeelOrder[1],
 		)
 	}
 	assertUnwindZeroMutations(t, req)

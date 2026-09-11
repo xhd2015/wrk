@@ -39,11 +39,11 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	assertExitZero(t, resp)
 	assertPeelOrder(t, resp.Stdout, req.PeelOrder)
 	assertPeelUsesRelDisplay(t, resp.Stdout, ".")
+	// Phase format: lane "." then would: git add -A / gen-commit-msg / commit.
 	assertContainsInOrder(t, resp.Stdout,
-		peelLine("."),
 		"would: git add -A",
-		"generate",
-		"commit",
+		"gen-commit-msg",
+		"would: commit",
 	)
 	if strings.Contains(resp.Stdout, "leave") && strings.Contains(resp.Stdout, "uncommitted") {
 		t.Fatalf("--add-all plan must not print leave-uncommitted; stdout:\n%s", resp.Stdout)

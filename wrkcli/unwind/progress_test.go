@@ -71,3 +71,46 @@ func TestHostIODefaults(t *testing.T) {
 		t.Fatal("custom writers not used")
 	}
 }
+
+func TestFormatProgressElapsed(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{0, "0ms"},
+		{850 * time.Millisecond, "850ms"},
+		{4800 * time.Millisecond, "4.8s"},
+		{62 * time.Second, "1m02s"},
+	}
+	for _, tc := range cases {
+		if got := formatProgressElapsed(tc.d); got != tc.want {
+			t.Fatalf("formatProgressElapsed(%v)=%q want %q", tc.d, got, tc.want)
+		}
+	}
+}
+
+func TestFormatRowLineElapsedAfterOneline(t *testing.T) {
+	t.Parallel()
+	p := newActionProgress(progressConfig{W: &bytes.Buffer{}, Color: false, Indent: "      "}, []*Action{
+		{ID: "a", Mode: ModePush, Lane: ".", Subject: Subject{Display: "."}},
+	})
+	row := p.rows["a"]
+	row.Status = progDone
+	row.StartedAt = time.Now().Add(-1500 * time.Millisecond)
+	row.Elapsed = 1500 * time.Millisecond
+	row.Oneline = "pushed master → origin/master"
+
+	line := p.formatRowLineLocked(row)
+	if !strings.Contains(line, "push") {
+		t.Fatalf("missing label: %q", line)
+	}
+	onelineIdx := strings.Index(line, "pushed master")
+	elapsedIdx := strings.Index(line, "1.5s")
+	if onelineIdx < 0 || elapsedIdx < 0 {
+		t.Fatalf("want oneline then elapsed: %q", line)
+	}
+	if elapsedIdx < onelineIdx {
+		t.Fatalf("elapsed must follow oneline: %q", line)
+	}
+}

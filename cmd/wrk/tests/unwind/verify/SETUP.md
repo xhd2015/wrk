@@ -105,8 +105,10 @@ func setupVerifySingleMainClean(t *testing.T, req *Request) {
 	mainRepo := filepath.Join(req.WorkRoot, labelRoot)
 	initGitRepoOnMain(t, mainRepo)
 	writeGoModRequire(t, mainRepo, unwindRootModule)
-	writeFile(t, filepath.Join(mainRepo, "main.go"), "package main\n")
-	runGitIsolated(t, mainRepo, "add", "go.mod", "main.go")
+	// Library package so tagscope owned-change / next-tag attach reliably.
+	writeFile(t, filepath.Join(mainRepo, "root.go"),
+		"package root\n\nfunc Version() string { return \"old\" }\n")
+	runGitIsolated(t, mainRepo, "add", "go.mod", "root.go")
 	runGitIsolated(t, mainRepo, "commit", "-m", "add module")
 	createLightweightTag(t, mainRepo, unwindApplyOldTag, "HEAD")
 	mainRepo = resolvePath(t, mainRepo)
@@ -132,8 +134,10 @@ func setupVerifySingleMainDirtyTagged(t *testing.T, req *Request) {
 func setupVerifySingleMainOwnedChanged(t *testing.T, req *Request) {
 	t.Helper()
 	setupVerifySingleMainClean(t, req)
-	writeFile(t, filepath.Join(req.MainRepo, "main.go"), "package main\n// changed after tag\n")
-	runGitIsolated(t, req.MainRepo, "add", "main.go")
+	// Library package (not package main) so tagscope owned-change detects NextTag.
+	writeFile(t, filepath.Join(req.MainRepo, "root.go"),
+		"package root\n\nfunc Version() string { return \"next\" }\n")
+	runGitIsolated(t, req.MainRepo, "add", "root.go")
 	runGitIsolated(t, req.MainRepo, "commit", "-m", "owned change after tag")
 	req.OldRequireVersion = unwindApplyOldTag
 	req.ExpectedPinVersion = unwindApplyNextTag

@@ -79,17 +79,17 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	}
 	assertContainsInOrder(t, out,
 		"would: tag-next "+unwindDotPkgsModule+" @",
-		"would: pin "+unwindRootModule+" <- "+unwindDotPkgsModule,
+		cascadePinNeedle(unwindRootModule, unwindDotPkgsModule),
 	)
 
 	// B1 interleave: free peel → free tag-next → free pin → deferred consumer peel.
 	// This is the intended user-facing dry-run order (may RED while FormatUnwindDryRun
 	// still emits peels-then-cascade globally).
 	assertContainsInOrder(t, out,
-		peelLine(freeDisplay),
+		freeDisplay,
 		"would: tag-next "+unwindDotPkgsModule+" @",
-		"would: pin "+unwindRootModule+" <- "+unwindDotPkgsModule,
-		peelLine(consDisplay),
+		cascadePinNeedle(unwindRootModule, unwindDotPkgsModule),
+		consDisplay,
 	)
 
 	// Explicit false freeHost guard: consumer peel must not precede free tag-next.

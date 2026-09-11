@@ -112,8 +112,8 @@ func TestBuildJobPhasesSplitsCrossAndIntraPins(t *testing.T) {
 		t.Fatalf("app filter_note=%q want %q", appP2.FilterNote, phase2EmptyNote)
 	}
 
-	// Nested require catch-up (untagged dep, version drift) is latest-drift:
-	// omitted without cleanup, Phase 1 with cleanup, never Phase 2.
+	// Intra require-drift catch-up (parent←nested LatestTag, CS-openterm2) is
+	// propagate: included without cleanup, Phase 2 (intra), never Phase 1.
 	snap.ModuleNodes = append(snap.ModuleNodes, UnwindGraphModuleNode{
 		Path: "example.com/app/pkgs/log", RepoLabel: "app", LatestTag: "v0.0.2",
 	})
@@ -127,24 +127,26 @@ func TestBuildJobPhasesSplitsCrossAndIntraPins(t *testing.T) {
 	phases = buildJobPhases(snap, flags, ActionGraphOpts{})
 	p1 = phaseByID(phases, "repos").ActionGraph
 	if findAction(p1, logPinID) != nil {
-		t.Fatalf("catch-up intra pin must be omitted without cleanup, actions=%v", actionIDs(p1))
+		t.Fatalf("intra catch-up pin must be Phase 2, not phase1, actions=%v", actionIDs(p1))
+	}
+	appMods := phaseByID(phases, "modules").ByRepo["app"]
+	catchUp := findAction(appMods, logPinID)
+	if catchUp == nil {
+		t.Fatalf("phase2 missing intra catch-up without cleanup, actions=%v", actionIDs(appMods))
+	}
+	if catchUp.Mode != ModeDepUpdate {
+		t.Fatalf("phase2 intra catch-up mode=%s want dep-update", catchUp.Mode)
+	}
+	if catchUp.Reason != ReasonPropagate {
+		t.Fatalf("reason=%s want propagate", catchUp.Reason)
 	}
 	phases = buildJobPhases(snap, flags, ActionGraphOpts{Cleanup: true})
 	p1 = phaseByID(phases, "repos").ActionGraph
-	before := findAction(p1, logPinID)
-	if before == nil {
-		t.Fatalf("cleanup phase1 missing catch-up intra, actions=%v", actionIDs(p1))
+	if findAction(p1, logPinID) != nil {
+		t.Fatalf("cleanup: intra catch-up stays Phase 2, not phase1, actions=%v", actionIDs(p1))
 	}
-	if before.Mode != ModePin {
-		t.Fatalf("catch-up intra mode=%s want pin", before.Mode)
-	}
-	if before.Reason != ReasonLatestDrift {
-		t.Fatalf("reason=%s want latest-drift", before.Reason)
-	}
-	if mods := phaseByID(phases, "modules"); mods != nil && mods.ByRepo != nil {
-		if findAction(mods.ByRepo["app"], before.ID) != nil {
-			t.Fatal("catch-up intra must not be Phase 2")
-		}
+	if findAction(phaseByID(phases, "modules").ByRepo["app"], logPinID) == nil {
+		t.Fatal("cleanup: phase2 still has intra catch-up")
 	}
 
 	job := BuildJobPlan(snap, flags)
