@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/mod/scan"
-	"github.com/xhd2015/dot-pkgs/go-pkgs/gotool/update"
 	"github.com/xhd2015/wrk/wrkcli/storage"
 	"golang.org/x/mod/modfile"
 )
@@ -54,20 +53,6 @@ type Edge struct {
 	DepPath         string
 	DepVersion      string
 	OwnerProject    string
-}
-
-// SourceReleasesResult maps modules under a source main repo to their latest
-// numeric release tags (or lists modules with no such tag).
-type SourceReleasesResult struct {
-	Releases []SourceRelease
-	Missing  []string
-}
-
-// SourceRelease is one module's resolved git tag and go require version.
-type SourceRelease struct {
-	ModulePath string
-	Tag        string // full git tag, e.g. "v1.2.3" or "sub/v0.1.0"
-	Version    string // go require version, e.g. "v1.2.3" or "v0.1.0"
 }
 
 // BuildInventory loads WRK_HOME projects, soft-skips missing paths, scans
@@ -257,45 +242,4 @@ func (inv Inventory) collectEdges(cross bool) []Edge {
 		}
 	}
 	return edges
-}
-
-// ResolveSourceReleases scans sourceMain for modules and maps numeric release
-// tags to go require versions. Modules without a numeric tag are listed in
-// Missing; overall success is still returned when any/all modules are missing.
-func ResolveSourceReleases(sourceMain string) (SourceReleasesResult, error) {
-	var result SourceReleasesResult
-	sourceMain = storage.NormalizePath(sourceMain)
-
-	modules, err := scan.Scan(sourceMain, scan.Options{})
-	if err != nil {
-		return result, err
-	}
-
-	for _, m := range modules {
-		if m.Path == "" {
-			continue
-		}
-		modDir := sourceMain
-		if m.Dir != "" && m.Dir != "." {
-			modDir = filepath.Join(sourceMain, filepath.FromSlash(m.Dir))
-		}
-
-		versionPrefix, err := update.CalculateVersionPrefix(modDir, m.Path)
-		if err != nil {
-			result.Missing = append(result.Missing, m.Path)
-			continue
-		}
-		tag, err := update.GetLatestVersionTag(modDir, versionPrefix)
-		if err != nil {
-			result.Missing = append(result.Missing, m.Path)
-			continue
-		}
-		version := update.StripVersionPrefix(versionPrefix, tag)
-		result.Releases = append(result.Releases, SourceRelease{
-			ModulePath: m.Path,
-			Tag:        tag,
-			Version:    version,
-		})
-	}
-	return result, nil
 }

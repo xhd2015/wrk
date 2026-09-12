@@ -52,6 +52,7 @@ import (
 )
 
 func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	ind := composeStageIndent(2)
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
@@ -65,9 +66,9 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	pushBlock := wouldPushMainOrigin("v0.0.2")
 
 	for _, part := range []string{
-		strings.TrimSpace(syncBlock),
-		strings.TrimSpace(tagBlock),
-		strings.TrimSpace(pushBlock),
+		strings.TrimSpace(indentBlock(ind, syncBlock)),
+		strings.TrimSpace(indentBlock(ind, tagBlock)),
+		strings.TrimSpace(indentBlock(ind, pushBlock)),
 	} {
 		if !strings.Contains(resp.Stdout, part) {
 			t.Fatalf("stdout missing post-stage block %q\nfull stdout:\n%s", part, resp.Stdout)
@@ -90,16 +91,13 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 
 	// Blank line between major stages: sync block and tag block separated by \n\n
 	// (joinMajorStages style). Soft check: "would: synced:…\n\n" then tag plan line.
-	if !strings.Contains(resp.Stdout, "would: synced: 0 into main, 1 into worktrees, 0 skipped\n\n") {
+	if !strings.Contains(resp.Stdout, ind+"would: synced: 0 into main, 1 into worktrees, 0 skipped\n"+ind+"\n") {
 		// allow trailing only if next stage still blank-separated somehow
 		t.Logf("note: expected blank line after sync would-summary before tag plan")
 	}
-	if !strings.Contains(resp.Stdout, "1 tag planned\n\nwould: git push origin main") &&
-		!strings.Contains(resp.Stdout, "1 tag planned\n\nwould: git push") {
-		// require blank line between tag plan and push
-		if !strings.Contains(resp.Stdout, "1 tag planned\n\n") {
-			t.Fatalf("expected blank line after tag plan before push; stdout:\n%s", resp.Stdout)
-		}
+	// Kind-aligned blank between tag plan and push (indent + empty line + indent).
+	if !strings.Contains(resp.Stdout, "1 tag planned\n"+ind+"\n"+ind+"would: git push") {
+		t.Fatalf("expected kind-aligned blank after tag plan before push; stdout:\n%s", resp.Stdout)
 	}
 
 	// Must not apply for real.

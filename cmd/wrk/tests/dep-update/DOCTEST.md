@@ -65,7 +65,7 @@ mutation in harness.
 **Partners:** `--dry-run`, optional `--color` / `--no-color`, `-v`.
 
 **Out of scope:** `--dep-replace --all` / `--dep-replace` fan-out; commit/build
-gate; other wrk tidy sites (bring, pin-locals, unwind, propagate-tags); JSON;
+gate; other wrk tidy sites (bring, pin-locals, unwind); JSON;
 editing other projects' go.mod; kool CLI; real network / real SDK download.
 
 # DSN (Domain Specific Notion)

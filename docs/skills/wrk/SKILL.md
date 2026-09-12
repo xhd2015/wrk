@@ -23,30 +23,33 @@ Flow: **dashboard** or create → work → `--done` / `--merge-back` → optiona
 
 # Compose pipeline
 
-Fixed stage order (flag order free):
+Flag order free; apply ship stages run concurrently:
 
 ```text
 # [pre]  --gen-commit-msg --commit [--model …]   # --commit required with primary
 # [main] --done | --merge-back
-# [post] --sync → --tag-next → --push → --propagate-tags
-# [tail] --reinstall-local   # main tip after merge; empty plan OK
+# [ship] (tag-next→push) ‖ sync ‖ reinstall-local   # [n/N] markers; dry-run stays serial
+# [tail] --exec
 ```
 
 ```sh
 # finish, sync, tag, push main (+ origin/<worktree-branch> when that ref exists)
 wrk --done --sync --tag-next --push
-# full pre→post→tail
+# full pre→ship
 wrk --gen-commit-msg --commit --model=MODEL --done --sync --tag-next --push --reinstall-local
 # manual commit + create/attach PR
 wrk --add-all --commit -m '…' --pr --title '…' --comment '…'
-# plan tag + consumer bumps only
-wrk --tag-next --propagate-tags --dry-run
+# stack pin/ship (prefer over ad-hoc consumer bumps)
+wrk --unwind --dry-run
+# intentional require bumps across stack consumers
+wrk --dep-update <dir>… --dry-run
 ```
 
 - Pre-stage: source worktree; `--dir` invalid when composed. Clean tree: `--gen-commit-msg --commit` soft-skips with `notice: worktree clean, skip commit` when later stages remain; bare gen-commit still errors. Manual `--commit -m` soft-skips only when the message already matches HEAD (else still errors).
-- `--propagate-tags`: bump consumer `go.mod` requires to source release tags (with `--tag-next` uses new tags; alone uses existing).
+- Ship apply: `[n/N]` markers for commit → land → ship; all body lines under a marker are kind-aligned (indenting writers); `(tag-next→push) ‖ sync ‖ reinstall-local` with fail-fast cancel and unwind-style progress; sync/tag+push bodies flush after progress; reinstall stays summary-only (full log on failure). Dry-run stays serial ordered `would:`.
+- Stack pin/ship → `--unwind`; intentional require bumps → `--dep-update` (not a compose ship stage).
 - `--dep-update` tidy prefers local git trees for well-known hosts via ephemeral `url.insteadOf` (no separate seed step; `--dep-replace` / `--bring` use plain tidy).
-- `--json` only for bare `--tag-next` (not with primary / `--propagate-tags`).
+- `--json` only for bare `--tag-next` (not with primary).
 - Before land, `--done` / `--merge-back` refresh **main** from its upstream (`fetch` + `rebase` onto `@{u}` or `origin/<branch>`); skip only when no remote exists. Main must be clean.
 - `--push` after `--done` / `--merge-back` publishes main (and tags). If `origin/<worktree-branch>` already exists and its tip is in the local branch, also lease-updates that ref so a standing PR is not left on pre-rebase commits.
 - Default auto-yes on `--done` / `--merge-back` / `--set-task`; `--confirm` for Y/n; `-y` still valid.

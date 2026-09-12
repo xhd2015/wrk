@@ -153,7 +153,6 @@ var wrkCompletionFlags = []string{
 	"--bring",
 	"--no-dep",
 	"--tag-next",
-	"--propagate-tags",
 	"--pr",
 	"--title",
 	"--comment",
@@ -201,7 +200,7 @@ var bashIntegrationDisallowedFlags = []string{
 	"--main",
 	"--pin-locals",
 	"--dep-replace", "--dep-update",
-	"--bring", "--no-dep", "--tag-next", "--propagate-tags", "--sync", "-t", "--task", "--set-task", "-y", "--yes",
+	"--bring", "--no-dep", "--tag-next", "--sync", "-t", "--task", "--set-task", "-y", "--yes",
 	"--confirm", "--confirm-from-stdin", "--no-in-module-replace",
 }
 

@@ -51,7 +51,7 @@ asserts **CLI behavior only**.
 - **events.jsonl** — successful `--projects-dep-graph` appends
   `command: "projects-dep-graph"`.
 - **Colors** — TTY policy only; doctests use pipes → plain text, no ANSI.
-- **Out of scope** — `--propagate-tags`, external-only deps as edges, JSON,
+- **Out of scope** — external-only deps as edges, JSON,
   dry-run, pipeline / tag-next.
 
 ## Tree Overview

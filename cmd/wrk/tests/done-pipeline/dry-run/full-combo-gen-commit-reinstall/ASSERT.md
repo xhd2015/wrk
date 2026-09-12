@@ -25,6 +25,7 @@ import (
 )
 
 func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	ind := composeStageIndent(2)
 	assertErrIsNil(t, err)
 	if strings.Contains(resp.Stderr, "mutually exclusive") {
 		t.Fatalf("flag layer still rejects full pre+posts+reinstall dry-run; stderr=%q", resp.Stderr)
@@ -53,9 +54,9 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	tagBlock := tagNextRootBumpPlanStdout()
 	pushBlock := wouldPushMainOrigin("v0.0.2")
 	for _, part := range []string{
-		strings.TrimSpace(syncBlock),
-		strings.TrimSpace(tagBlock),
-		strings.TrimSpace(pushBlock),
+		strings.TrimSpace(indentBlock(ind, syncBlock)),
+		strings.TrimSpace(indentBlock(ind, tagBlock)),
+		strings.TrimSpace(indentBlock(ind, pushBlock)),
 	} {
 		if !strings.Contains(resp.Stdout, part) {
 			t.Fatalf("stdout missing post-stage block %q\nfull stdout:\n%s", part, resp.Stdout)

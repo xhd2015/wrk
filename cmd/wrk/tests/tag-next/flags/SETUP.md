@@ -10,7 +10,7 @@ wrk --dry-run (alone) -> error
 
 ## Preconditions
 
-- Bare `--dry-run` requires a host: `--done`, `--merge-back`, `--tag-next`, `--propagate-tags`, or `--sync`.
+- Bare `--dry-run` requires a host: `--done`, `--merge-back`, `--tag-next`, `--sync`, or other dry-run hosts.
 - Composition of `--tag-next` with `--done` / `--merge-back` is allowed at flag layer (see `done-compose/`); still exclusive with other standalone modes (`--list`, etc.).
 
 ## Steps

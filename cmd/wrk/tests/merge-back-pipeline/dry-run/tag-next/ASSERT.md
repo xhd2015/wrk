@@ -23,6 +23,7 @@ import (
 )
 
 func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err error) {
+	ind := composeStageIndent(2)
 	assertErrIsNil(t, err)
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
@@ -33,7 +34,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 
 	assertPrimaryMergeBackKeepDryRunPlanned(t, resp.Stdout, req.WtBranch)
 
-	tagBlock := strings.TrimSpace(tagNextRootBumpPlanStdoutMB())
+	tagBlock := strings.TrimSpace(indentBlock(ind, tagNextRootBumpPlanStdoutMB()))
 	if !strings.Contains(resp.Stdout, tagBlock) {
 		t.Fatalf("missing tag-next dry-run plan block %q\nstdout:\n%s", tagBlock, resp.Stdout)
 	}

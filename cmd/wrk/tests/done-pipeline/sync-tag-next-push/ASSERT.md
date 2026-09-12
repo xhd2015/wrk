@@ -3,22 +3,15 @@
 ```
 merged branch <WtBranch> into main
 
-feature-stays ← main  (+1 commit)
-
-synced: 0 into main, 1 into worktrees, 0 skipped
-
-v0.0.1        owned changed                  ->  v0.0.2
-tagged v0.0.2 @ <short>
-1 tag created
-
-pushed main → origin/main
+<flushed tag-next+push body>
+<flushed sync body>
 ```
 
 ## Expected
 
 - Exit code 0.
-- Fixed order: primary → sync → tag-next → push (blank line between major stages).
-- Stderr empty.
+- Concurrent ship: stderr has `] ship · concurrent` plus progress labels `tag-next+push` / `sync`; land marker `] done`.
+- Stdout: primary merge message, then flushed tag body (`tagged`) and sync body (`synced:`), plus `pushed`.
 - wtA removed; wtB HEAD == main; `feature-work` on main.
 - Local + origin `v0.0.2`; origin/main == main HEAD.
 - Event command `"done"`.
@@ -36,7 +29,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/xhd2015/doctest/assert"
 	"github.com/xhd2015/doctest/session"
 )
 
@@ -45,18 +37,18 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
-	assertEmptyStderr(t, resp.Stderr)
+	assertShipStderrMarkers(t, resp.Stderr, true)
+	if !strings.Contains(resp.Stderr, "] done") {
+		t.Fatalf("expected done stage marker; stderr=%q", resp.Stderr)
+	}
+	assertContains(t, resp.Stderr, "tag-next+push")
+	assertContains(t, resp.Stderr, "sync")
 
 	primary := strings.TrimSuffix(primaryMergeMsg(req.WtBranch), "\n")
-	syncBlock := buildSyncStdout([]string{syncDetailPass2(req.Wt2Branch, 1)}, 0, 1, 0)
-	short := shortHEAD(t, req.MainRepo)
-	want := joinMajorStages(
-		primary,
-		syncBlock,
-		tagNextRootBumpApplyStdout(short),
-		donePushConfirmLine(),
-	)
-	assert.Output(t, resp.Stdout, v2StdoutTemplate(want))
+	assertContains(t, resp.Stdout, primary)
+	assertContains(t, resp.Stdout, "tagged")
+	assertContains(t, resp.Stdout, "pushed")
+	assertContains(t, resp.Stdout, "synced:")
 
 	assertFileNotExists(t, req.WtDir)
 	assertBranchNotExists(t, req.MainRepo, req.WtBranch)

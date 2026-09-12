@@ -3,7 +3,7 @@
 **Feature**: bare wrk --dry-run rejected unless paired with an allowed mode (incl. --sync)
 
 ```
-# wrk --dry-run alone -> error listing all dry-run hosts incl. --sync and --propagate-tags
+# wrk --dry-run alone -> error listing all dry-run hosts incl. --sync
 wrk --dry-run -> validation error before any mode body
 ```
 

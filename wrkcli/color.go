@@ -13,6 +13,7 @@ const (
 	ansiGreen  = "\x1b[32m"
 	ansiOrange = "\x1b[33m"
 	ansiGrey   = "\x1b[90m"
+	ansiStrike = "\x1b[9m"
 	ansiReset  = "\x1b[0m"
 )
 
@@ -93,6 +94,20 @@ func resolveStdoutColor(forceColor, noColor bool) bool {
 		return false
 	}
 	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+// resolveStderrColor is the same three-mode policy for stderr (stage markers).
+func resolveStderrColor(forceColor, noColor bool) bool {
+	if noColor {
+		return false
+	}
+	if forceColor {
+		return true
+	}
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	return term.IsTerminal(int(os.Stderr.Fd()))
 }
 
 // paintCount formats n for summary lines: green when n>0 and color on, else plain/gray-0.

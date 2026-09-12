@@ -22,10 +22,10 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
-	assertEmptyStderr(t, resp.Stderr)
+	assertShipStderrMarkers(t, resp.Stderr, false)
 
 	primary := fmt.Sprintf("merged branch %s into main", req.WtBranch)
-	want := primaryThenPushStdout(primary, donePushConfirmLine())
+	want := composeLandShipStdout(primaryThenPushStdout(primary, donePushConfirmLine()))
 	assert.Output(t, resp.Stdout, v2StdoutTemplate(want))
 
 	assertFileNotExists(t, req.WtDir)

@@ -642,6 +642,44 @@ func assertEmptyStderr(t *testing.T, stderr string) {
 	}
 }
 
+func assertShipStderrMarkers(t *testing.T, stderr string, concurrent bool) {
+	t.Helper()
+	// Stage index depends on enabled pre/land stages (e.g. [2/2] or [3/3]).
+	if !strings.Contains(stderr, "] ship") {
+		t.Fatalf("expected ship stage marker on stderr; got %q", stderr)
+	}
+	if concurrent {
+		if !strings.Contains(stderr, "ship · concurrent") {
+			t.Fatalf("expected concurrent ship marker; stderr=%q", stderr)
+		}
+	}
+}
+
+// composeStageIndent returns the kind-column pad for a pipeline with total stages.
+func composeStageIndent(total int) string {
+	if total < 1 {
+		total = 1
+	}
+	return strings.Repeat(" ", len(fmt.Sprintf("[%d/%d] ", total, total)))
+}
+
+// indentBlock prefixes every line with indent (including blank lines).
+func indentBlock(indent, s string) string {
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSuffix(s, "\n"), "\n")
+	for i, line := range lines {
+		lines[i] = indent + line
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// composeLandShipStdout indents a land+ship (total=2) stdout body for exact asserts.
+func composeLandShipStdout(body string) string {
+	return indentBlock(composeStageIndent(2), body)
+}
+
 func syncCommitWord(n int) string {
 	if n == 1 {
 		return "commit"
@@ -1222,6 +1260,7 @@ func ensureHelpersUsed() {
 	_ = revParseHEAD
 	_ = assertHEAD
 	_ = assertEmptyStderr
+	_ = assertShipStderrMarkers
 	_ = syncCommitWord
 	_ = syncDetailPass2
 	_ = syncSummaryLine

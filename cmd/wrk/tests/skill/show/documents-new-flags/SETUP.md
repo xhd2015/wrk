@@ -5,7 +5,7 @@
 ```
 # skill show surfaces agent-facing docs for polish flags + multi-mode PR
 workspace/ -> wrk skill --show
-  -> stdout embeds SKILL.md mentioning --propagate-tags, --projects-dep-graph,
+  -> stdout embeds SKILL.md mentioning --unwind, --dep-update, --projects-dep-graph,
      and multi-mode --pr (show / status / comment / create; --title/--comment
      for create-attach — not always-required companions)
 ```

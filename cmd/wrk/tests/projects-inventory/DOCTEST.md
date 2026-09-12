@@ -10,7 +10,7 @@ module release tags for go `require` versions.
 **Classic TDD (RED):** `wrkcli.BuildInventory`, inventory edge methods, and
 `wrkcli.ResolveSourceReleases` do **not** exist yet. Leaves must fail compile or
 assert until the implementer lands the public API below. **No CLI flags** in
-this tree (`--projects-dep-graph`, `--propagate-tags` are P2+).
+this tree (`--projects-dep-graph` and later polish are out of scope here).
 
 # DSN (Domain Specific Notion)
 

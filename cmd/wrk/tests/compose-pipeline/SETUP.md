@@ -9,14 +9,13 @@
 # 3. sync
 # 4. tag-next                (only when activeRoot is main)
 # 5. push                    (follows activeRoot)
-# 6. propagate-tags          (repo-level; OK from WT or main)
-# 7. reinstall-local         (follows activeRoot)
-# 8. exec                    (last; runs in final activeRoot)
+# 6. reinstall-local         (follows activeRoot)
+# 7. exec                    (last; runs in final activeRoot)
 
 # activeRoot starts as git toplevel of effective cwd.
-# After successful --done/--merge-back: activeRoot := main for stages 3–8.
+# After successful --done/--merge-back: activeRoot := main for stages 3–7.
 # --main + pipeline partners (no shell): resolve main for this checkout,
-#   activeRoot := main at start, then stages 3–8 (no nested shell; no done/merge/remove).
+#   activeRoot := main at start, then stages 3–7 (no nested shell; no done/merge/remove).
 # Without those switches: activeRoot stays cwd for the whole run.
 # Bare wrk --main alone: nested shell at main (see main/ tree; not this compose model).
 
@@ -30,7 +29,7 @@
 # - --json: bare --tag-next only; multi-stage + --json rejected
 # - --done and --merge-back still exclusive of each other
 # - --main is exclusive with --done / --merge-back / --gen-commit-msg
-# - --main partners allowed: sync, tag-next, push, propagate-tags, reinstall-local, dry-run, exec
+# - --main partners allowed: sync, tag-next, push, reinstall-local, dry-run, exec
 #     (+ status / reinstall-alone covered elsewhere)
 # - Already on main + --main + pipeline: notice (--main not necessary; continuing); exit 0 if rest OK
 # - --exec valid as last stage of any compose (not only with --done)

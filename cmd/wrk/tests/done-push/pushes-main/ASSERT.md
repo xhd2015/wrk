@@ -11,8 +11,8 @@ pushed main → origin/main
 ## Expected
 
 - Exit code 0.
-- Stdout: primary `merged branch <WtBranch> into main`, blank line, `pushed main → origin/main`.
-- Stderr empty.
+- Stdout: primary `merged branch <WtBranch> into main`, blank line, `pushed main → origin/main` (single-lane live).
+- Stderr has `[1/1] ship` marker (not concurrent).
 - Worktree directory gone; branch deleted; main has `feature-work`.
 - Bare origin `refs/heads/main` equals post-merge main HEAD (branch tip pushed).
 - No requirement that any tags were created or pushed (branch-only P2).
@@ -40,10 +40,10 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
-	assertEmptyStderr(t, resp.Stderr)
+	assertShipStderrMarkers(t, resp.Stderr, false)
 
 	primary := fmt.Sprintf("merged branch %s into main", req.WtBranch)
-	want := primaryThenPushStdout(primary, donePushConfirmLine())
+	want := composeLandShipStdout(primaryThenPushStdout(primary, donePushConfirmLine()))
 	assert.Output(t, resp.Stdout, v2StdoutTemplate(want))
 
 	assertFileNotExists(t, req.WtDir)

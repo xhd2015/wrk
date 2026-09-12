@@ -2,9 +2,10 @@
 
 - Exit code 0.
 - Stdout is the embedded `SKILL.md` (marker + `name: wrk`).
-- Stdout documents `--propagate-tags` (consumer require bump to source releases).
+- Stdout documents `--unwind` (stack pin/ship).
+- Stdout documents `--dep-update` (intentional require bumps).
 - Stdout documents `--projects-dep-graph` (cross-project module dep graph).
-- Stdout documents `--pr` as its own flag token (not only as a prefix of `--propagate-tags`).
+- Stdout documents `--pr` as its own flag token.
 - Stdout documents `--title` and `--comment` as **create/attach** companions of `--pr`
   (tokens present); they are **not** framed as always-required for every `--pr` mode.
 - Multi-mode PR surface (implementation-owned wording; soft checks):
@@ -33,9 +34,10 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if resp.Stderr != "" {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
-	// Token-aware: "--pr" must not match only via "--propagate-tags".
+	// Token-aware whole-flag match (skillDocumentsFlagToken).
 	for _, flag := range []string{
-		"--propagate-tags",
+		"--unwind",
+		"--dep-update",
 		"--projects-dep-graph",
 		"--pr",
 		"--title",

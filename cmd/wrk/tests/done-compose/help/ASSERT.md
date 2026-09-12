@@ -17,7 +17,7 @@
   - **`--json`** remains tagged as for bare `--tag-next` (not a primary composition flag);
     help must not claim `--json` is valid with `--done`.
 - Prefer implementer wording (soft, not asserted verbatim):
-  - `--done [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--propagate-tags] [--reinstall-local] [--dry-run] …`
+  - `--done [--gen-commit-msg --commit …] [--sync] [--tag-next] [--push] [--reinstall-local] [--dry-run] …`
   - `--gen-commit-msg`: also as pre-stage before `--done` / `--merge-back` (requires `--commit`)
   - `--reinstall-local` also: after successful `--done` / `--merge-back`
   - `--push` dual meaning: tags with `--tag-next`; branch (and tags when combined) with primary.

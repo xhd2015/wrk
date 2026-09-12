@@ -254,6 +254,15 @@ func isLocalFilesystemReplaceChange(change modfilediff.Change) bool {
 	return filepath.IsAbs(change.New) || strings.HasPrefix(change.New, "./") || strings.HasPrefix(change.New, "../")
 }
 
+func isLocalFilesystemReplace(newPath, newVersion string) bool {
+	if newPath == "" || newVersion != "" {
+		return false
+	}
+	return strings.HasPrefix(newPath, "./") ||
+		strings.HasPrefix(newPath, "../") ||
+		filepath.IsAbs(newPath)
+}
+
 func replaceSpec(path, version string) string {
 	if version == "" {
 		return path

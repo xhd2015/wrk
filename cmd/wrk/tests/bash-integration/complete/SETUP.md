@@ -85,7 +85,7 @@ func assertFlagsInclude(t *testing.T, stdout string, flags ...string) {
 
 // assertExactFlagCandidates requires each flag to appear as a full completion
 // line (one candidate per line). Use for short flags like --pr that are
-// prefixes of longer flags (e.g. --propagate-tags).
+// prefixes of longer flags (e.g. --projects-dep-graph).
 func assertExactFlagCandidates(t *testing.T, stdout string, flags ...string) {
 	t.Helper()
 	have := map[string]bool{}

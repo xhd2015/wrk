@@ -5,8 +5,8 @@ Primary merge message, blank line, pass-2 detail for `feature-stays`, blank line
 ## Expected
 
 - Exit code 0.
-- Stdout: `merged branch <WtBranch> into main`, blank line, then sync detail+summary for wtB.
-- Stderr empty.
+- Stdout: `merged branch <WtBranch> into main`, blank line, then sync detail+summary for wtB (single-lane live).
+- Stderr has `[1/1] ship` marker (not concurrent).
 - wtA directory gone; branch deleted; main has `feature-work`.
 - wtB HEAD equals main HEAD after distribute.
 
@@ -28,10 +28,10 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
-	assertEmptyStderr(t, resp.Stderr)
+	assertShipStderrMarkers(t, resp.Stderr, false)
 
 	primary := fmt.Sprintf("merged branch %s into main", req.WtBranch)
-	want := primaryThenSyncStdout(primary, []string{syncDetailPass2(req.Wt2Branch, 1)}, 0, 1, 0)
+	want := composeLandShipStdout(primaryThenSyncStdout(primary, []string{syncDetailPass2(req.Wt2Branch, 1)}, 0, 1, 0))
 	assert.Output(t, resp.Stdout, v2StdoutTemplate(want))
 
 	assertFileNotExists(t, req.WtDir)

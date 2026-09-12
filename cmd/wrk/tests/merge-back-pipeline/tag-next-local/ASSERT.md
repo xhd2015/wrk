@@ -13,8 +13,8 @@ tagged v0.0.2 @ <short>
 ## Expected
 
 - Exit code 0.
-- Stdout: primary merge message, blank line, root-bump tag-next apply block.
-- Stderr empty.
+- Stdout: primary merge message, blank line, root-bump tag-next apply block (single-lane live).
+- Stderr has `[1/1] ship` marker (not concurrent).
 - Worktree directory **remains**; branch kept; main has `feature-work`.
 - No `worktree removed:` in stdout.
 - Lightweight tag `v0.0.2` exists locally at main HEAD (no remote required).
@@ -41,14 +41,14 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
-	assertEmptyStderr(t, resp.Stderr)
+	assertShipStderrMarkers(t, resp.Stderr, false)
 	assertNotContains(t, resp.Stdout, "worktree removed:")
 
 	short := shortHEAD(t, req.MainRepo)
-	want := joinMajorStages(
+	want := composeLandShipStdout(joinMajorStages(
 		primaryMergeMsg(req.WtBranch),
 		tagNextRootBumpApplyStdout(short),
-	)
+	))
 	assert.Output(t, resp.Stdout, v2StdoutTemplate(want))
 
 	assertSourceWorktreeKept(t, req)

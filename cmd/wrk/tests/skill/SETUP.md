@@ -189,8 +189,8 @@ func installDryRunCursorStdoutV2(t *testing.T, workRoot string) string {
 }
 
 // skillDocumentsFlagToken reports whether flag appears as a whole flag name
-// (next byte is not a letter/digit/hyphen), so "--pr" does not match
-// "--propagate-tags".
+// (next byte is not a letter/digit/hyphen), so shorter tokens are not
+// satisfied by longer flags that share a prefix.
 func skillDocumentsFlagToken(stdout, flag string) bool {
 	for i := 0; i < len(stdout); {
 		j := strings.Index(stdout[i:], flag)

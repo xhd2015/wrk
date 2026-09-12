@@ -63,7 +63,7 @@ printer (P1), **apply cascade driver** (P2), **partial-edit pin path** (P3),
 **BuildUnwindVerifyReport** / human+JSON verify formatters (this cycle).
 
 **Out of scope this cycle (verify):** remote push checks; projects.json /
-propagate-tags; worktree-removed / tag-points-at-main-HEAD; rewriting sealed
+worktree-removed / tag-points-at-main-HEAD; rewriting sealed
 show-graph/cascade asserts; L3 e2e.
 
 # DSN (Domain Specific Notion)
