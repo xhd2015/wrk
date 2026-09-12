@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +16,11 @@ import (
 )
 
 // Minimal unwind-style progress for compose ship lanes (stderr).
-// Live rows during concurrent apply; full capture available for flush/dump.
+//
+// TTY (block): in-place redraw with spinner; clamp lines to term width and
+// clear residual rows when the block shrinks.
+// Non-TTY (append): one final line per lane on Finish only — no Start/oneline
+// appends (avoids duplicate ghost rows like a leftover spinner "-").
 
 type shipProgStatus string
 
@@ -28,6 +33,9 @@ const (
 
 var shipSpinnerFrames = []string{"|", "/", "-", "\\"}
 
+// strip CSI / ESC sequences for visible-width measure.
+var shipANSIPattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
 type shipProgRow struct {
 	ID        string
 	Label     string
@@ -36,6 +44,7 @@ type shipProgRow struct {
 	Detail    string
 	StartedAt time.Time
 	Elapsed   time.Duration
+	emitted   bool // append mode: already printed final line
 }
 
 type shipProgress struct {
@@ -136,9 +145,8 @@ func (p *shipProgress) Begin() {
 		p.redrawLocked()
 		p.spinWG.Add(1)
 		go p.spinLoop()
-		return
 	}
-	fmt.Fprintln(p.w, strings.TrimSuffix(p.renderLocked(), "\n"))
+	// Append mode: stay silent until Finish (one line per lane).
 }
 
 func (p *shipProgress) spinLoop() {
@@ -183,7 +191,10 @@ func (p *shipProgress) Start(id string) {
 	row.Status = shipProgRunning
 	row.StartedAt = time.Now()
 	row.Elapsed = 0
-	p.emitLocked(id)
+	if p.block {
+		p.emitLocked(id)
+	}
+	// Append mode: no Start line (avoids ghost spinner rows).
 }
 
 func (p *shipProgress) Finish(id string, summary string, err error) {
@@ -232,6 +243,24 @@ func (p *shipProgress) Close() {
 			fmt.Fprintln(p.w)
 		}
 		p.mu.Unlock()
+		return
+	}
+	// Append mode: emit any lane that never got Finish (cancelled) once.
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, id := range p.order {
+		row := p.rows[id]
+		if row == nil || row.emitted {
+			continue
+		}
+		if row.Status == shipProgWaiting || row.Status == shipProgRunning {
+			row.Status = shipProgFailed
+			if row.Detail == "" {
+				row.Detail = "cancelled"
+			}
+		}
+		fmt.Fprintln(p.w, p.formatRowLocked(row))
+		row.emitted = true
 	}
 }
 
@@ -243,9 +272,10 @@ func (p *shipProgress) setOneline(id, line string) {
 		return
 	}
 	row.Oneline = truncateShipProgress(line, p.onelineBudgetLocked())
-	if p.begun {
+	if p.begun && p.block {
 		p.emitLocked(id)
 	}
+	// Append mode: oneline updates are capture-only until Finish.
 }
 
 func (p *shipProgress) onelineBudgetLocked() int {
@@ -266,15 +296,21 @@ func (p *shipProgress) emitLocked(id string) {
 		return
 	}
 	row := p.rows[id]
-	if row == nil {
+	if row == nil || row.emitted {
+		return
+	}
+	// Append mode: only final states (Finish / Close).
+	if row.Status != shipProgDone && row.Status != shipProgFailed {
 		return
 	}
 	fmt.Fprintln(p.w, p.formatRowLocked(row))
+	row.emitted = true
 }
 
 func (p *shipProgress) redrawLocked() {
-	if p.lines > 0 {
-		fmt.Fprint(p.w, cursor.Up(p.lines))
+	old := p.lines
+	if old > 0 {
+		fmt.Fprint(p.w, cursor.Up(old))
 	}
 	block := p.renderLocked()
 	lines := strings.Split(strings.TrimSuffix(block, "\n"), "\n")
@@ -282,7 +318,15 @@ func (p *shipProgress) redrawLocked() {
 		lines = nil
 	}
 	for _, line := range lines {
-		fmt.Fprintf(p.w, "%s%s\n", cursor.ClearLine, cursor.CR+line)
+		clamped := clampShipProgLine(line, p.termWidth)
+		fmt.Fprintf(p.w, "%s%s\n", cursor.ClearLine, cursor.CR+clamped)
+	}
+	// Clear leftover rows when the block shrinks (wrap / prior taller frame).
+	for i := len(lines); i < old; i++ {
+		fmt.Fprintf(p.w, "%s%s\n", cursor.ClearLine, cursor.CR)
+	}
+	if extra := old - len(lines); extra > 0 {
+		fmt.Fprint(p.w, cursor.Up(extra))
 	}
 	p.lines = len(lines)
 }
@@ -323,7 +367,7 @@ func (p *shipProgress) formatRowLocked(row *shipProgRow) string {
 	if elapsed := formatShipProgElapsed(row); elapsed != "" {
 		line += "  " + paint(elapsed, ansiGrey, p.color)
 	}
-	return line
+	return clampShipProgLine(line, p.termWidth)
 }
 
 func formatShipProgElapsed(row *shipProgRow) string {
@@ -371,6 +415,28 @@ func truncateShipProgress(s string, max int) string {
 	}
 	runes := []rune(s)
 	return string(runes[:max-3]) + "..."
+}
+
+func shipVisibleWidth(s string) int {
+	return utf8.RuneCountInString(shipANSIPattern.ReplaceAllString(s, ""))
+}
+
+// clampShipProgLine truncates a rendered progress row to term width so TTY
+// redraw line counts stay accurate (wrapped rows cause ghost duplicates).
+func clampShipProgLine(line string, width int) string {
+	if width < 20 {
+		width = 20
+	}
+	if shipVisibleWidth(line) <= width {
+		return line
+	}
+	// Prefer truncating the plain visible tail; keep prefix (indent+glyph+label).
+	plain := shipANSIPattern.ReplaceAllString(line, "")
+	runes := []rune(plain)
+	if len(runes) <= width {
+		return line
+	}
+	return string(runes[:width-3]) + "..."
 }
 
 func firstShipLine(s string) string {
