@@ -610,7 +610,7 @@ func applyDepReplaceTree(tree []depReplaceCheckout, deps []depReplaceDep, opts s
 // on the unwind stack (CollectStackInventory) that already requires that path.
 // Not git → nearest go.mod. Self (consumer.Path == dep.Path) is never pinned.
 // After pins: versioned tidy via withgo unless vendor/. Multi-arg fail-fast:
-// every dir arg is validated before any banner/print.
+// every dir arg is validated before stack inventory and before any banner/print.
 func runDepUpdate(workDir string, paths []string, dryRun bool, ctx *invocationContext) error {
 	if len(paths) == 0 {
 		return fmt.Errorf("wrk: --dep-update requires a directory or --all")
@@ -621,12 +621,7 @@ func runDepUpdate(workDir string, paths []string, dryRun bool, ctx *invocationCo
 	}
 	cwd = storage.NormalizePath(cwd)
 
-	consumers, warnings, err := collectDepUpdateConsumers(cwd)
-	if err != nil {
-		return err
-	}
-
-	// Preflight every dir-mode arg before any banner/print.
+	// Preflight every dir-mode arg before stack inventory (and before banner/print).
 	deps := make([]dirModeDep, 0, len(paths))
 	for _, p := range paths {
 		absDep, err := absAgainstProcessCwd(p)
@@ -658,6 +653,11 @@ func runDepUpdate(workDir string, paths []string, dryRun bool, ctx *invocationCo
 			version:    probe.Version,
 			tag:        probe.Tag,
 		})
+	}
+
+	consumers, warnings, err := collectDepUpdateConsumers(cwd)
+	if err != nil {
+		return err
 	}
 
 	// Zero requirers on the whole stack is a hard error (no banner).
