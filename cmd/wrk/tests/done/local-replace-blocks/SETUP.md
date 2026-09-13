@@ -13,8 +13,8 @@
    `./external/foo` is deliberately **not** created on disk, so it classifies as
    **extra-repo** (non-existent) and blocks `--done` under the default lenient
    guard. (A real `./external/...` dep-worktree block is covered by
-   `external-cascade`; an existing same-repo target would be intra-repo → WARN,
-   covered by `intra-replace-warns`.)
+   `external-cascade`; an existing same-repo relative target would be
+   relative intra-repo → silent, covered by `intra-replace-warns`.)
 3. Run `wrk --done` from worktree.
 
 ```go

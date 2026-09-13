@@ -2490,13 +2490,13 @@ func runDone(workDir, wrkHome string, confirmFromStdin, yesFlag, forceConfirm, n
 	// or sub-module). wrk --bring writes replace => ./external/... and
 	// --done's cascade removes those external worktrees, so a remaining local
 	// replace would dangle — those (extra-repo) block. An intra-repo replace
-	// (target exists and shares the consumer's toplevel, e.g. ../../ or ./sub
-	// pointing back into the same repo) is stable, so under the default lenient
-	// guard it only warns and --done proceeds; --no-in-module-replace makes
-	// every local replace block. Scanning every module (not just the nearest
-	// go.mod) also catches sub-module replaces a single upward lookup would
-	// miss. A checkout with no go.mod yields zero modules → guard is a no-op →
-	// MergeBack proceeds (it is pure git).
+	// (target exists and shares the consumer's toplevel) is stable: relative
+	// form (./sub, ../../) is silent under the default lenient guard; absolute
+	// form still warns (machine-local path) and --done proceeds.
+	// --no-in-module-replace makes every local replace block. Scanning every
+	// module (not just the nearest go.mod) also catches sub-module replaces a
+	// single upward lookup would miss. A checkout with no go.mod yields zero
+	// modules → guard is a no-op → MergeBack proceeds (it is pure git).
 	if err := blockIfLocalReplace(consumerTop, noInModuleReplace); err != nil {
 		return err
 	}
@@ -3675,11 +3675,15 @@ func ensureGitignoreExternal(top string) error {
 // A replace is intra-repo when its target resolves to an existing directory
 // that shares the consumer's git toplevel (a ../../ or ./sub reference back
 // into the same repo); otherwise it is extra-repo (./external dep worktree,
-// non-existent target, absolute or sibling-repo path).
+// non-existent target, absolute path to another checkout, sibling-repo path).
 //
-// Under the default lenient guard, intra-repo replaces only warn (printed to
-// stderr) and --done proceeds; extra-repo replaces block. When noInModuleReplace
-// is set, every local replace blocks (fully strict).
+// Under the default lenient guard:
+//   - relative intra-repo → silent proceed
+//   - absolute intra-repo → warn (stderr) and proceed (literal abs NewPath even
+//     when the target is inside the same toplevel)
+//   - extra-repo → block
+//
+// When noInModuleReplace is set, every local replace blocks (fully strict).
 //
 // Classification uses show-toplevel identity (see isWrkIntraRepoReplace), not
 // replace.ReplaceIssue.IsIntraRepo: the library also treats any path under the
@@ -3702,9 +3706,11 @@ func blockIfLocalReplace(top string, noInModuleReplace bool) error {
 			return errors.New(b.String())
 		}
 
-		// Only intra-repo offenders, default lenient mode: warn and proceed.
-		fmt.Fprintln(os.Stderr, replace.FormatIssueLine(top, issue))
-		fmt.Fprintln(os.Stderr, "local filesystem replace (intra-repo) - tolerated, remove before pushing:")
+		// Absolute intra-repo: warn and proceed. Relative intra-repo: silent.
+		if filepath.IsAbs(issue.NewPath) {
+			fmt.Fprintln(os.Stderr, replace.FormatIssueLine(top, issue))
+			fmt.Fprintln(os.Stderr, "local filesystem replace (intra-repo) - tolerated, remove before pushing:")
+		}
 	}
 	return nil
 }
