@@ -28,7 +28,7 @@ Flag order free; apply ship stages run concurrently:
 ```text
 # [pre]  --gen-commit-msg --commit [--model …]   # --commit required with primary
 # [main] --done | --merge-back
-# [ship] (tag-next→push) ‖ sync ‖ reinstall-local   # [n/N] markers; dry-run stays serial
+# [ship] (tag-next→push | tag-next | push) ‖ sync ‖ reinstall-local   # lane name = enabled flags; dry-run serial
 # [tail] --exec
 ```
 
@@ -46,7 +46,7 @@ wrk --dep-update <dir>… --dry-run
 ```
 
 - Pre-stage: source worktree; `--dir` invalid when composed. Clean tree: `--gen-commit-msg --commit` soft-skips with `notice: worktree clean, skip commit` when later stages remain; bare gen-commit still errors. Manual `--commit -m` soft-skips only when the message already matches HEAD (else still errors).
-- Ship apply: `[n/N]` markers for commit → land → ship; all body lines under a marker are kind-aligned (indenting writers); `(tag-next→push) ‖ sync ‖ reinstall-local` with fail-fast cancel and unwind-style progress; sync/tag+push bodies flush after progress; reinstall stays summary-only (full log on failure). Dry-run stays serial ordered `would:`.
+- Ship apply: `[n/N]` markers for commit → land → ship; all body lines under a marker are kind-aligned (indenting writers); `(tag-next→push | tag-next | push) ‖ sync ‖ reinstall-local` with fail-fast cancel and unwind-style progress (lane label matches enabled flags); sync/tag+push bodies flush after progress; reinstall stays summary-only (full log on failure). Dry-run stays serial ordered `would:`.
 - Stack pin/ship → `--unwind`; intentional require bumps → `--dep-update` (not a compose ship stage).
 - `--dep-update` tidy prefers local git trees for well-known hosts via ephemeral `url.insteadOf` (no separate seed step; `--dep-replace` / `--bring` use plain tidy).
 - `--json` only for bare `--tag-next` (not with primary).

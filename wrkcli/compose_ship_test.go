@@ -56,6 +56,37 @@ func TestIsContextCanceled(t *testing.T) {
 	}
 }
 
+func TestShipTagPushLaneID(t *testing.T) {
+	cases := []struct {
+		tag, push bool
+		want      shipLaneID
+	}{
+		{true, true, shipLaneTagPush},
+		{true, false, shipLaneTagNext},
+		{false, true, shipLanePush},
+		{false, false, ""},
+	}
+	for _, tc := range cases {
+		got := shipTagPushLaneID(tc.tag, tc.push)
+		if got != tc.want {
+			t.Fatalf("shipTagPushLaneID(%v,%v)=%q want %q", tc.tag, tc.push, got, tc.want)
+		}
+	}
+}
+
+func TestIsTagOrPushLane(t *testing.T) {
+	for _, id := range []shipLaneID{shipLaneTagPush, shipLaneTagNext, shipLanePush} {
+		if !isTagOrPushLane(id) {
+			t.Fatalf("expected isTagOrPushLane(%q)", id)
+		}
+	}
+	for _, id := range []shipLaneID{shipLaneSync, shipLaneReinstall, ""} {
+		if isTagOrPushLane(id) {
+			t.Fatalf("unexpected isTagOrPushLane(%q)", id)
+		}
+	}
+}
+
 func TestShipFailFastCancelsSibling(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

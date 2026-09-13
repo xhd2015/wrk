@@ -13,7 +13,8 @@ import (
 )
 
 // composeShipOpts configures the post-land / activeRoot ship wave:
-// (tag-next → push) ‖ sync ‖ reinstall-local.
+// (tag-next → push | tag-next | push) ‖ sync ‖ reinstall-local.
+// The tag/push lane label reflects enabled flags (see shipTagPushLaneID).
 type composeShipOpts struct {
 	MainPath   string
 	SourcePath string // linked worktree path (same-name origin update after push)
@@ -39,9 +40,30 @@ type shipLaneID string
 
 const (
 	shipLaneTagPush   shipLaneID = "tag-next+push"
+	shipLaneTagNext   shipLaneID = "tag-next"
+	shipLanePush      shipLaneID = "push"
 	shipLaneSync      shipLaneID = "sync"
 	shipLaneReinstall shipLaneID = "reinstall-local"
 )
+
+// shipTagPushLaneID names the serial tag/push ship lane from enabled flags.
+// Both → tag-next+push; tag only → tag-next; push only → push.
+func shipTagPushLaneID(withTagNext, withPush bool) shipLaneID {
+	switch {
+	case withTagNext && withPush:
+		return shipLaneTagPush
+	case withTagNext:
+		return shipLaneTagNext
+	case withPush:
+		return shipLanePush
+	default:
+		return ""
+	}
+}
+
+func isTagOrPushLane(id shipLaneID) bool {
+	return id == shipLaneTagPush || id == shipLaneTagNext || id == shipLanePush
+}
 
 type shipLaneResult struct {
 	ID      shipLaneID
@@ -140,7 +162,7 @@ func runComposeShipApply(opts composeShipOpts) error {
 	var lanes []lane
 	if opts.WithTagNext || opts.WithPush {
 		lanes = append(lanes, lane{
-			id: shipLaneTagPush,
+			id: shipTagPushLaneID(opts.WithTagNext, opts.WithPush),
 			run: func(ctx context.Context, out, errW io.Writer) (string, error) {
 				return runShipTagPushLane(ctx, opts, out)
 			},
@@ -226,7 +248,7 @@ func runComposeShipApply(opts composeShipOpts) error {
 			prog.Start(string(l.id))
 			start := time.Now()
 			run := l.run
-			if l.id == shipLaneTagPush || l.id == shipLaneSync {
+			if isTagOrPushLane(l.id) || l.id == shipLaneSync {
 				inner := run
 				run = func(ctx context.Context, out, errW io.Writer) (string, error) {
 					pathMu.Lock()
@@ -266,15 +288,15 @@ func runComposeShipApply(opts composeShipOpts) error {
 
 	// Flush full bodies for sync/tag+push via kind-aligned stdout; reinstall summary-only.
 	for _, r := range results {
-		switch r.ID {
-		case shipLaneTagPush, shipLaneSync:
-			body := strings.TrimSpace(r.Capture)
-			if body == "" {
-				continue
-			}
-			fmt.Fprintln(out)
-			fmt.Fprintln(out, body)
+		if !isTagOrPushLane(r.ID) && r.ID != shipLaneSync {
+			continue
 		}
+		body := strings.TrimSpace(r.Capture)
+		if body == "" {
+			continue
+		}
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, body)
 	}
 	return nil
 }

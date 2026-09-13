@@ -9,7 +9,7 @@ linked wt (ahead) [+ optional wtB] [+ bare origin] [+ GOBIN stubs]
   -> wrk --done -y [--sync] [--tag-next] [--push] [--reinstall-local]
   -> merge-back --rm (message on stdout)
   -> stderr: [1/1] ship / [1/1] ship · concurrent (+ grey detail)
-  -> apply (≥2 lanes): capture + stdout summaries (tag-next+push ‖ sync ‖ reinstall-local)
+  -> apply (≥2 lanes): capture + stdout summaries ((tag-next+push|tag-next|push) ‖ sync ‖ reinstall-local)
   -> apply (1 lane, except reinstall): live full stdout; stderr still has ship marker
   -> dry-run: serial would: sync → tag-next → push → reinstall (blank lines; stdout largely unchanged)
   -> event command stays "done"
@@ -23,7 +23,7 @@ linked wt (ahead) [+ optional wtB] [+ bare origin] [+ GOBIN stubs]
 - Locked behavior:
   1. dispatch prefers **done** over bare `runTagNext` / reinstall when primary set,
   2. post-land ship is concurrent on apply (≥2 lanes); dry-run serial ordered,
-  3. with `--push`, tag-next+push lane pushes branch + tags,
+  3. with `--push` (and optional `--tag-next`), the tag/push lane label matches flags and publishes branch (+ tags when tagged),
   4. reinstall scans **main tip** after merge (`result.TargetPath`), not the removed worktree.
 
 ## Steps
