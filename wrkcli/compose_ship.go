@@ -143,7 +143,7 @@ func runComposeShipDry(opts composeShipOpts) error {
 		if err := runPushMainWrite(opts.MainPath, true, opts.ForcePush, tags, true, out); err != nil {
 			return err
 		}
-		maybeUpdateSameNameOriginBranch(opts.MainPath, opts.SourcePath, opts.Result, opts.SameName, true)
+		maybeUpdateSameNameOriginBranch(opts.MainPath, opts.SourcePath, opts.Result, opts.SameName, true, out, errW)
 	}
 	if opts.WithReinstall {
 		blankBefore()
@@ -212,6 +212,7 @@ func runComposeShipApply(opts composeShipOpts) error {
 				dumpShipCaptureTo(errW, string(l.id), sink.String())
 				return fmt.Errorf("wrk: %s failed: %w", l.id, err)
 			}
+			flushShipReinstallDiags(errW, sink.String())
 			if summary != "" {
 				fmt.Fprintln(out, summary)
 			}
@@ -286,6 +287,15 @@ func runComposeShipApply(opts composeShipOpts) error {
 		return fmt.Errorf("wrk: ship failed: %w", firstErr)
 	}
 
+	// Reinstall stays summary-only on the progress row; emit captured diagnostics
+	// after the spinner releases the TTY so notices are not lost and do not ghost.
+	for _, r := range results {
+		if r.ID != shipLaneReinstall {
+			continue
+		}
+		flushShipReinstallDiags(errW, r.Capture)
+	}
+
 	// Flush full bodies for sync/tag+push via kind-aligned stdout; reinstall summary-only.
 	for _, r := range results {
 		if !isTagOrPushLane(r.ID) && r.ID != shipLaneSync {
@@ -340,7 +350,7 @@ func runShipTagPushLane(ctx context.Context, opts composeShipOpts, out io.Writer
 		if err := runPushMainWrite(opts.MainPath, false, opts.ForcePush, tags, true, out); err != nil {
 			return strings.Join(parts, " · "), err
 		}
-		maybeUpdateSameNameOriginBranch(opts.MainPath, opts.SourcePath, opts.Result, opts.SameName, false)
+		maybeUpdateSameNameOriginBranch(opts.MainPath, opts.SourcePath, opts.Result, opts.SameName, false, out, out)
 		parts = append(parts, "pushed")
 	}
 	return strings.Join(parts, " · "), nil
@@ -420,4 +430,46 @@ func dumpShipCaptureTo(errW io.Writer, id, capture string) {
 		return
 	}
 	fmt.Fprintln(errW, capture)
+}
+
+// flushShipReinstallDiags prints notice:/warning: diagnostic lines captured
+// during the reinstall lane (after progress Close). Install/skip noise stays
+// summary-only on the progress row.
+func flushShipReinstallDiags(errW io.Writer, capture string) {
+	if errW == nil {
+		errW = os.Stderr
+	}
+	lines := shipReinstallDiagLines(capture)
+	if len(lines) == 0 {
+		return
+	}
+	fmt.Fprintln(errW)
+	for _, line := range lines {
+		fmt.Fprintln(errW, line)
+	}
+}
+
+func shipReinstallDiagLines(capture string) []string {
+	capture = strings.TrimSpace(capture)
+	if capture == "" {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(capture, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if isShipReinstallDiagLine(line) {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func isShipReinstallDiagLine(line string) bool {
+	plain := strings.TrimSpace(shipANSIPattern.ReplaceAllString(line, ""))
+	if plain == "" {
+		return false
+	}
+	return strings.HasPrefix(plain, "notice:") ||
+		strings.HasPrefix(plain, "warning: bin") ||
+		strings.HasPrefix(plain, "warning: reinstall finished")
 }

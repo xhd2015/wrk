@@ -68,3 +68,56 @@ func TestClampShipProgLine(t *testing.T) {
 		t.Fatalf("expected ellipsis: %q", got)
 	}
 }
+
+func TestShipReinstallDiagLines(t *testing.T) {
+	capture := strings.Join([]string{
+		"notice: bin wrk: preferring ./script/wrk over ./cmd/wrk",
+		"go install ./cmd/foo",
+		"skip: bar (not in /tmp/bin)",
+		"warning: bin baz: ambiguous under cmd (./cmd/baz, ./cmd/baz2); skipping",
+		"warning: reinstall finished with 1 failed",
+		"reinstalled 1, skipped 1, failed 1",
+	}, "\n")
+	got := shipReinstallDiagLines(capture)
+	want := []string{
+		"notice: bin wrk: preferring ./script/wrk over ./cmd/wrk",
+		"warning: bin baz: ambiguous under cmd (./cmd/baz, ./cmd/baz2); skipping",
+		"warning: reinstall finished with 1 failed",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d lines %q; want %d %q", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("line %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestFlushShipReinstallDiags(t *testing.T) {
+	var errBuf bytes.Buffer
+	flushShipReinstallDiags(&errBuf, "go install ./cmd/foo\nnotice: bin wrk: preferring ./script/wrk over ./cmd/wrk\n")
+	got := errBuf.String()
+	if !strings.Contains(got, "notice: bin wrk:") {
+		t.Fatalf("expected notice in errW; got %q", got)
+	}
+	if strings.Contains(got, "go install") {
+		t.Fatalf("must not flush install noise; got %q", got)
+	}
+
+	errBuf.Reset()
+	flushShipReinstallDiags(&errBuf, "go install ./cmd/foo\nreinstalled 1, skipped 0, failed 0\n")
+	if errBuf.Len() != 0 {
+		t.Fatalf("no diags → silent; got %q", errBuf.String())
+	}
+}
+
+func TestIsShipReinstallDiagLineANSI(t *testing.T) {
+	colored := ansiOrange + "warning:" + ansiReset + " bin x: ambiguous under cmd (a, b); skipping"
+	if !isShipReinstallDiagLine(colored) {
+		t.Fatalf("ANSI warning: bin should match: %q", colored)
+	}
+	if isShipReinstallDiagLine("warning: skip master-x: dirty worktree") {
+		t.Fatal("sync skip warning must not match reinstall diag filter")
+	}
+}

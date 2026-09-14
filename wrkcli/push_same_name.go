@@ -3,6 +3,7 @@ package wrkcli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -186,35 +187,43 @@ func shortSHA(sha string) string {
 // a successful land when the pre-land snapshot says that ref existed, still
 // points at the same tip, and that tip was already in the local branch.
 // Failures are warnings only (exit 0); land + origin/main already published.
-func maybeUpdateSameNameOriginBranch(mainPath, sourcePath string, result *worktree.MergeBackResult, snap sameNameRemoteSnapshot, dryRun bool) {
+// out/errW default to os.Stdout/os.Stderr when nil (concurrent ship passes the
+// lane sink so these lines do not punch through the TTY spinner).
+func maybeUpdateSameNameOriginBranch(mainPath, sourcePath string, result *worktree.MergeBackResult, snap sameNameRemoteSnapshot, dryRun bool, out, errW io.Writer) {
 	if !snap.remoteExists || snap.branch == "" || snap.branch == "HEAD" {
 		return
+	}
+	if out == nil {
+		out = os.Stdout
+	}
+	if errW == nil {
+		errW = os.Stderr
 	}
 
 	exists, currentTip, err := lsRemoteOriginHead(mainPath, snap.branch)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not re-read origin/%s: %v\n", snap.branch, err)
+		fmt.Fprintf(errW, "warning: could not re-read origin/%s: %v\n", snap.branch, err)
 		return
 	}
 	kind, warn := decideSameNameRemoteUpdate(snap, exists, currentTip)
 	if warn != "" {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", warn)
+		fmt.Fprintf(errW, "warning: %s\n", warn)
 	}
 	if kind != sameNameRemoteDoUpdate {
 		return
 	}
 
 	if dryRun {
-		fmt.Printf("would: git push --force-with-lease origin %s\n", snap.branch)
+		fmt.Fprintf(out, "would: git push --force-with-lease origin %s\n", snap.branch)
 		return
 	}
 
 	postSHA, err := resolvePostLandSHA(mainPath, sourcePath, result, snap)
 	if err != nil || postSHA == "" {
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not resolve post-land tip for origin/%s: %v\n", snap.branch, err)
+			fmt.Fprintf(errW, "warning: could not resolve post-land tip for origin/%s: %v\n", snap.branch, err)
 		} else {
-			fmt.Fprintf(os.Stderr, "warning: could not resolve post-land tip for origin/%s\n", snap.branch)
+			fmt.Fprintf(errW, "warning: could not resolve post-land tip for origin/%s\n", snap.branch)
 		}
 		return
 	}
@@ -226,10 +235,10 @@ func maybeUpdateSameNameOriginBranch(mainPath, sourcePath string, result *worktr
 		if msg == "" {
 			msg = pushErr.Error()
 		}
-		fmt.Fprintf(os.Stderr, "warning: could not update origin/%s: %s\n", snap.branch, msg)
+		fmt.Fprintf(errW, "warning: could not update origin/%s: %s\n", snap.branch, msg)
 		return
 	}
-	fmt.Printf("pushed %s → origin/%s\n", snap.branch, snap.branch)
+	fmt.Fprintf(out, "pushed %s → origin/%s\n", snap.branch, snap.branch)
 }
 
 func resolvePostLandSHA(mainPath, sourcePath string, result *worktree.MergeBackResult, snap sameNameRemoteSnapshot) (string, error) {

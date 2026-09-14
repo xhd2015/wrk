@@ -917,11 +917,21 @@ func printMultiLocalReinstallDryRun(plan *MultiLocalReinstallPlan, colorOn bool)
 	return nil
 }
 
-// printReinstallDiagnostics writes one stderr line per diagnostic.
+// printReinstallDiagnostics writes one stderr line per diagnostic to os.Stderr.
 // Color (when colorOn) applies only to the "notice:" / "warning:" prefix.
 func printReinstallDiagnostics(diags []ReinstallDiagnostic, colorOn bool) {
+	printReinstallDiagnosticsTo(os.Stderr, diags, colorOn)
+}
+
+// printReinstallDiagnosticsTo writes one diagnostic line per entry to errW
+// (nil → os.Stderr). Used by concurrent ship so diagnostics hit the lane sink
+// instead of the real terminal while the TTY spinner owns the screen.
+func printReinstallDiagnosticsTo(errW io.Writer, diags []ReinstallDiagnostic, colorOn bool) {
+	if errW == nil {
+		errW = os.Stderr
+	}
 	for _, d := range diags {
-		fmt.Fprint(os.Stderr, formatReinstallDiagnosticLine(d, colorOn))
+		fmt.Fprint(errW, formatReinstallDiagnosticLine(d, colorOn))
 	}
 }
 
@@ -1046,7 +1056,7 @@ func executeMultiLocalReinstallsTo(plan *MultiLocalReinstallPlan, diagColor, std
 	}
 	var st ReinstallExecStats
 	for _, mod := range plan.Modules {
-		printReinstallDiagnostics(mod.Diagnostics, diagColor)
+		printReinstallDiagnosticsTo(errW, mod.Diagnostics, diagColor)
 	}
 	nReinstalled, nSkip, nFailed := 0, 0, 0
 	for _, mod := range plan.Modules {

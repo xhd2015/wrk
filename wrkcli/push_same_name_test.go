@@ -1,6 +1,7 @@
 package wrkcli
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -28,6 +29,23 @@ func TestParseLsRemoteHeadSHA(t *testing.T) {
 				t.Fatalf("parseLsRemoteHeadSHA(%q)=%q want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestMaybeUpdateSameNameOriginBranchRoutesWriters(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	snap := sameNameRemoteSnapshot{
+		branch:       "feature",
+		remoteExists: true,
+		remoteTip:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		included:     true,
+	}
+	maybeUpdateSameNameOriginBranch("/nonexistent-repo-for-ship-writers", "", nil, snap, false, &out, &errBuf)
+	if !strings.Contains(errBuf.String(), "warning:") {
+		t.Fatalf("expected warning on errW; got err=%q out=%q", errBuf.String(), out.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("out must stay empty on probe failure; got %q", out.String())
 	}
 }
 
