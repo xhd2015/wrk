@@ -5,17 +5,18 @@ go 1.25.10
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/xhd2015/agent-pro v0.0.126
+	github.com/xhd2015/agent-pro v0.0.198
 	github.com/xhd2015/dot-pkgs/go-pkgs v0.0.175
 	github.com/xhd2015/gitops v0.0.31
 	github.com/xhd2015/less-flags v1.0.5
-	github.com/xhd2015/skills v0.0.26
+	github.com/xhd2015/skills v0.0.31
 	github.com/xhd2015/xgo v1.2.8
 	golang.org/x/mod v0.36.0
 	golang.org/x/term v0.45.0
 )
 
 require (
+	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect
 	github.com/charmbracelet/x/ansi v0.11.6 // indirect
@@ -41,7 +42,7 @@ require (
 	github.com/xhd2015/go-coverage v1.0.41 // indirect
 	github.com/xhd2015/go-inspect v0.0.49 // indirect
 	github.com/xhd2015/less-gen v0.0.19 // indirect
-	github.com/xhd2015/tty-watch v0.0.4 // indirect
+	github.com/xhd2015/tty-watch v0.0.11 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
