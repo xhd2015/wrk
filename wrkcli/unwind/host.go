@@ -2,13 +2,16 @@ package unwind
 
 import (
 	"fmt"
+	"io"
 	"sync"
 )
 
 // Host is the CLI-owned ops bundle injected by wrkcli so this package does
 // not import wrkcli (cycle: wrkcli → unwind).
 type Host struct {
-	GitRun    func(repoPath string, args ...string) error
+	GitRun func(repoPath string, args ...string) error
+	// GitRunIO is GitRun with redirected stdio (graph apply: keep git off the TTY).
+	GitRunIO  func(repoPath string, stdout, stderr io.Writer, args ...string) error
 	GitOutput func(repoPath string, args ...string) (string, error)
 	ShortHEAD func(repo string) (string, error)
 	GoModTidy func(dir string) error

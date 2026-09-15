@@ -26,6 +26,7 @@ func mapUnwindError(err error) error {
 func newUnwindHost() unwind.Host {
 	return unwind.Host{
 		GitRun:    gitRunDir,
+		GitRunIO:  gitRunDirTo,
 		GitOutput: gitOutputDir,
 		ShortHEAD: shortHEAD,
 		GoModTidy: goModTidy,

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -27,9 +28,21 @@ const (
 const (
 	ansiStrike = "\x1b[9m"
 	spinPeriod = 120 * time.Millisecond
+	// Hide/show around an in-place frame so the cursor does not flash
+	// mid-rewrite (DEC private modes DECTCEM).
+	cursorHide = "\x1b[?25l"
+	cursorShow = "\x1b[?25h"
 )
 
 var progressSpinnerFrames = []string{"|", "/", "-", "\\"}
+
+// OSC (ESC ] … BEL/ST), CSI, leftover ESC, and C0 (except space).
+var (
+	progressOSCPattern = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+	progressCSIPattern = regexp.MustCompile(`\x1b\[[0-9;:?]*[A-Za-z]`)
+	progressESCPattern = regexp.MustCompile(`\x1b.`)
+	progressC0Pattern  = regexp.MustCompile(`[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`)
+)
 
 type actionProgressRow struct {
 	ID        string
@@ -63,13 +76,13 @@ type actionProgress struct {
 	groups []progressGroup
 	sinks  map[string]*actionSink
 
-	lines      int
-	begun      bool
-	done       bool
-	spinFrame  int
-	stopSpin   chan struct{}
-	spinWG     sync.WaitGroup
-	termWidth  int
+	lines     int
+	begun     bool
+	done      bool
+	spinFrame int
+	stopSpin  chan struct{}
+	spinWG    sync.WaitGroup
+	termWidth int
 }
 
 type progressConfig struct {
@@ -174,8 +187,7 @@ func terminalWidth(w io.Writer) int {
 }
 
 func truncateProgress(s string, max int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.TrimSpace(s)
+	s = stripProgressControls(s)
 	if max < 4 {
 		max = 4
 	}
@@ -319,7 +331,7 @@ func (p *actionProgress) setOneline(id, line string) {
 func (p *actionProgress) onelineBudgetLocked() int {
 	// indent + "   " + glyph + "  " + label(~20) + "  " + elapsed(~8)
 	used := len(p.indent) + 3 + 1 + 2 + 20 + 2 + 8
-	budget := p.termWidth - used
+	budget := progressFrameWidth(p.termWidth) - used
 	if budget < 16 {
 		return 16
 	}
@@ -398,17 +410,13 @@ func (p *actionProgress) emitLocked(id string) {
 }
 
 func (p *actionProgress) redrawLocked() {
-	if p.lines > 0 {
-		fmt.Fprint(p.w, cursor.Up(p.lines))
-	}
+	old := p.lines
 	block := p.renderLocked()
 	lines := strings.Split(strings.TrimSuffix(block, "\n"), "\n")
 	if block == "" {
 		lines = nil
 	}
-	for _, line := range lines {
-		fmt.Fprintf(p.w, "%s%s\n", cursor.ClearLine, cursor.CR+line)
-	}
+	fmt.Fprint(p.w, buildProgressFrame(old, lines, progressFrameWidth(p.termWidth)))
 	p.lines = len(lines)
 }
 
@@ -464,7 +472,7 @@ func (p *actionProgress) formatRowLineLocked(row *actionProgressRow) string {
 	if elapsed := formatActionElapsed(row); elapsed != "" {
 		line += "  " + paint(elapsed, ansiGrey, p.color)
 	}
-	return line
+	return clampProgressLine(line, progressFrameWidth(p.termWidth))
 }
 
 // formatActionElapsed returns a compact duration for running/finished rows.
@@ -568,6 +576,87 @@ func (s *actionSink) Write(b []byte) (int, error) {
 
 // Ensure actionSink implements io.Writer.
 var _ io.Writer = (*actionSink)(nil)
+
+// progressFrameWidth is the max visible columns for one progress row.
+// Subtract 1 for xenl: a full-width line plus LF can occupy two visual rows.
+func progressFrameWidth(termWidth int) int {
+	w := termWidth - 1
+	if w < 1 {
+		return 1
+	}
+	return w
+}
+
+// stripProgressControls removes cursor-moving / query sequences from untrusted
+// action output so reprinting a row cannot desync CSI nA.
+func stripProgressControls(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
+	s = progressOSCPattern.ReplaceAllString(s, "")
+	s = progressCSIPattern.ReplaceAllString(s, "")
+	s = progressESCPattern.ReplaceAllString(s, "")
+	s = progressC0Pattern.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
+}
+
+func progressVisibleWidth(s string) int {
+	s = progressOSCPattern.ReplaceAllString(s, "")
+	s = progressCSIPattern.ReplaceAllString(s, "")
+	return utf8.RuneCountInString(s)
+}
+
+// clampProgressLine truncates a rendered progress row to width so TTY
+// redraw line counts stay accurate (wrapped rows cause ghost duplicates).
+func clampProgressLine(line string, width int) string {
+	if width < 1 {
+		width = 1
+	}
+	if progressVisibleWidth(line) <= width {
+		return line
+	}
+	plain := progressOSCPattern.ReplaceAllString(line, "")
+	plain = progressCSIPattern.ReplaceAllString(plain, "")
+	runes := []rune(plain)
+	if len(runes) <= width {
+		return line
+	}
+	if width <= 3 {
+		return string(runes[:width])
+	}
+	return string(runes[:width-3]) + "..."
+}
+
+// buildProgressFrame is one in-place TTY rewrite: hide cursor, Up(old),
+// CR+EL+clamped line per row, clear leftover rows, show cursor.
+func buildProgressFrame(old int, lines []string, width int) string {
+	var b strings.Builder
+	b.WriteString(cursorHide)
+	if old > 0 {
+		b.WriteString(cursor.Up(old))
+	}
+	for _, line := range lines {
+		b.WriteString(cursor.ClearLine)
+		b.WriteString(cursor.CR)
+		b.WriteString(clampProgressLine(line, width))
+		b.WriteByte('\n')
+	}
+	extra := old - len(lines)
+	if extra < 0 {
+		extra = 0
+	}
+	for i := 0; i < extra; i++ {
+		b.WriteString(cursor.ClearLine)
+		b.WriteString(cursor.CR)
+		b.WriteByte('\n')
+	}
+	if extra > 0 {
+		b.WriteString(cursor.Up(extra))
+	}
+	b.WriteString(cursorShow)
+	return b.String()
+}
 
 // resolveProgressColor mirrors stderr color policy for the progress block.
 func resolveProgressColor(forceColor, noColor bool) bool {

@@ -16,6 +16,16 @@ func gitRunDir(repoPath string, args ...string) error {
 	return xgocmd.Dir(repoPath).Run("git", args...)
 }
 
+// gitRunDirIO runs git with stdout/stderr pointed at io (ActionSink during graph apply).
+func gitRunDirIO(repoPath string, io HostIO, args ...string) error {
+	h := currentHost()
+	stdout, stderr := io.Out(), io.Err()
+	if h.GitRunIO != nil {
+		return h.GitRunIO(repoPath, stdout, stderr, args...)
+	}
+	return xgocmd.Dir(repoPath).Stdout(stdout).Stderr(stderr).Run("git", args...)
+}
+
 func gitOutputDir(repoPath string, args ...string) (string, error) {
 	h := currentHost()
 	if h.GitOutput != nil {

@@ -196,12 +196,12 @@ type jobRunner struct {
 	shipMains        []string
 	seenMain         map[string]struct{}
 
-	mu       sync.Mutex
-	pathMu   map[string]*sync.Mutex // serialize git ops per checkout/main path
-	messages map[string]string      // message:<lane> → commit message
-	createdTags map[string][]string // lane → tags created by ModeTagNext this run
-	quietRan bool                   // suppress emitRan (progress UI owns status lines)
-	prog     *actionProgress
+	mu          sync.Mutex
+	pathMu      map[string]*sync.Mutex // serialize git ops per checkout/main path
+	messages    map[string]string      // message:<lane> → commit message
+	createdTags map[string][]string    // lane → tags created by ModeTagNext this run
+	quietRan    bool                   // suppress emitRan (progress UI owns status lines)
+	prog        *actionProgress
 }
 
 func (r *jobRunner) run() error {
@@ -783,7 +783,7 @@ func (r *jobRunner) applyAction(a *Action, io HostIO) error {
 	case ModeGenCommit:
 		return r.applyGenCommit(a.Lane, io)
 	case ModeAddAll:
-		return r.applyAddAll(a.Lane)
+		return r.applyAddAll(a.Lane, io)
 	case ModeGenCommitMsg:
 		return r.applyGenCommitMsgOnly(a, io)
 	case ModeMergeBack:
@@ -803,12 +803,12 @@ func (r *jobRunner) applyAction(a *Action, io HostIO) error {
 	}
 }
 
-func (r *jobRunner) applyAddAll(label string) error {
+func (r *jobRunner) applyAddAll(label string, io HostIO) error {
 	dir := r.checkoutOf(label)
 	if dir == "" {
 		return fmt.Errorf("wrk: add-all %s: no checkout", label)
 	}
-	if err := gitRunDir(dir, "add", "-A"); err != nil {
+	if err := gitRunDirIO(dir, io, "add", "-A"); err != nil {
 		return fmt.Errorf("wrk: git add -A in %s: %w", dir, err)
 	}
 	return nil
@@ -901,7 +901,7 @@ func (r *jobRunner) applyGenCommit(label string, io HostIO) error {
 		return fmt.Errorf("wrk: gen-commit %s: no checkout", label)
 	}
 	if r.flags.AddAll || genArgsHasFlag(r.flags.GenCommitArgs, "--add-all") {
-		if err := gitRunDir(dir, "add", "-A"); err != nil {
+		if err := gitRunDirIO(dir, io, "add", "-A"); err != nil {
 			return fmt.Errorf("wrk: git add -A in %s: %w", dir, err)
 		}
 	}

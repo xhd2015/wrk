@@ -161,9 +161,21 @@ func gitCommandWithEnv(repoPath string, extraEnv []string, args ...string) *exec
 
 // gitRunDir runs git in repoPath via xgo/support/cmd (non-interactive).
 func gitRunDir(repoPath string, args ...string) error {
+	return gitRunDirTo(repoPath, nil, nil, args...)
+}
+
+// gitRunDirTo is gitRunDir with optional stdout/stderr (nil → process defaults).
+func gitRunDirTo(repoPath string, stdout, stderr io.Writer, args ...string) error {
 	fullArgs := append([]string{"-C", repoPath}, args...)
 	logGitCommand(fullArgs)
-	return xgocmd.Dir(repoPath).Run("git", args...)
+	b := xgocmd.Dir(repoPath)
+	if stdout != nil {
+		b = b.Stdout(stdout)
+	}
+	if stderr != nil {
+		b = b.Stderr(stderr)
+	}
+	return b.Run("git", args...)
 }
 
 // gitOutputDir captures git stdout via xgo/support/cmd (non-interactive).
