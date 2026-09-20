@@ -37,6 +37,12 @@ type setConfigOpts struct {
 	noNewTerminal bool
 	openInAgent   bool
 	noOpenInAgent bool
+	// browser holds the value after --browser; nil = flag absent.
+	browser   *string
+	noBrowser bool
+
+	// agentRunner holds the canonicalized --agent-runner value; nil = flag absent.
+	agentRunner *string
 
 	// other disallowed tokens / positionals for mutual exclusion messages
 	conflict string
@@ -103,6 +109,9 @@ func runSetConfig(origWd string, args []string, ctx *invocationContext) error {
 		noNewTerminal: opts.noNewTerminal,
 		openInAgent:   opts.openInAgent,
 		noOpenInAgent: opts.noOpenInAgent,
+		agentRunner:   opts.agentRunner,
+		browser:       opts.browser,
+		noBrowser:     opts.noBrowser,
 	}
 	if err := f.validate(); err != nil {
 		return err
@@ -172,9 +181,14 @@ UX flags:
   --reuse-terminal       persist create.terminal.mode=reuse
   --smart-terminal       persist create.terminal.mode=smart
   --open-in-agent        enable create.agent (default runner/template/args)
+  --agent-runner NAME    set create.agent.runner (codex, codex-tty, grok,
+                         grok-tty, or dsh-web; canonical form stored)
+  --browser NAME         persist create.agent.browser (dsh-web runner: forwarded
+                         to dsh web open)
   --no-new-window        clear create.window
   --no-new-terminal      clear create.terminal
   --no-open-in-agent     set create.agent.enabled=false
+  --no-browser           clear create.agent.browser
 
 Conflicts (same as create mode):
   --open-in-agent with --no-open-in-agent
@@ -185,6 +199,8 @@ Conflicts (same as create mode):
 
 Notes:
   Merge-only: only keys implied by flags are written; unknown top-level keys preserved.
+  Browser forwarding applies at create time only with agent launch and the
+  dsh-web runner; other combinations error.
   --show is mutually exclusive with --create / create UX flags.
 
 Examples:
@@ -192,6 +208,9 @@ Examples:
   wrk --set-config --create --open-in-agent
   wrk --set-config --create --no-open-in-agent
   wrk --set-config --create --new-window --open-in-agent
+  wrk --set-config --create --open-in-agent --browser brave
+  wrk --set-config --create --agent-runner dsh-web --browser brave
+  wrk --set-config --create --no-browser
 `
 }
 
@@ -214,12 +233,13 @@ Example:
 func (o setConfigOpts) anyCreateFlag() bool {
 	return o.newWindow || o.noNewWindow ||
 		o.newTerminal || o.reuseTerminal || o.smartTerminal || o.noNewTerminal ||
-		o.openInAgent || o.noOpenInAgent
+		o.openInAgent || o.noOpenInAgent || o.agentRunner != nil || o.browser != nil || o.noBrowser
 }
 
 func parseSetConfigArgs(args []string) (setConfigOpts, error) {
 	var opts setConfigOpts
 	sawSetConfig := false
+	args = splitSetConfigEqualsValues(args)
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch arg {
@@ -248,6 +268,31 @@ func parseSetConfigArgs(args []string) (setConfigOpts, error) {
 			opts.openInAgent = true
 		case "--no-open-in-agent":
 			opts.noOpenInAgent = true
+		case "--browser":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("wrk: --browser requires a value")
+			}
+			i++
+			if args[i] == "" {
+				return opts, fmt.Errorf("wrk: --browser requires a value")
+			}
+			v := args[i]
+			opts.browser = &v
+		case "--agent-runner":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("wrk: --agent-runner requires a value")
+			}
+			i++
+			if args[i] == "" {
+				return opts, fmt.Errorf("wrk: --agent-runner requires a value")
+			}
+			v, err := normalizeCreateAgentRunner(args[i])
+			if err != nil {
+				return opts, err
+			}
+			opts.agentRunner = &v
+		case "--no-browser":
+			opts.noBrowser = true
 		case "--":
 			// anything after is positional / conflict
 			if i+1 < len(args) {
@@ -280,6 +325,26 @@ func parseSetConfigArgs(args []string) (setConfigOpts, error) {
 		return opts, fmt.Errorf("wrk: --set-config required")
 	}
 	return opts, nil
+}
+
+// splitSetConfigEqualsValues rewrites the set-config value flags from equals
+// form into two tokens so --agent-runner=X and --browser=X parse like their
+// space forms; every other token (bool flags, unknown flags, positionals)
+// passes through unchanged. An empty value keeps the empty token so the
+// flag case reports its requires-a-value error.
+func splitSetConfigEqualsValues(args []string) []string {
+	out := make([]string, 0, len(args)+2)
+	for _, arg := range args {
+		switch {
+		case strings.HasPrefix(arg, "--agent-runner="):
+			out = append(out, "--agent-runner", strings.TrimPrefix(arg, "--agent-runner="))
+		case strings.HasPrefix(arg, "--browser="):
+			out = append(out, "--browser", strings.TrimPrefix(arg, "--browser="))
+		default:
+			out = append(out, arg)
+		}
+	}
+	return out
 }
 
 func isSetConfigDisallowed(arg string) bool {
@@ -358,7 +423,14 @@ func setConfigWriteCreate(wrkHome string, f createUXFlags) error {
 		createMap["terminal"] = map[string]interface{}{"mode": "smart"}
 	}
 
-	// Agent
+	// Agent. Runner write runs first so the open-in-agent defaults below
+	// resolve against the effective runner. Merge-only: touches
+	// create.agent.runner and does not imply create.agent.enabled.
+	if f.agentRunner != nil {
+		agent := existingAgentMap(createMap)
+		agent["runner"] = *f.agentRunner
+		createMap["agent"] = agent
+	}
 	if f.noOpenInAgent {
 		agent := existingAgentMap(createMap)
 		agent["enabled"] = false
@@ -375,8 +447,25 @@ func setConfigWriteCreate(wrkHome string, f createUXFlags) error {
 			agent["prompt_template"] = defaultAgentPromptTemplate
 		}
 		if _, ok := agent["args"]; !ok {
-			agent["args"] = defaultAgentArgs()
+			runner, _ := agent["runner"].(string)
+			agent["args"] = defaultAgentArgs(runner)
 		}
+		createMap["agent"] = agent
+	}
+
+	// Browser: set/clear create.agent.browser without touching other agent keys.
+	if f.noBrowser {
+		agent := existingAgentMap(createMap)
+		delete(agent, "browser")
+		if len(agent) > 0 {
+			createMap["agent"] = agent
+		} else {
+			delete(createMap, "agent")
+		}
+	}
+	if f.browser != nil {
+		agent := existingAgentMap(createMap)
+		agent["browser"] = *f.browser
 		createMap["agent"] = agent
 	}
 

@@ -71,8 +71,8 @@ github.com/rogpeppe/go-internal v1.15.0 h1:D0RCU5rMAp+SpgkiNdrjfJ+LX4J1M32V2NeCY
 github.com/rogpeppe/go-internal v1.15.0/go.mod h1:DrUVZyrJU+txYW5/1kwtXQSMFio52ZOxX7yM1VHvnxs=
 github.com/xhd2015/agent-pro v0.0.198 h1:NhVoGP51S0iF0Rh1n4yxLCFlKkoQeLVMLZ6WBQCxDcU=
 github.com/xhd2015/agent-pro v0.0.198/go.mod h1:WHELbq8uEoaHll4VV78uUosZe3B+OXTMDncpVGij1+w=
-github.com/xhd2015/dot-pkgs/go-pkgs v0.0.175 h1:Wgqc8KgeN8G2VFWwtCXJNKF5iak8LKNwgoQZyKj2Ej4=
-github.com/xhd2015/dot-pkgs/go-pkgs v0.0.175/go.mod h1:rbA6ttLFEN1d78090+OnJo5Ghcsn8P91a0Eo2OUsxhQ=
+github.com/xhd2015/dot-pkgs/go-pkgs v0.0.179 h1:PwOC6/zztTxbexk/hgoEtq1WgwLOe6nUr/Wy1Dv2Sa4=
+github.com/xhd2015/dot-pkgs/go-pkgs v0.0.179/go.mod h1:rbA6ttLFEN1d78090+OnJo5Ghcsn8P91a0Eo2OUsxhQ=
 github.com/xhd2015/gitops v0.0.31 h1:dyiUIHzxeTCrG6dySEvfS5TpzooDxM8tXR+qlWDb+LQ=
 github.com/xhd2015/gitops v0.0.31/go.mod h1:KS8y6tZ3FG+myEaR+H6MvoR099YrP/ADIHZX9ROpZo8=
 github.com/xhd2015/go-coverage v1.0.41 h1:JjUcE93IMz0KHmdCYUKq9JN/EDC/5k0OEhsMAeVvL88=

@@ -45,6 +45,20 @@ Run `wrk -h` for the full flag list.
 
 Bash tab-completion and auto-cd: `wrk --bash-integration`.
 
+## DSH Web agent runner
+
+```sh
+wrk project -t 'Implement the task' --open-in-agent --agent-runner dsh-web
+```
+
+This creates the worktree and hands `/brainstorm Implement the task` to `agent-run`, which invokes `dsh web open` on the already-running DSH Web server. Install compatible `agent-run` and `dsh` executables on `PATH`. The browser opens an editable draft; the task does not run until you submit it. Existing window and terminal placement settings still apply; add `--no-new-window --no-new-terminal` to launch directly without a terminal window.
+
+The `dsh-web` defaults are `--open --no-submit`, without the terminal-only `--color` or agent-run's `--session-id-from-prompt`. Other runners retain their defaults. DSH owns session identity and execution; agent-run exits after the handoff rather than waiting for task completion. Long tasks use `--prompt-file` through both launch steps.
+
+To select this runner persistently, set `create.agent.runner` in `$WRK_HOME/config.json` with `wrk --set-config --create --agent-runner dsh-web` (equals form `--agent-runner=dsh-web` also works; `codex` and `grok` canonicalize to their `-tty` runners, stored in canonical form) and enable `create.agent.enabled`. Omit `create.agent.args` or use an empty array for runner defaults. A nonempty array replaces defaults and is forwarded unchanged for `dsh-web`; for example `["--open"]` submits immediately. When switching from saved terminal defaults, remove incompatible arguments such as `--color` and `--session-id-from-prompt`; the browser runner rejects them rather than silently ignoring them. Explicit prompt templates remain unchanged.
+
+Pass `--browser NAME` with create agent launch to pick the browser for the draft; the value is forwarded to `dsh web open --browser` and errors with a non-`dsh-web` runner or without agent launch. Persist it as `create.agent.browser` with `wrk --set-config --create --browser NAME` (keep `create.agent.enabled` on) and clear it with `wrk --set-config --create --no-browser`; for example `wrk project -t 'task' --open-in-agent --agent-runner dsh-web --browser brave`.
+
 ## Dependencies
 
 `wrk` is a standalone CLI that reuses shared libraries from

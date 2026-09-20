@@ -39,6 +39,9 @@ type CreateAgent struct {
 	Runner         string   `json:"runner,omitempty"`
 	PromptTemplate string   `json:"prompt_template,omitempty"`
 	Args           []string `json:"args,omitempty"`
+	// Browser names the browser for `dsh web open --browser` (dsh-web runner
+	// only); empty forwards nothing.
+	Browser string `json:"browser,omitempty"`
 }
 
 // loadConfig reads $WRK_HOME/config.json. Missing file returns (nil, nil).

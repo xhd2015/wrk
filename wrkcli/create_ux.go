@@ -44,9 +44,11 @@ func defaultPromptTemplate(runner string) string {
 	return defaultAgentPromptTemplate
 }
 
-// defaultAgentArgs returns the default agent-run flags before --agent-runner.
-// Includes --color so TTY children (grok-tty/codex-tty) force color env.
-func defaultAgentArgs() []string {
+// defaultAgentArgs returns the runner-specific agent-run launch flags.
+func defaultAgentArgs(runner string) []string {
+	if runner == "dsh-web" {
+		return []string{"--open", "--no-submit"}
+	}
 	return []string{"--session-id-from-prompt", "--no-submit", "--open", "--color"}
 }
 
@@ -64,12 +66,19 @@ type createUXFlags struct {
 	here bool
 	// agentRunner is a one-shot create-agent override. Nil means use config/default.
 	agentRunner *string
+	// browser is a one-shot create-agent browser override for the dsh-web
+	// runner. Nil means use config/default; empty forwards nothing.
+	browser *string
+	// noBrowser clears create.agent.browser. Set only by --set-config; create
+	// mode has no --no-browser flag.
+	noBrowser bool
 }
 
 func (f createUXFlags) any() bool {
 	return f.newWindow || f.noNewWindow ||
 		f.newTerminal || f.reuseTerminal || f.smartTerminal || f.noNewTerminal ||
-		f.openInAgent || f.noOpenInAgent || f.here || f.agentRunner != nil
+		f.openInAgent || f.noOpenInAgent || f.here || f.agentRunner != nil ||
+		f.browser != nil || f.noBrowser
 }
 
 func (f createUXFlags) validate() error {
@@ -110,8 +119,11 @@ type createUXPlan struct {
 	agent        bool
 	here         bool // prefer follow-up / nested-shell agent launch
 	runner       string
-	promptTmpl   string
-	agentArgs    []string
+	// browser names the browser forwarded to `dsh web open` for the dsh-web
+	// runner; empty forwards nothing.
+	browser    string
+	promptTmpl string
+	agentArgs  []string
 }
 
 // resolveCreateUX builds the create UX plan. When applyConfig is true (plain
@@ -128,7 +140,6 @@ func resolveCreateUX(wrkHome string, flags createUXFlags, applyConfig bool) (cre
 	plan := createUXPlan{
 		runner:     defaultAgentRunner,
 		promptTmpl: "", // empty = not explicitly set; resolved after runner is finalized
-		agentArgs:  defaultAgentArgs(),
 	}
 
 	if applyConfig {
@@ -153,6 +164,9 @@ func resolveCreateUX(wrkHome string, flags createUXFlags, applyConfig bool) (cre
 				}
 				if c.Agent.Runner != "" {
 					plan.runner = c.Agent.Runner
+				}
+				if c.Agent.Browser != "" {
+					plan.browser = c.Agent.Browser
 				}
 				if c.Agent.PromptTemplate != "" {
 					plan.promptTmpl = c.Agent.PromptTemplate
@@ -205,6 +219,20 @@ func resolveCreateUX(wrkHome string, flags createUXFlags, applyConfig bool) (cre
 		plan.runner = runner
 	}
 
+	// Browser override + validation run after the runner is finalized; both
+	// rejections fire before any worktree/window creation.
+	if flags.browser != nil {
+		plan.browser = *flags.browser
+	}
+	if plan.browser != "" {
+		if !plan.agent {
+			return createUXPlan{}, fmt.Errorf("wrk: --browser requires agent launch; remove --no-open-in-agent or pass --open-in-agent")
+		}
+		if plan.runner != "dsh-web" {
+			return createUXPlan{}, fmt.Errorf("wrk: --browser requires the dsh-web runner; current runner is %s", plan.runner)
+		}
+	}
+
 	// Window on implies terminal new when terminal is still off.
 	if plan.window && plan.terminalMode == "" {
 		plan.terminalMode = "new"
@@ -215,22 +243,25 @@ func resolveCreateUX(wrkHome string, flags createUXFlags, applyConfig bool) (cre
 	if plan.promptTmpl == "" {
 		plan.promptTmpl = defaultPromptTemplate(plan.runner)
 	}
+	if plan.agentArgs == nil {
+		plan.agentArgs = defaultAgentArgs(plan.runner)
+	}
 
 	return plan, nil
 }
 
-// normalizeCreateAgentRunner accepts the compact runner names used by create
-// UX and resolves them to the TTY providers understood by agent-run.
+// normalizeCreateAgentRunner accepts browser runners and resolves compact
+// terminal runner names to the TTY providers understood by agent-run.
 func normalizeCreateAgentRunner(runner string) (string, error) {
 	switch runner {
 	case "codex":
 		return "codex-tty", nil
 	case "grok":
 		return "grok-tty", nil
-	case "codex-tty", "grok-tty":
+	case "codex-tty", "grok-tty", "dsh-web":
 		return runner, nil
 	default:
-		return "", fmt.Errorf("wrk: unsupported create agent runner %q (want codex, codex-tty, grok, or grok-tty)", runner)
+		return "", fmt.Errorf("wrk: unsupported create agent runner %q (want codex, codex-tty, grok, grok-tty, or dsh-web)", runner)
 	}
 }
 
@@ -477,10 +508,11 @@ func expandAgentPrompt(tmpl, task string) string {
 	return strings.ReplaceAll(tmpl, "${task}", task)
 }
 
-// buildAgentArgv builds: agent-run run --dir <absWorktree> <args...> --agent-runner=<runner> <prompt>
+// buildAgentArgv builds: agent-run run --dir <absWorktree> <args...> --agent-runner=<runner> [--browser=<name>] <prompt>
 // --dir is the workspace source of truth (process cwd need not equal the worktree).
-// Always ensures --color so agent-run forces TTY child color even when create.agent.args
-// omits it or the parent shell has NO_COLOR/TERM=dumb.
+// Ensures --color for terminal runners even with custom args; browser runners
+// receive custom args unchanged. --browser is forwarded only for the dsh-web
+// runner with a nonempty plan.browser.
 // Long prompts (agentrunapi.PromptFileSpillMinRunes) and follow-ups that would
 // exceed iTerm write-text SafeMax are delivered via --prompt-file instead of a
 // positional prompt, using agentrunapi.MaybeSpillPrompt.
@@ -491,9 +523,11 @@ func buildAgentArgv(worktreePath string, plan createUXPlan, task string) ([]stri
 	}
 	args := plan.agentArgs
 	if args == nil {
-		args = defaultAgentArgs()
+		args = defaultAgentArgs(runner)
 	}
-	args = ensureAgentColorArg(args)
+	if runner != "dsh-web" {
+		args = ensureAgentColorArg(args)
+	}
 	absDir, err := filepath.Abs(worktreePath)
 	if err != nil {
 		absDir = worktreePath
@@ -503,6 +537,9 @@ func buildAgentArgv(worktreePath string, plan createUXPlan, task string) ([]stri
 	argv = append(argv, "agent-run", "run", "--dir", absDir)
 	argv = append(argv, args...)
 	argv = append(argv, "--agent-runner="+runner)
+	if runner == "dsh-web" && plan.browser != "" {
+		argv = append(argv, "--browser="+plan.browser)
+	}
 
 	path, spilled, err := agentrunapi.MaybeSpillPrompt(prompt, agentrunapi.PromptSpillOpts{})
 	if err != nil {

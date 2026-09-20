@@ -237,6 +237,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var openInAgent bool
 	var noOpenInAgent bool
 	var agentRunner *string
+	var browserName *string
 	var noConfig bool
 	var webFlag bool
 	var webDev bool
@@ -312,6 +313,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--open-in-agent", &openInAgent).
 		Bool("--no-open-in-agent", &noOpenInAgent).
 		String("--agent-runner", &agentRunner).
+		String("--browser", &browserName).
 		Bool("--no-config", &noConfig).
 		Varargs("--bring", &bringPaths, lessflags.WithMinimum(1)).
 		Bool("--no-dep", &noDep).
@@ -474,6 +476,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		openInAgent:   openInAgent,
 		noOpenInAgent: noOpenInAgent,
 		agentRunner:   agentRunner,
+		browser:       browserName,
 	}
 	// Exclusive bring: cwd consumer. Compose: --new / -t / leftover positionals /
 	// create UX flags. --no-config / --exec / --no-cd alone are not compose signals.
@@ -501,7 +504,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			newWindow: newWindow, noNewWindow: noNewWindow,
 			newTerminal: newTerminal, reuseTerminal: reuseTerminal, smartTerminal: smartTerminal,
 			noNewTerminal: noNewTerminal, here: here, openInAgent: openInAgent, noOpenInAgent: noOpenInAgent,
-			agentRunner: agentRunner,
+			agentRunner: agentRunner, browser: browserName,
 		}, noConfig, noCd, forceCd, len(execArgs) > 0) {
 			ctx.command = "dashboard"
 		}
@@ -531,6 +534,15 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		syncFlag || pushFlag || prFlag || jsonFlag || setTaskDesc != nil || cd || mainFlag || unwind ||
 		showGraph || verify || pinLocals || depReplaceMode || depUpdateMode || webFlag || scanGitRepos) {
 		return fmt.Errorf("wrk: --agent-runner is only valid with create")
+	}
+
+	// Same create-only guard as --agent-runner: --web / --scan-git-repos
+	// dispatch before the generic create UX flag check below.
+	if browserName != nil && (done || mergeBack || list || status || repos || projects || projectsDepGraph ||
+		addPath != nil || removePath != nil || where || reinstallLocal || tagNext ||
+		syncFlag || pushFlag || prFlag || jsonFlag || setTaskDesc != nil || cd || mainFlag || unwind ||
+		showGraph || verify || pinLocals || depReplaceMode || depUpdateMode || webFlag || scanGitRepos) {
+		return fmt.Errorf("wrk: --browser is only valid with create")
 	}
 
 	// --no-cache is only valid with --scan-git-repos.
@@ -1801,7 +1813,9 @@ Flags:
   --smart-terminal                smart iTerm2 window/tab reuse
   --open-in-agent                 launch agent-run after create (iTerm follow-up or current process)
   --agent-runner RUNNER           with create agent launch: codex→codex-tty, grok→grok-tty;
-                                  accepts codex, codex-tty, grok, or grok-tty
+                                  accepts codex, codex-tty, grok, grok-tty, or dsh-web
+  --browser NAME                  with create agent launch (dsh-web): browser passed to
+                                  dsh web open (e.g. brave, firefox)
   --no-new-window                 disable window UX for this run
   --no-new-terminal               disable terminal UX for this run; with --bring, suppress bring
                                   plan/SKIP/external path lines; ignore -v/--verbose
