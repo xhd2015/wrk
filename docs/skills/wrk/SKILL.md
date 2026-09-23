@@ -52,7 +52,7 @@ wrk --dep-update <dir>… --dry-run
 - Stack pin/ship → `--unwind`; intentional require bumps → `--dep-update` (not a compose ship stage).
 - `--dep-update` tidy prefers local git trees for well-known hosts via ephemeral `url.insteadOf` (no separate seed step; `--dep-replace` / `--bring` use plain tidy).
 - `--json` only for bare `--tag-next` (not with primary).
-- Before land, `--done` / `--merge-back` refresh **main** from its upstream (`fetch` + `rebase` onto `@{u}` or `origin/<branch>`); skip only when no remote exists. Main must be clean.
+- Before land, `--done` / `--merge-back` refresh **main** from its upstream (`fetch` + `rebase` onto `@{u}` or `origin/<branch>`). Skip when no remote exists, or when the worktree HEAD is already included in local main (remove/noop; dirty main is allowed). Otherwise main must be clean.
 - `--push` after `--done` / `--merge-back` publishes main (and tags). If `origin/<worktree-branch>` already exists and its tip is in the local branch, also lease-updates that ref so a standing PR is not left on pre-rebase commits.
 - Default auto-yes on `--done` / `--merge-back` / `--set-task`; `--confirm` for Y/n; `-y` still valid.
 
