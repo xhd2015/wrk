@@ -180,8 +180,22 @@ func formatReinstallSummaryLine(reinstalled, skipped, failed int, colorOn bool) 
 	)
 }
 
+// formatInstallSummaryLine builds "installed N, failed F" for wrk --install.
+// No skipped segment: a named install is always forced (no binDir gate).
+func formatInstallSummaryLine(installed, failed int, colorOn bool) string {
+	inL, faL := "installed", "failed"
+	if colorOn {
+		inL = colorize(inL, ansiGrey)
+		faL = colorize(faL, ansiGrey)
+	}
+	return fmt.Sprintf("%s %s, %s %s",
+		inL, paintCount(installed, colorOn),
+		faL, paintFailedCount(failed, colorOn),
+	)
+}
+
 // formatGoInstallProgressLine highlights the go install/run verb (green) and
-// leaves the package path plain — progress for --reinstall-local.
+// leaves the package path plain — progress for --reinstall-local / --install.
 func formatGoInstallProgressLine(method Method, relPath string, colorOn bool) string {
 	verb := "go install"
 	if method == MethodGoRunInstall {

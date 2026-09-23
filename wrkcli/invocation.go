@@ -58,7 +58,7 @@ func (ctx *invocationContext) autoRecord() error {
 	return nil
 }
 
-func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack bool, bring bool, reinstallLocal, tagNext, syncFlag, pushFlag, prFlag, cd, mainFlag, unwind bool) string {
+func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack bool, bring bool, install bool, reinstallLocal, tagNext, syncFlag, pushFlag, prFlag, cd, mainFlag, unwind bool) string {
 	switch {
 	case setTaskFlagSet:
 		return "set-task"
@@ -89,6 +89,10 @@ func resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTa
 		return "done"
 	case mergeBack:
 		return "merge-back"
+	case install:
+		// install wins over main when both set (wrk --main --install name...).
+		// Exclusive mode: never composes with pipeline stages (unlike reinstall-local).
+		return "install"
 	case reinstallLocal:
 		// reinstall-local wins over main when both set (wrk --main --reinstall-local)
 		return "reinstall-local"
@@ -131,6 +135,7 @@ var flagValueArgs = map[string]struct{}{
 // varargsSlurpFlags take zero or more following non-flag tokens (less-flags Varargs).
 var varargsSlurpFlags = map[string]struct{}{
 	"--bring":           {},
+	"--install":         {},
 	"--reinstall-local": {},
 }
 

@@ -235,6 +235,22 @@ type ReinstallExecStats struct {
 	Failed      int
 }
 
+// InstallMode selects the user-facing vocabulary, flag label, and named-lookup
+// gate for the shared local install engine (runLocalInstallExTo).
+type InstallMode string
+
+const (
+	// ModeReinstallLocal is wrk --reinstall-local [name...]: the binDir gate is
+	// on for the bare form and off when names select items explicitly.
+	ModeReinstallLocal InstallMode = "reinstall-local"
+	// ModeInstall is wrk --install name...: always a forced install (no binDir
+	// gate), and names are required.
+	ModeInstall InstallMode = "install"
+)
+
+// flagName returns the CLI spelling used in error prefixes ("--install").
+func (m InstallMode) flagName() string { return "--" + string(m) }
+
 // runReinstallLocal implements wrk --reinstall-local [--dry-run] [--main] [--color].
 // dry-run prints the plan and does not run go install/run.
 // Without --dry-run, installs run sequentially (continue on failure).
@@ -256,6 +272,34 @@ func runReinstallLocalEx(workDir string, dryRun bool, useMain bool, colorFlag, n
 
 // runReinstallLocalExTo is runReinstallLocalEx with custom writers (unwind HostIO).
 func runReinstallLocalExTo(workDir string, dryRun bool, useMain bool, colorFlag, noColor bool, names []string, out, errW io.Writer) (ReinstallExecStats, error) {
+	return runLocalInstallExTo(ModeReinstallLocal, workDir, dryRun, useMain, colorFlag, noColor, names, out, errW)
+}
+
+// runInstall implements wrk --install name...: install named local module
+// binaries resolved exactly like --reinstall-local (cmd/<name> → go install,
+// script/<name>/install → go run), but with the GOBIN/GOPATH/bin presence gate
+// disabled, so a name installs even when its binary is not installed yet.
+//
+// At least one name is required (the flag parser also enforces a minimum of one
+// non-flag token per --install occurrence).
+func runInstall(workDir string, dryRun bool, useMain bool, colorFlag, noColor bool, names []string) error {
+	_, err := runInstallExTo(workDir, dryRun, useMain, colorFlag, noColor, names, os.Stdout, os.Stderr)
+	return err
+}
+
+// runInstallExTo is runInstall with custom writers and returned execute stats.
+func runInstallExTo(workDir string, dryRun bool, useMain bool, colorFlag, noColor bool, names []string, out, errW io.Writer) (ReinstallExecStats, error) {
+	if len(names) == 0 {
+		return ReinstallExecStats{}, fmt.Errorf("wrk: --install requires at least one name")
+	}
+	return runLocalInstallExTo(ModeInstall, workDir, dryRun, useMain, colorFlag, noColor, names, out, errW)
+}
+
+// runLocalInstallExTo is the shared planner+executor behind --install and
+// --reinstall-local. mode selects the flag label, named-lookup gating, and
+// stdout vocabulary; scan root, discovery, diagnostics, nearest-go.mod
+// re-rooting, and go invocation are identical for both modes.
+func runLocalInstallExTo(mode InstallMode, workDir string, dryRun bool, useMain bool, colorFlag, noColor bool, names []string, out, errW io.Writer) (ReinstallExecStats, error) {
 	var empty ReinstallExecStats
 	if out == nil {
 		out = os.Stdout
@@ -272,7 +316,7 @@ func runReinstallLocalExTo(workDir string, dryRun bool, useMain bool, colorFlag,
 		return empty, err
 	}
 	if len(names) > 0 {
-		plan, err = filterNamedReinstallPlan(plan, names)
+		plan, err = lookupNamedPlan(plan, names, mode)
 		if err != nil {
 			return empty, err
 		}
@@ -280,137 +324,88 @@ func runReinstallLocalExTo(workDir string, dryRun bool, useMain bool, colorFlag,
 	diagColor := reinstallDiagColorEnabled(colorFlag)
 	stdoutColor := resolveStdoutColor(colorFlag, noColor)
 	if dryRun {
+		if mode == ModeInstall {
+			return empty, printLocalInstallDryRun(mode, plan, diagColor, out, errW)
+		}
+		// --reinstall-local dry-run keeps process stdout/stderr (the compose
+		// dry-run path is serial and relies on those streams).
 		return empty, printMultiLocalReinstallDryRun(plan, diagColor)
 	}
-	return executeMultiLocalReinstallsTo(plan, diagColor, stdoutColor, out, errW)
+	return executeLocalInstallsTo(mode, plan, diagColor, stdoutColor, out, errW)
 }
 
-// filterNamedReinstallPlan keeps only the requested bin names from a multi plan.
-// Each surviving item is forced to ActionInstall (named mode skips the binDir gate).
-// Missing names, empty names, and the same name claimed by multiple modules are errors.
-func filterNamedReinstallPlan(plan *MultiLocalReinstallPlan, names []string) (*MultiLocalReinstallPlan, error) {
+// lookupNamedPlan keeps only the requested bin names from a multi plan and
+// forces every surviving item to ActionInstall (named mode skips the binDir gate).
+//
+// Selection, request-order item ordering, dedupe, ambiguity/collision errors,
+// and diagnostic filtering come from installplan.Lookup; mode only supplies the
+// error prefix ("wrk: --install: …" / "wrk: --reinstall-local: …").
+func lookupNamedPlan(plan *MultiLocalReinstallPlan, names []string, mode InstallMode) (*MultiLocalReinstallPlan, error) {
 	if plan == nil {
-		return nil, fmt.Errorf("nil reinstall plan")
+		return nil, fmt.Errorf("wrk: %s: nil reinstall plan", mode.flagName())
 	}
-	ordered, err := dedupeReinstallNames(names)
+	sel, err := installplan.Lookup(localPlanToInstallPlan(plan), names)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("wrk: %s: %w", mode.flagName(), err)
 	}
+	return installPlanToLocalPlan(sel, plan.BinDir), nil
+}
 
-	type hit struct {
-		modIdx  int
-		itemIdx int
-	}
-	byName := make(map[string][]hit)
-	for mi, mod := range plan.Modules {
-		for ii, it := range mod.Items {
-			byName[it.BinName] = append(byName[it.BinName], hit{modIdx: mi, itemIdx: ii})
-		}
-	}
+// filterNamedReinstallPlan is the --reinstall-local spelling of lookupNamedPlan.
+func filterNamedReinstallPlan(plan *MultiLocalReinstallPlan, names []string) (*MultiLocalReinstallPlan, error) {
+	return lookupNamedPlan(plan, names, ModeReinstallLocal)
+}
 
-	// modIdx -> selected items (forced install), preserving request order within module.
-	selected := make([][]PlanItem, len(plan.Modules))
-	diagKeep := make([]map[string]struct{}, len(plan.Modules))
-	for i := range diagKeep {
-		diagKeep[i] = make(map[string]struct{})
-	}
-
-	for _, name := range ordered {
-		hits := byName[name]
-		if len(hits) == 0 {
-			// Prefer ambiguous diagnostic wording when the bin was omitted for that reason.
-			if paths, ok := namedAmbiguousPaths(plan, name); ok {
-				return nil, fmt.Errorf("wrk: --reinstall-local: bin %q is ambiguous (%s)", name, strings.Join(paths, ", "))
-			}
-			return nil, fmt.Errorf("wrk: --reinstall-local: no install candidate for %q", name)
+// localPlanToInstallPlan narrows the wrkcli plan (discovery + binDir Action) to
+// the pure discovery model owned by dot-pkgs installplan.
+func localPlanToInstallPlan(plan *MultiLocalReinstallPlan) *installplan.MultiPlan {
+	modules := make([]installplan.ModulePlan, 0, len(plan.Modules))
+	for _, m := range plan.Modules {
+		items := make([]installplan.Item, 0, len(m.Items))
+		for _, it := range m.Items {
+			items = append(items, installplan.Item{
+				BinName: it.BinName,
+				RelPath: it.RelPath,
+				Method:  it.Method,
+			})
 		}
-		if len(hits) > 1 {
-			a := plan.Modules[hits[0].modIdx]
-			b := plan.Modules[hits[1].modIdx]
-			return nil, fmt.Errorf(
-				"wrk: --reinstall-local: bin %q claimed by multiple modules: %s (%s) and %s (%s)",
-				name, a.ModuleRoot, a.ModuleName, b.ModuleRoot, b.ModuleName,
-			)
-		}
-		h := hits[0]
-		it := plan.Modules[h.modIdx].Items[h.itemIdx]
-		it.Action = ActionInstall
-		selected[h.modIdx] = append(selected[h.modIdx], it)
-		diagKeep[h.modIdx][name] = struct{}{}
-	}
-
-	outMods := make([]ModuleReinstallPlan, 0, len(plan.Modules))
-	for mi, mod := range plan.Modules {
-		items := selected[mi]
-		if len(items) == 0 {
-			continue
-		}
-		var diags []ReinstallDiagnostic
-		for _, d := range mod.Diagnostics {
-			if _, ok := diagKeep[mi][d.BinName]; ok {
-				diags = append(diags, d)
-			}
-		}
-		outMods = append(outMods, ModuleReinstallPlan{
-			ModuleRoot:  mod.ModuleRoot,
-			ModulePath:  mod.ModulePath,
-			ModuleName:  mod.ModuleName,
-			RelDir:      mod.RelDir,
+		modules = append(modules, installplan.ModulePlan{
+			ModuleRoot:  m.ModuleRoot,
+			ModulePath:  m.ModulePath,
+			ModuleName:  m.ModuleName,
+			RelDir:      m.RelDir,
 			Items:       items,
-			Diagnostics: diags,
+			Diagnostics: m.Diagnostics,
 		})
 	}
-	return &MultiLocalReinstallPlan{
-		BinDir:  plan.BinDir,
-		Modules: outMods,
-	}, nil
+	return &installplan.MultiPlan{Modules: modules}
 }
 
-func dedupeReinstallNames(names []string) ([]string, error) {
-	seen := make(map[string]struct{}, len(names))
-	out := make([]string, 0, len(names))
-	for _, n := range names {
-		if n == "" {
-			return nil, fmt.Errorf("wrk: --reinstall-local: empty name")
+// installPlanToLocalPlan widens a selected installplan plan back to the wrkcli
+// plan, forcing every item to ActionInstall (named mode is gate-free: a named
+// bin installs even when it is not present in binDir).
+func installPlanToLocalPlan(plan *installplan.MultiPlan, binDir string) *MultiLocalReinstallPlan {
+	modules := make([]ModuleReinstallPlan, 0, len(plan.Modules))
+	for _, m := range plan.Modules {
+		items := make([]PlanItem, 0, len(m.Items))
+		for _, it := range m.Items {
+			items = append(items, PlanItem{
+				BinName: it.BinName,
+				RelPath: it.RelPath,
+				Method:  it.Method,
+				Action:  ActionInstall,
+			})
 		}
-		if _, ok := seen[n]; ok {
-			continue
-		}
-		seen[n] = struct{}{}
-		out = append(out, n)
+		modules = append(modules, ModuleReinstallPlan{
+			ModuleRoot:  m.ModuleRoot,
+			ModulePath:  m.ModulePath,
+			ModuleName:  m.ModuleName,
+			RelDir:      m.RelDir,
+			Items:       items,
+			Diagnostics: m.Diagnostics,
+		})
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("wrk: --reinstall-local: empty name list")
-	}
-	return out, nil
-}
-
-// namedAmbiguousPaths returns sorted paths from ambiguous-* diagnostics for bin, if any.
-func namedAmbiguousPaths(plan *MultiLocalReinstallPlan, bin string) ([]string, bool) {
-	var paths []string
-	seen := make(map[string]struct{})
-	for _, mod := range plan.Modules {
-		for _, d := range mod.Diagnostics {
-			if d.BinName != bin {
-				continue
-			}
-			if d.Kind != DiagKindAmbiguousCmd && d.Kind != DiagKindAmbiguousScript {
-				continue
-			}
-			for _, p := range d.Paths {
-				if _, ok := seen[p]; ok {
-					continue
-				}
-				seen[p] = struct{}{}
-				paths = append(paths, p)
-			}
-		}
-	}
-	if len(paths) == 0 {
-		return nil, false
-	}
-	sort.Strings(paths)
-	return paths, true
+	return &MultiLocalReinstallPlan{BinDir: binDir, Modules: modules}
 }
 
 // reinstallDiagColorEnabled reports whether diagnostic prefix tokens should use ANSI.
@@ -488,18 +483,32 @@ func printLocalReinstallDryRun(plan *LocalReinstallPlan, colorOn bool) error {
 	return nil
 }
 
-// printMultiLocalReinstallDryRun prints a multi-module dry-run plan.
-//
-// Diagnostics (if any) are printed to stderr first, then plan lines on stdout.
-// K==1: same format as single-module dry-run (no # module headers; summary
-// without "across").
-// K>1: for each module in plan order, "# module <ModulePath> (<RelDir>)" then
-// that module's would:/skip: lines; summary ends with " across K modules".
+// printMultiLocalReinstallDryRun prints the --reinstall-local multi-module
+// dry-run plan to process stdout/stderr (mode-aware form: printLocalInstallDryRun).
 func printMultiLocalReinstallDryRun(plan *MultiLocalReinstallPlan, colorOn bool) error {
+	return printLocalInstallDryRun(ModeReinstallLocal, plan, colorOn, os.Stdout, os.Stderr)
+}
+
+// printLocalInstallDryRun prints the dry-run plan for mode: diagnostics first on
+// errW, then would:/skip: lines on out, then the mode summary line last.
+//
+// K==1: no # module headers and no "across" suffix (sealed single-module shape).
+// K>1: "# module <ModulePath> (<RelDir>)" before each module's items, and the
+// summary ends with " across K modules".
+//
+// Summary wording: --reinstall-local "would: reinstall N binaries (M skipped)";
+// --install "would: install N binaries" (a forced install never skips).
+func printLocalInstallDryRun(mode InstallMode, plan *MultiLocalReinstallPlan, colorOn bool, out, errW io.Writer) error {
+	if out == nil {
+		out = os.Stdout
+	}
+	if errW == nil {
+		errW = os.Stderr
+	}
 	k := len(plan.Modules)
 	// Print all diagnostics first (module order, already sorted within each).
 	for _, mod := range plan.Modules {
-		printReinstallDiagnostics(mod.Diagnostics, colorOn)
+		printReinstallDiagnosticsTo(errW, mod.Diagnostics, colorOn)
 	}
 	nInstall, nSkip := 0, 0
 	for _, mod := range plan.Modules {
@@ -512,16 +521,24 @@ func printMultiLocalReinstallDryRun(plan *MultiLocalReinstallPlan, colorOn bool)
 			if relDir == "" {
 				relDir = "."
 			}
-			fmt.Printf("# module %s (%s)\n", modulePath, relDir)
+			fmt.Fprintf(out, "# module %s (%s)\n", modulePath, relDir)
 		}
-		if err := printPlanItemsDryRun(mod.ModuleRoot, mod.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
+		if err := printPlanItemsDryRunTo(out, mod.ModuleRoot, mod.Items, plan.BinDir, &nInstall, &nSkip); err != nil {
 			return err
 		}
 	}
+	if mode == ModeInstall {
+		if k > 1 {
+			fmt.Fprintf(out, "would: install %d binaries across %d modules\n", nInstall, k)
+		} else {
+			fmt.Fprintf(out, "would: install %d binaries\n", nInstall)
+		}
+		return nil
+	}
 	if k > 1 {
-		fmt.Printf("would: reinstall %d binaries (%d skipped) across %d modules\n", nInstall, nSkip, k)
+		fmt.Fprintf(out, "would: reinstall %d binaries (%d skipped) across %d modules\n", nInstall, nSkip, k)
 	} else {
-		fmt.Printf("would: reinstall %d binaries (%d skipped)\n", nInstall, nSkip)
+		fmt.Fprintf(out, "would: reinstall %d binaries (%d skipped)\n", nInstall, nSkip)
 	}
 	return nil
 }
@@ -592,10 +609,19 @@ func splitWinner(paths []string) (winner string, rest []string) {
 	return paths[0], paths[1:]
 }
 
-// printPlanItemsDryRun writes would:/skip: lines for items; accumulates counters.
+// printPlanItemsDryRun writes would:/skip: lines for items to os.Stdout;
+// see printPlanItemsDryRunTo for the writer-aware form.
+func printPlanItemsDryRun(moduleRoot string, items []PlanItem, binDir string, nInstall, nSkip *int) error {
+	return printPlanItemsDryRunTo(os.Stdout, moduleRoot, items, binDir, nInstall, nSkip)
+}
+
+// printPlanItemsDryRunTo writes would:/skip: lines for items to out; accumulates counters.
 // Install paths are re-rooted to the nearest go.mod under moduleRoot so dry-run
 // matches what execute will run (e.g. ./foo when cmd/ is a nested module).
-func printPlanItemsDryRun(moduleRoot string, items []PlanItem, binDir string, nInstall, nSkip *int) error {
+func printPlanItemsDryRunTo(out io.Writer, moduleRoot string, items []PlanItem, binDir string, nInstall, nSkip *int) error {
+	if out == nil {
+		out = os.Stdout
+	}
 	for _, it := range items {
 		switch it.Action {
 		case ActionInstall:
@@ -606,15 +632,15 @@ func printPlanItemsDryRun(moduleRoot string, items []PlanItem, binDir string, nI
 			}
 			switch it.Method {
 			case MethodGoInstall:
-				fmt.Printf("would: go install %s\n", ownRel)
+				fmt.Fprintf(out, "would: go install %s\n", ownRel)
 			case MethodGoRunInstall:
-				fmt.Printf("would: go run %s\n", ownRel)
+				fmt.Fprintf(out, "would: go run %s\n", ownRel)
 			default:
 				return fmt.Errorf("unknown reinstall method %q for %s", it.Method, it.BinName)
 			}
 		case ActionSkip:
 			*nSkip++
-			fmt.Printf("skip: %s (not in %s)\n", it.BinName, binDir)
+			fmt.Fprintf(out, "skip: %s (not in %s)\n", it.BinName, binDir)
 		default:
 			return fmt.Errorf("unknown reinstall action %q for %s", it.Action, it.BinName)
 		}
@@ -645,10 +671,24 @@ func executeLocalReinstalls(plan *LocalReinstallPlan, diagColor, stdoutColor boo
 // lines and summary as single-module execute. Continues after failures.
 // Soft: failed > 0 → stderr warning, exit 0 (hard plan errors still fail).
 func executeMultiLocalReinstalls(plan *MultiLocalReinstallPlan, diagColor, stdoutColor bool) (ReinstallExecStats, error) {
-	return executeMultiLocalReinstallsTo(plan, diagColor, stdoutColor, os.Stdout, os.Stderr)
+	return executeLocalInstallsTo(ModeReinstallLocal, plan, diagColor, stdoutColor, os.Stdout, os.Stderr)
 }
 
+// executeMultiLocalReinstallsTo is executeLocalInstallsTo for --reinstall-local.
 func executeMultiLocalReinstallsTo(plan *MultiLocalReinstallPlan, diagColor, stdoutColor bool, out, errW io.Writer) (ReinstallExecStats, error) {
+	return executeLocalInstallsTo(ModeReinstallLocal, plan, diagColor, stdoutColor, out, errW)
+}
+
+// executeLocalInstallsTo runs installs for every module in the multi plan
+// (module order, then item order within each module). Continues after failures.
+//
+// Progress lines are mode-independent ("go install <ownRel>" / "go run <ownRel>",
+// post-re-root); the summary and soft-failure warning are mode-specific:
+//   - ModeReinstallLocal: "reinstalled N, skipped M, failed F"
+//   - ModeInstall:        "installed N, failed F"
+//
+// Soft: failed > 0 → stderr warning, exit 0 (hard plan errors still fail).
+func executeLocalInstallsTo(mode InstallMode, plan *MultiLocalReinstallPlan, diagColor, stdoutColor bool, out, errW io.Writer) (ReinstallExecStats, error) {
 	if out == nil {
 		out = os.Stdout
 	}
@@ -659,17 +699,21 @@ func executeMultiLocalReinstallsTo(plan *MultiLocalReinstallPlan, diagColor, std
 	for _, mod := range plan.Modules {
 		printReinstallDiagnosticsTo(errW, mod.Diagnostics, diagColor)
 	}
-	nReinstalled, nSkip, nFailed := 0, 0, 0
+	nInstalled, nSkip, nFailed := 0, 0, 0
 	for _, mod := range plan.Modules {
-		if err := executePlanItemsTo(mod.ModuleRoot, plan.BinDir, mod.Items, stdoutColor, out, errW, &nReinstalled, &nSkip, &nFailed); err != nil {
+		if err := executePlanItemsTo(mod.ModuleRoot, plan.BinDir, mod.Items, stdoutColor, out, errW, &nInstalled, &nSkip, &nFailed); err != nil {
 			return st, err
 		}
 	}
-	fmt.Fprintln(out, formatReinstallSummaryLine(nReinstalled, nSkip, nFailed, stdoutColor))
-	if nFailed > 0 {
-		printReinstallFailedWarningTo(errW, nFailed, diagColor)
+	if mode == ModeInstall {
+		fmt.Fprintln(out, formatInstallSummaryLine(nInstalled, nFailed, stdoutColor))
+	} else {
+		fmt.Fprintln(out, formatReinstallSummaryLine(nInstalled, nSkip, nFailed, stdoutColor))
 	}
-	st = ReinstallExecStats{Reinstalled: nReinstalled, Skipped: nSkip, Failed: nFailed}
+	if nFailed > 0 {
+		printLocalInstallFailedWarningTo(errW, mode, nFailed, diagColor)
+	}
+	st = ReinstallExecStats{Reinstalled: nInstalled, Skipped: nSkip, Failed: nFailed}
 	return st, nil
 }
 
@@ -680,14 +724,24 @@ func printReinstallFailedWarning(nFailed int, colorOn bool) {
 }
 
 func printReinstallFailedWarningTo(errW io.Writer, nFailed int, colorOn bool) {
+	printLocalInstallFailedWarningTo(errW, ModeReinstallLocal, nFailed, colorOn)
+}
+
+// printLocalInstallFailedWarningTo emits the mode-specific soft-failure notice:
+// "warning: reinstall finished with N failed" / "warning: install finished with N failed".
+func printLocalInstallFailedWarningTo(errW io.Writer, mode InstallMode, nFailed int, colorOn bool) {
 	if errW == nil {
 		errW = os.Stderr
+	}
+	verb := "reinstall"
+	if mode == ModeInstall {
+		verb = "install"
 	}
 	prefix := "warning:"
 	if colorOn {
 		prefix = colorize(prefix, ansiOrange)
 	}
-	fmt.Fprintf(errW, "%s reinstall finished with %d failed\n", prefix, nFailed)
+	fmt.Fprintf(errW, "%s %s finished with %d failed\n", prefix, verb, nFailed)
 }
 
 // executePlanItems runs install/skip actions for one module's items.

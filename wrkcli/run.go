@@ -193,6 +193,8 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	var noInModuleReplace bool
 	var bringPaths []string
 	var noDep bool
+	// installNames: --install name... (Varargs, min 1); nil = flag absent.
+	var installNames *[]string
 	var reinstallLocalNames *[]string
 	var tagNext bool
 	var syncFlag bool
@@ -288,6 +290,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		Bool("--dep-update", &depUpdate).
 		Bool("--undo", &undoFlag).
 		Bool("--all", &allFlag).
+		Varargs("--install", &installNames, lessflags.WithMinimum(1)).
 		Varargs("--reinstall-local", &reinstallLocalNames).
 		Bool("--tag-next", &tagNext).
 		Bool("--sync", &syncFlag).
@@ -346,6 +349,12 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if reinstallLocalNames != nil {
 		reinstallNames = *reinstallLocalNames
 	}
+	// --install requires ≥1 name (lessflags WithMinimum(1) already rejected zero).
+	installMode := installNames != nil
+	var installArgs []string
+	if installNames != nil {
+		installArgs = *installNames
+	}
 
 	// --dep-update / --dep-replace are Bool modes; dep dirs are remaining args.
 	// --dep-update may use partner --all instead of dirs. Clear remaining so
@@ -401,7 +410,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if pinLocals {
 		bringModeEarly := len(bringPaths) > 0
 		other := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
-			addPath != nil || removePath != nil || where || bringModeEarly || reinstallLocal ||
+			addPath != nil || removePath != nil || where || bringModeEarly || installMode || reinstallLocal ||
 			tagNext || syncFlag || pushFlag || prFlag || jsonFlag ||
 			taskDesc != nil || setTaskDesc != nil || cd || mainFlag || unwind || showGraph ||
 			commitFlag || addAll || genCommitMsg || newFlag || webFlag || scanGitRepos ||
@@ -421,7 +430,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		}
 		bringModeEarly := len(bringPaths) > 0
 		other := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
-			addPath != nil || removePath != nil || where || bringModeEarly || reinstallLocal ||
+			addPath != nil || removePath != nil || where || bringModeEarly || installMode || reinstallLocal ||
 			tagNext || syncFlag || pushFlag || prFlag || jsonFlag ||
 			taskDesc != nil || setTaskDesc != nil || cd || mainFlag || unwind || showGraph ||
 			commitFlag || addAll || genCommitMsg || newFlag || webFlag || scanGitRepos ||
@@ -488,7 +497,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	} else if scanGitRepos {
 		ctx.command = "scan-git-repos"
 	} else {
-		ctx.command = resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, exclusiveBring, reinstallLocal, tagNext, syncFlag, pushFlag, prFlag, cd, mainFlag, unwind)
+		ctx.command = resolveCommand(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, done, list, status, repos, mergeBack, exclusiveBring, installMode, reinstallLocal, tagNext, syncFlag, pushFlag, prFlag, cd, mainFlag, unwind)
 		if pinLocals {
 			ctx.command = "pin-locals"
 		}
@@ -530,7 +539,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	// It is deliberately distinct from the gen-commit-msg use, which peels and
 	// returns before this parser sees the flag.
 	if agentRunner != nil && (done || mergeBack || list || status || repos || projects || projectsDepGraph ||
-		addPath != nil || removePath != nil || where || reinstallLocal || tagNext ||
+		addPath != nil || removePath != nil || where || installMode || reinstallLocal || tagNext ||
 		syncFlag || pushFlag || prFlag || jsonFlag || setTaskDesc != nil || cd || mainFlag || unwind ||
 		showGraph || verify || pinLocals || depReplaceMode || depUpdateMode || webFlag || scanGitRepos) {
 		return fmt.Errorf("wrk: --agent-runner is only valid with create")
@@ -539,7 +548,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	// Same create-only guard as --agent-runner: --web / --scan-git-repos
 	// dispatch before the generic create UX flag check below.
 	if browserName != nil && (done || mergeBack || list || status || repos || projects || projectsDepGraph ||
-		addPath != nil || removePath != nil || where || reinstallLocal || tagNext ||
+		addPath != nil || removePath != nil || where || installMode || reinstallLocal || tagNext ||
 		syncFlag || pushFlag || prFlag || jsonFlag || setTaskDesc != nil || cd || mainFlag || unwind ||
 		showGraph || verify || pinLocals || depReplaceMode || depUpdateMode || webFlag || scanGitRepos) {
 		return fmt.Errorf("wrk: --browser is only valid with create")
@@ -607,7 +616,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	// --unwind --web is handled later (static preview + Run).
 	if webFlag && !unwind {
 		otherMode := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
-			addFlagSet || removeFlagSet || whereFlagSet || reinstallLocal || tagNext || syncFlag ||
+			addFlagSet || removeFlagSet || whereFlagSet || installMode || reinstallLocal || tagNext || syncFlag ||
 			dryRun || pushFlag || prFlag || jsonFlag || taskFlagSet || setTaskFlagSet || fetchFlag || noCd || forceCd ||
 			cd || mainFlag || confirmFromStdin || forceConfirm || noInModuleReplace || scanGitRepos ||
 			newFlag || newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
@@ -633,7 +642,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if scanGitRepos {
 		otherMode := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || bringMode ||
-			reinstallLocal || tagNext || syncFlag || dryRun || unwind || pushFlag || prFlag || jsonFlag || taskFlagSet ||
+			installMode || reinstallLocal || tagNext || syncFlag || dryRun || unwind || pushFlag || prFlag || jsonFlag || taskFlagSet ||
 			setTaskFlagSet || fetchFlag || noCd || forceCd || cd || mainFlag ||
 			confirmFromStdin || forceConfirm || noInModuleReplace || webFlag ||
 			newFlag || newWindow || noNewWindow || newTerminal || reuseTerminal || smartTerminal ||
@@ -735,7 +744,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	// also set, prefer that error over unexpected arguments.
 	if mainFlag {
 		// Pipeline partners, reinstall-local, --where, and --cd are compose partners (not otherMode).
-		mainPipelinePartner := reinstallLocal || tagNext || syncFlag || pushFlag || len(execArgs) > 0
+		mainPipelinePartner := installMode || reinstallLocal || tagNext || syncFlag || pushFlag || len(execArgs) > 0
 		otherMode := done || list || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet ||
 			bringMode || jsonFlag || mergeBack || taskFlagSet ||
 			setTaskFlagSet || noCd || spawnTarget != ""
@@ -801,7 +810,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 
 	// Resolve sourceDir to absolute; default to process cwd when absent.
 	// Passed to every sub-command as workDir instead of using os.Getwd/Chdir.
-	createMode := isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status, exclusiveBring, reinstallLocal, tagNext, syncFlag, pushFlag, prFlag, list, done, mergeBack, cd, mainFlag, unwind) && !pinLocals && !depReplaceMode && !depUpdateMode
+	createMode := isCreateMode(projects, projectsDepGraph, addFlagSet, removeFlagSet, setTaskFlagSet, whereFlagSet, repos, status, exclusiveBring, installMode, reinstallLocal, tagNext, syncFlag, pushFlag, prFlag, list, done, mergeBack, cd, mainFlag, unwind) && !pinLocals && !depReplaceMode && !depUpdateMode
 	if err := uxFlags.validate(); err != nil {
 		return err
 	}
@@ -893,7 +902,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		return fmt.Errorf("wrk: task description must not be empty")
 	}
 	// --set-task is mutually exclusive with all other modes.
-	if setTaskFlagSet && (taskFlagSet || done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || spawnTarget != "" || cd || mainFlag || unwind) {
+	if setTaskFlagSet && (taskFlagSet || done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || installMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || spawnTarget != "" || cd || mainFlag || unwind) {
 		return fmt.Errorf("wrk: --set-task is mutually exclusive with other flags")
 	}
 	if setTaskFlagSet {
@@ -905,7 +914,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		return fmt.Errorf("wrk: task description must not be empty")
 	}
 	// --task is only valid with create mode (create+bring compose is allowed).
-	if taskFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || reinstallLocal || tagNext || syncFlag || mergeBack || prFlag || cd || mainFlag || unwind) {
+	if taskFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || installMode || reinstallLocal || tagNext || syncFlag || mergeBack || prFlag || cd || mainFlag || unwind) {
 		return fmt.Errorf("wrk: --task is mutually exclusive with --done, --merge-back, --list, --status, --repos, --projects, --add, --rm, and --where")
 	}
 
@@ -913,7 +922,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if newFlag {
 		otherMode := done || mergeBack || list || status || repos || projects || projectsDepGraph ||
 			addFlagSet || removeFlagSet || whereFlagSet || setTaskFlagSet ||
-			reinstallLocal || tagNext || syncFlag || pushFlag || prFlag || jsonFlag ||
+			installMode || reinstallLocal || tagNext || syncFlag || pushFlag || prFlag || jsonFlag ||
 			cd || mainFlag || dryRun
 		if otherMode {
 			return fmt.Errorf("wrk: --new is mutually exclusive with other modes")
@@ -944,7 +953,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		// status is allowed with --pr (PR status mode); validated below.
 		// --where is a compose partner for location lookup (not otherMode).
 		otherMode := done || mergeBack || list || repos || projects || projectsDepGraph ||
-			addFlagSet || removeFlagSet || bringMode || reinstallLocal || tagNext ||
+			addFlagSet || removeFlagSet || bringMode || installMode || reinstallLocal || tagNext ||
 			syncFlag || dryRun || jsonFlag || taskFlagSet || setTaskFlagSet ||
 			spawnTarget != "" || cd || mainFlag || unwind || fetchFlag || hasExec || newFlag ||
 			confirmFromStdin || forceConfirm || noInModuleReplace || noCd || forceCd
@@ -1014,29 +1023,29 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if done && mergeBack {
 		return fmt.Errorf("wrk: --done and --merge-back are mutually exclusive")
 	}
-	if repos && (done || list || status || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || spawnTarget != "" || cd || mainFlag || unwind) {
+	if repos && (done || list || status || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || installMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || spawnTarget != "" || cd || mainFlag || unwind) {
 		return fmt.Errorf("wrk: --repos is mutually exclusive with other modes")
 	}
-	if projects && (done || list || status || repos || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag || unwind) {
+	if projects && (done || list || status || repos || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || installMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag || unwind) {
 		return fmt.Errorf("wrk: --projects is mutually exclusive with other modes")
 	}
-	if projectsDepGraph && (done || list || status || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag || fetchFlag || unwind) {
+	if projectsDepGraph && (done || list || status || repos || projects || addFlagSet || removeFlagSet || whereFlagSet || bringMode || installMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag || fetchFlag || unwind) {
 		return fmt.Errorf("wrk: --projects-dep-graph is mutually exclusive with other modes")
 	}
-	if addFlagSet && (done || list || status || repos || projects || projectsDepGraph || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag || unwind) {
+	if addFlagSet && (done || list || status || repos || projects || projectsDepGraph || removeFlagSet || whereFlagSet || bringMode || installMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag || unwind) {
 		return fmt.Errorf("wrk: --add is mutually exclusive with other modes")
 	}
-	if removeFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag || unwind) {
+	if removeFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || whereFlagSet || bringMode || installMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || cd || mainFlag || unwind) {
 		return fmt.Errorf("wrk: --rm is mutually exclusive with other modes")
 	}
 	// --where composes with --main (print main path) and --pr (PR URL → worktree path).
 	// Still exclusive with --cd and other modes. prFlag is carved out here; invalid
 	// --where --pr + title/comment/push/status is checked in the prFlag block above.
-	if whereFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || bringMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || cd || unwind) {
+	if whereFlagSet && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || bringMode || installMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || cd || unwind) {
 		return fmt.Errorf("wrk: --where is mutually exclusive with other modes")
 	}
 	// --cd composes with --main (runCd main). Still exclusive with --where and other modes.
-	if cd && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || noCd || unwind) {
+	if cd && (done || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || installMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || prFlag || jsonFlag || mergeBack || taskFlagSet || setTaskFlagSet || spawnTarget != "" || fetchFlag || noCd || unwind) {
 		return fmt.Errorf("wrk: --cd is mutually exclusive with other modes")
 	}
 	// --main composes with --status (and --fetch when status is set), with
@@ -1044,7 +1053,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	// (sync/tag-next/push/reinstall-local/exec, plus --dry-run as modifier).
 	// Exclusive with done/merge-back, gen-commit-msg (checked earlier), and non-pipeline modes.
 	if mainFlag {
-		mainPipelinePartner := reinstallLocal || tagNext || syncFlag || pushFlag || hasExec
+		mainPipelinePartner := installMode || reinstallLocal || tagNext || syncFlag || pushFlag || hasExec
 		otherMode := done || list || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || bringMode || jsonFlag || mergeBack || prFlag || taskFlagSet || setTaskFlagSet || spawnTarget != "" || noCd || unwind || (!status && fetchFlag)
 		if !mainPipelinePartner && !status && !whereFlagSet && !cd {
 			otherMode = otherMode || dryRun
@@ -1056,7 +1065,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	// --status composes with --pr (PR status) and --main; exclusive with push/list/etc.
 	// prFlag is carved out here; invalid --pr --status + title/comment/push is checked above.
 	// --unwind remains exclusive with bare --status.
-	if status && (done || list || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || spawnTarget != "" || cd || unwind) {
+	if status && (done || list || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || bringMode || installMode || reinstallLocal || tagNext || syncFlag || dryRun || pushFlag || jsonFlag || spawnTarget != "" || cd || unwind) {
 		return fmt.Errorf("wrk: --status is mutually exclusive with other modes")
 	}
 	if confirmFromStdin && !done && !mergeBack {
@@ -1068,8 +1077,29 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if noInModuleReplace && !done {
 		return fmt.Errorf("wrk: --no-in-module-replace is only valid with --done")
 	}
-	if bringMode && (done || list || mergeBack || tagNext || syncFlag || cd || mainFlag || reinstallLocal || unwind) {
+	if bringMode && (done || list || mergeBack || tagNext || syncFlag || cd || mainFlag || installMode || reinstallLocal || unwind) {
 		return fmt.Errorf("wrk: --bring is mutually exclusive with --done, --merge-back and --list")
+	}
+	// --install is an exclusive named-install mode: --main (scan the main repo),
+	// --dry-run, --color/--no-color, and -v are its only partners. It forces the
+	// install (no binDir gate), so it never composes with pipeline stages or with
+	// --reinstall-local (which keeps the gate for its bare form).
+	if installMode {
+		if reinstallLocal {
+			return fmt.Errorf("wrk: --install is mutually exclusive with --reinstall-local")
+		}
+		otherMode := list || status || repos || projects || projectsDepGraph ||
+			addFlagSet || removeFlagSet || whereFlagSet || bringMode ||
+			cd || taskFlagSet || setTaskFlagSet ||
+			spawnTarget != "" || jsonFlag || fetchFlag ||
+			done || mergeBack || tagNext || syncFlag || pushFlag || prFlag ||
+			genCommitMsg || manualCommit || hasExec || unwind ||
+			confirmFromStdin || forceConfirm || noInModuleReplace || noCd || forceCd ||
+			newFlag || webFlag || scanGitRepos || pinLocals || depReplaceMode || depUpdateMode ||
+			showGraph || verify || forcePush
+		if otherMode {
+			return fmt.Errorf("wrk: --install is mutually exclusive with other modes")
+		}
 	}
 	// --reinstall-local may compose with pipeline stages (activeRoot model) and with
 	// --main / --done / --merge-back. Still exclusive with list/status/repos and similar.
@@ -1159,8 +1189,8 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	// with --unwind (stack peel plan), with --pin-locals / --dep-replace / --dep-update,
 	// with --gen-commit-msg (handled early via runGenCommitMsg),
 	// and with manual --commit -m/--message.
-	if dryRun && !done && !mergeBack && !tagNext && !syncFlag && !reinstallLocal && !pushFlag && !unwind && !manualCommit && !pinLocals && !depReplaceMode && !depUpdateMode {
-		return fmt.Errorf("wrk: --dry-run is only valid with --done, --merge-back, --tag-next, --sync, --reinstall-local, --push, --unwind, --pin-locals, --dep-replace, --dep-update, --gen-commit-msg, or --commit -m/--message")
+	if dryRun && !done && !mergeBack && !tagNext && !syncFlag && !installMode && !reinstallLocal && !pushFlag && !unwind && !manualCommit && !pinLocals && !depReplaceMode && !depUpdateMode {
+		return fmt.Errorf("wrk: --dry-run is only valid with --done, --merge-back, --tag-next, --sync, --install, --reinstall-local, --push, --unwind, --pin-locals, --dep-replace, --dep-update, --gen-commit-msg, or --commit -m/--message")
 	}
 	// -f/--force is a push modifier only (D5): never a bare primary.
 	if forcePush && !pushFlag {
@@ -1181,7 +1211,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 
 	// spawnTarget only applies to the create path. Reject for any other mode.
 	// create+bring compose may use <target-dir> (bring applies inside the spawn).
-	if spawnTarget != "" && (reinstallLocal || tagNext || syncFlag || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || done || mergeBack || prFlag || cd || mainFlag || unwind) {
+	if spawnTarget != "" && (installMode || reinstallLocal || tagNext || syncFlag || list || status || repos || projects || projectsDepGraph || addFlagSet || removeFlagSet || whereFlagSet || done || mergeBack || prFlag || cd || mainFlag || unwind) {
 		return fmt.Errorf("wrk: unexpected arguments")
 	}
 
@@ -1417,6 +1447,11 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 			return runDepUpdateAll(workDir, wrkHome, dryRun, ctx)
 		}
 		return runDepUpdate(workDir, depUpdatePaths, dryRun, ctx)
+	}
+	// --install name...: exclusive named forced install (no binDir gate).
+	// Handled before bare --main so --main --install never opens a nested shell.
+	if installMode {
+		return runInstall(workDir, dryRun, mainFlag, colorFlag, noColorFlag, installArgs)
 	}
 	// Bare / --main --reinstall-local before bare --main so compose does not open a nested shell.
 	// Multi-stage reinstall is handled by activeRoot pipeline below.
@@ -1765,11 +1800,17 @@ Flags:
   --main                          open nested shell at main repository root for this checkout
                                   (with --status: run status against the main repo instead;
                                    with --where: print main path; with --cd: runCd to main;
-                                   with --reinstall-local: reinstall from main repo modules;
+                                   with --install / --reinstall-local: scan main repo modules;
                                    with pipeline stages: run activeRoot as main, no nested shell)
   --bring p1 p2                   spawn one or more dep worktrees under ./external (repeatable); with create, apply inside the new worktree
                                   (with --here / --no-new-terminal: suppress bring plan, SKIP, and external path lines)
   --no-dep                        with --bring: worktree only; skip replace and tidy
+  --install name... [--dry-run]   install named local module binaries resolved from this checkout:
+                                  cmd/<name> → go install; script/<name>/install → go run
+                                  (at least one name required; names are arbitrary args like --bring p1 p2;
+                                   unlike --reinstall-local there is no GOBIN/GOPATH/bin presence gate,
+                                   so a name installs even when it was never installed;
+                                   with --main: scan main repository modules for this checkout)
   --reinstall-local [name...]     reinstall local module binaries already in GOBIN/GOPATH/bin
                                   (with names: install only those bins, exclusive path; skip binDir gate;
                                    with --main: scan main repository modules for this checkout;
@@ -1778,7 +1819,7 @@ Flags:
                                   (also: after successful --done / --merge-back; --json only bare)
   --sync [--dry-run]              FF-only bi-directional sync main ↔ linked worktrees
                                   (also: after successful --done / --merge-back)
-  --dry-run                       with --done/--merge-back/--tag-next/--sync/--push/--reinstall-local/--unwind/--pin-locals/--dep-replace[--undo]/--dep-update/--gen-commit-msg/--commit -m: plan only
+  --dry-run                       with --done/--merge-back/--tag-next/--sync/--push/--install/--reinstall-local/--unwind/--pin-locals/--dep-replace[--undo]/--dep-update/--gen-commit-msg/--commit -m: plan only
   --push                          push current checkout branch to upstream/origin;
                                   with --done/--merge-back: push main branch (and tags when with --tag-next);
                                   also force-with-lease origin/<worktree-branch> when that ref already exists
