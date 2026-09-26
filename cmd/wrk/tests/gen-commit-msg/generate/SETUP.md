@@ -24,6 +24,7 @@ staged + fake-opencode
 
 - No `--commit`: HEAD must not move.
 - Mock title/description match agent-pro `commit-with-fake-opencode/succeeds`.
+- `generate/unborn-binary` uses git-init-only + staged ELF binary (auto-unstage must not fatal).
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {

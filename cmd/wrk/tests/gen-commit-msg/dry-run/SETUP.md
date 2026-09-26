@@ -11,6 +11,7 @@ git repo with staged files
   -> binaries: would-unstage on stderr; index unchanged
   -> --commit: would: git commit on stderr; HEAD unchanged
   -> --commit --no-verify: would-line includes --no-verify
+  -> unborn HEAD: --dry-run --commit plans; HEAD stays unborn
 ```
 
 ## Preconditions

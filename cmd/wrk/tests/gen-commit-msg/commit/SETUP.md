@@ -24,6 +24,7 @@ staged + fake-opencode
 
 - `commit/succeeds` uses hooks-disabled repo and mock title `feat: add feature`.
 - `commit/no-verify` uses failing pre-commit + mock title `feat: skip hooks`.
+- `commit/unborn-init` uses git-init-only (no seed commit) + `--add-all --commit`.
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {

@@ -18,12 +18,15 @@ git repo with staged files
   -> exit 0; no agent
   -> binary staged: would-unstage on stderr; index unchanged
   -> --commit / --commit --no-verify: would: git commit on stderr; HEAD unchanged
+  -> unborn HEAD (git init only, staged): --dry-run --commit plans; HEAD stays unborn
 
 # generate / commit via fake-opencode (no live LLM)
 staged + FAKE_OPENCODE_MOCK_CONFIG + --agent-runner-binary <fake-opencode>
   -> wrk --gen-commit-msg --agent-runner opencode --model openai/gpt-5
   -> stdout: parsed title + description
   -> optional --commit / --commit --no-verify
+  -> unborn HEAD + staged binary: auto-unstage then generate (no restore HEAD fatal)
+  -> unborn HEAD + --add-all --commit: first (root) commit with mock title
 
 # validation / mutex vs pipeline compose
 wrk --gen-commit-msg --status              -> mutually exclusive
@@ -389,6 +392,38 @@ func stageOneTextFile(t *testing.T, req *Request) {
 	req.RepoDir = repo
 }
 
+// initUnbornGitRepo creates a hooks-disabled git repo with no commits (unborn HEAD).
+func initUnbornGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	skipIfNoGit(t)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir git dir: %v", err)
+	}
+	runGit(t, dir, "init", "--template=", "-b", "main")
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	runGit(t, dir, "config", "user.name", "Test User")
+	runGit(t, dir, "config", "core.hooksPath", "/dev/null")
+}
+
+// stageOneTextFileUnborn inits an unborn repo under WorkRoot/repo, stages change.go.
+func stageOneTextFileUnborn(t *testing.T, req *Request) {
+	t.Helper()
+	repo := filepath.Join(req.WorkRoot, "repo")
+	initUnbornGitRepo(t, repo)
+	writeFile(t, filepath.Join(repo, "change.go"), "package main\n")
+	runGit(t, repo, "add", "change.go")
+	req.RepoDir = repo
+}
+
+// writeUntrackedInUnbornRepo inits an unborn repo with an untracked change.go (not staged).
+func writeUntrackedInUnbornRepo(t *testing.T, req *Request) {
+	t.Helper()
+	repo := filepath.Join(req.WorkRoot, "repo")
+	initUnbornGitRepo(t, repo)
+	writeFile(t, filepath.Join(repo, "change.go"), "package main\n")
+	req.RepoDir = repo
+}
+
 // initCleanGitRepo inits hooks-disabled repo with only the seed commit (nothing staged).
 func initCleanGitRepo(t *testing.T, req *Request) {
 	t.Helper()
@@ -455,6 +490,25 @@ func stageBinaryAndTextFile(t *testing.T, req *Request) string {
 	return binaryRel
 }
 
+// stageBinaryAndTextFileUnborn is stageBinaryAndTextFile on an unborn HEAD (no seed commit).
+func stageBinaryAndTextFileUnborn(t *testing.T, req *Request) string {
+	t.Helper()
+	repo := filepath.Join(req.WorkRoot, "repo")
+	initUnbornGitRepo(t, repo)
+	writeFile(t, filepath.Join(repo, "app.go"), "package main\n")
+	runGit(t, repo, "add", "app.go")
+
+	binaryRel := "blob.bin"
+	binPath := filepath.Join(repo, binaryRel)
+	if err := os.WriteFile(binPath, []byte{0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01}, 0o755); err != nil {
+		t.Fatalf("write binary: %v", err)
+	}
+	runGit(t, repo, "add", binaryRel)
+	req.RepoDir = repo
+	req.BinaryRel = binaryRel
+	return binaryRel
+}
+
 func gitHEADSubject(t *testing.T, gitDir string) string {
 	t.Helper()
 	cmd := exec.Command("git", "log", "-1", "--format=%s")
@@ -468,6 +522,17 @@ func gitHEADSubject(t *testing.T, gitDir string) string {
 		t.Fatalf("git log -1 --format=%%s: %v\n%s", err, string(out))
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func gitHEADExists(t *testing.T, gitDir string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "--verify", "HEAD")
+	cmd.Dir = gitDir
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+	)
+	return cmd.Run() == nil
 }
 
 func gitStagedNames(t *testing.T, gitDir string) []string {
@@ -539,11 +604,16 @@ func assertMockMessageB(t *testing.T, stdout string, n int) {
 
 func ensureGenCommitMsgHelpersUsed() {
 	_ = stageOneTextFile
+	_ = stageOneTextFileUnborn
+	_ = writeUntrackedInUnbornRepo
+	_ = initUnbornGitRepo
 	_ = stageBinaryAndTextFile
+	_ = stageBinaryAndTextFileUnborn
 	_ = stageOneTextFileWithFailingPreCommit
 	_ = initGitRepoWithFailingPreCommitHook
 	_ = initCleanGitRepo
 	_ = gitHEADSubject
+	_ = gitHEADExists
 	_ = gitStagedNames
 	_ = mockMessageB
 	_ = assertMockMessageB

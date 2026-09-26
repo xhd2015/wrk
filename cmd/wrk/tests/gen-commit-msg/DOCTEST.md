@@ -1,7 +1,7 @@
 # wrk --gen-commit-msg — CLI wire to agent-pro commit_msg
 
 ## Version
-0.0.4
+0.0.6
 
 Decision tree for `wrk --gen-commit-msg`: top-level wrk mode that forwards to
 `github.com/xhd2015/agent-pro/agent/commit_msg.RunGenCommitMsg`. Coverage backfill
@@ -46,6 +46,9 @@ mutex pins (`--status`, bare `--sync`) and standalone generate/commit/dry-run.
 - **Git cwd** — dry-run / generate success leaves init an isolated repo under
   WorkRoot with hooks disabled (`core.hooksPath=/dev/null`) unless a leaf needs
   real hooks (`commit/no-verify`); process cwd is the repo.
+- **Unborn HEAD** — `git init` with no commits. `--gen-commit-msg --commit`
+  must not fatal on `rev-parse --abbrev-ref HEAD`; exclusive-branch uses
+  `ReadBranch` (symbolic-ref). First commit is a valid git operation.
 
 ## Tree Overview
 
@@ -57,12 +60,15 @@ gen-commit-msg/
 │   ├── accepts-model/                 # --model some/model accepted under dry-run
 │   ├── no-unstage-binary/             # binary+text staged → would-unstage; index unchanged; N=2
 │   ├── with-commit-no-mutate/         # --dry-run --commit → would: git commit; HEAD unchanged
-│   └── with-commit-no-verify-plan/    # --dry-run --commit --no-verify → would-line has --no-verify
+│   ├── with-commit-no-verify-plan/    # --dry-run --commit --no-verify → would-line has --no-verify
+│   └── unborn-init/                   # unborn HEAD + --dry-run --commit → would: git commit; stays unborn
 ├── generate/
-│   └── succeeds/                      # fake-opencode; no --commit; stdout has title+description
+│   ├── succeeds/                      # fake-opencode; no --commit; stdout has title+description
+│   └── unborn-binary/                 # unborn HEAD + staged binary; auto-unstage then generate
 ├── commit/
 │   ├── succeeds/                      # --commit; HEAD subject = mock title
-│   └── no-verify/                     # failing pre-commit + --commit --no-verify → succeeds
+│   ├── no-verify/                     # failing pre-commit + --commit --no-verify → succeeds
+│   └── unborn-init/                   # unborn HEAD + --add-all --commit → first commit mock title
 ├── mutual-exclusion/
 │   ├── with-status/                   # --gen-commit-msg --status → mutex error
 │   └── with-sync/                     # bare --gen-commit-msg --sync → allowed compose
@@ -84,9 +90,12 @@ gen-commit-msg/
 | D3 | dry-run/no-unstage-binary | binary+text staged → would-unstage on stderr; binary still staged; mock N=2 |
 | D4 | dry-run/with-commit-no-mutate | `--dry-run --commit` → would: git commit; HEAD subject unchanged |
 | D5 | dry-run/with-commit-no-verify-plan | `--dry-run --commit --no-verify` → would-line includes `--no-verify`; HEAD unchanged |
+| D6 | dry-run/unborn-init | unborn HEAD + staged + `--dry-run --commit` → would: git commit; HEAD stays unborn |
 | G1 | generate/succeeds | fake-opencode mock → exit 0; stdout has `feat: add feature` + description |
+| G2 | generate/unborn-binary | unborn HEAD + staged binary → auto-unstage; generate continues; no restore HEAD fatal |
 | C1 | commit/succeeds | `--commit` + fake-opencode → HEAD subject `feat: add feature` |
 | C2 | commit/no-verify | failing pre-commit + `--commit --no-verify` → subject `feat: skip hooks` |
+| C3 | commit/unborn-init | unborn HEAD + `--add-all --commit` + fake-opencode → root commit `feat: add feature` |
 | M1 | mutual-exclusion/with-status | `--gen-commit-msg --status` → non-zero; mutually exclusive |
 | M2 | mutual-exclusion/with-sync | bare `--gen-commit-msg --sync` → allowed multi-stage compose |
 | P1 | compose/clean-skip-with-exec | clean + `--add-all --gen-commit-msg --commit --exec true` → notice skip; exit 0 |
@@ -103,8 +112,11 @@ doctest test -v ./cmd/wrk/tests/gen-commit-msg
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/help
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/dry-run/mock-message
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/generate/succeeds
+doctest test -v ./cmd/wrk/tests/gen-commit-msg/generate/unborn-binary
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/commit/succeeds
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/commit/no-verify
+doctest test -v ./cmd/wrk/tests/gen-commit-msg/dry-run/unborn-init
+doctest test -v ./cmd/wrk/tests/gen-commit-msg/commit/unborn-init
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/mutual-exclusion/with-status
 doctest test -v ./cmd/wrk/tests/gen-commit-msg/mutual-exclusion/with-sync
 # P2 primary compose (flag + pipeline) — separate monotree roots:
