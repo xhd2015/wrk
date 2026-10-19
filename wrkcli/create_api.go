@@ -24,41 +24,62 @@ type CreateWorktreeResult struct {
 // taskSlug is an already-slugified task segment; empty means no task in names.
 // Callers that accept free-text tasks should use NormalizeTaskSlug first.
 func CreateDefaultWorktree(projectPath, wrkHome, taskSlug string) (*CreateWorktreeResult, error) {
+	checkoutRoot, planned, err := planDefaultWorktree(projectPath, wrkHome, taskSlug)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(planned.Path), 0o755); err != nil {
+		return nil, fmt.Errorf("create worktrees dir: %w", err)
+	}
+	if err := createWorktree(checkoutRoot, planned.Path, planned.Branch); err != nil {
+		return nil, err
+	}
+	return planned, nil
+}
+
+// PreviewDefaultWorktree returns the path and branch CreateDefaultWorktree
+// would use, without creating a worktree or mkdir.
+func PreviewDefaultWorktree(projectPath, wrkHome, taskSlug string) (*CreateWorktreeResult, error) {
+	_, planned, err := planDefaultWorktree(projectPath, wrkHome, taskSlug)
+	return planned, err
+}
+
+func planDefaultWorktree(projectPath, wrkHome, taskSlug string) (checkoutRoot string, planned *CreateWorktreeResult, err error) {
 	if strings.TrimSpace(projectPath) == "" {
-		return nil, fmt.Errorf("project path is required")
+		return "", nil, fmt.Errorf("project path is required")
 	}
 	if strings.TrimSpace(wrkHome) == "" {
-		return nil, fmt.Errorf("wrk home is required")
+		return "", nil, fmt.Errorf("wrk home is required")
 	}
 
 	cwd, err := filepath.Abs(projectPath)
 	if err != nil {
-		return nil, fmt.Errorf("resolve project path: %w", err)
+		return "", nil, fmt.Errorf("resolve project path: %w", err)
 	}
 
 	if !worktree.IsInsideWorkTree(cwd) {
-		return nil, fmt.Errorf("%s is not a git repository", cwd)
+		return "", nil, fmt.Errorf("%s is not a git repository", cwd)
 	}
 
-	checkoutRoot, err := worktree.ShowToplevel(cwd)
+	checkoutRoot, err = worktree.ShowToplevel(cwd)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	mainRepo, err := worktree.ResolveMainRepo(checkoutRoot)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	baseBranch, err := worktree.ReadBranch(cwd)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	date := resolveWrkDate()
 	_, pathToken, err := resolveNamingInputs(cwd, baseBranch)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	basename := filepath.Base(mainRepo)
 
@@ -66,32 +87,23 @@ func CreateDefaultWorktree(projectPath, wrkHome, taskSlug string) (*CreateWorktr
 	// Callers may pass already-fitted slugs; fitting is idempotent.
 	fitted, fitErr := fitTaskSlugForNames(basename, pathToken, date, taskSlug)
 	if fitErr != nil {
-		return nil, fitErr
+		return "", nil, fitErr
 	}
 	taskSlug = fitted
 
 	worktreesDir := filepath.Join(wrkHome, "worktrees")
-	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create worktrees dir: %w", err)
-	}
-
 	for suffix := 0; suffix < 100; suffix++ {
 		wtPath, branch := candidateNames(worktreesDir, basename, pathToken, date, taskSlug, suffix)
 		if candidateBlocked(mainRepo, wtPath, branch) {
 			continue
 		}
-
-		if err := createWorktree(checkoutRoot, wtPath, branch); err != nil {
-			return nil, err
-		}
-
 		absPath, err := filepath.Abs(wtPath)
 		if err != nil {
-			return nil, fmt.Errorf("resolve worktree path: %w", err)
+			return "", nil, fmt.Errorf("resolve worktree path: %w", err)
 		}
-		return &CreateWorktreeResult{Path: absPath, Branch: branch}, nil
+		return checkoutRoot, &CreateWorktreeResult{Path: absPath, Branch: branch}, nil
 	}
-	return nil, fmt.Errorf("could not find available worktree name after 99 attempts")
+	return "", nil, fmt.Errorf("could not find available worktree name after 99 attempts")
 }
 
 // NormalizeTaskSlug turns free-text task into a path slug.
