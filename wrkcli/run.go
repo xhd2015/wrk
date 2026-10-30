@@ -17,7 +17,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"unicode"
 
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/scan_repo"
 	"github.com/xhd2015/dot-pkgs/go-pkgs/git/worktree"
@@ -3889,6 +3888,9 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 
 	// Derive task slug if --task was set (or promoted from a task-like positional).
 	// CLI rejects empty/whitespace task text when the flag is present with empty value.
+	// A task with no ASCII word (e.g. pure Chinese) yields an empty slug and
+	// falls back to date-only naming instead of erroring, matching the server
+	// API's "empty/omitted task -> no slug" behavior.
 	// Fit slug to path/branch 255-byte budget (reserve 3 for -N); agent still gets full taskDesc.
 	var slug string
 	if taskDesc != "" {
@@ -3896,9 +3898,6 @@ func runCreate(workDir string, origWd string, targetDir string, taskDesc string,
 			return fmt.Errorf("wrk: task description must not be empty")
 		}
 		slug = slugify(taskDesc)
-		if slug == "" {
-			return fmt.Errorf("wrk: task description %q produces an empty slug", taskDesc)
-		}
 	}
 	fitted, fitErr := fitTaskSlugForNames(basename, pathToken, date, slug)
 	if fitErr != nil {
@@ -4275,13 +4274,16 @@ func hasArg(args []string, flag string) bool {
 }
 
 // slugify converts a task description into a path-safe slug.
-// Rules: lowercase, non-letter-non-digit -> "-", collapse runs of "-",
-// trim leading/trailing "-", truncate to 64 runes.
+// Rules: lowercase, non-ASCII-letter-non-ASCII-digit -> "-", collapse runs
+// of "-", trim leading/trailing "-", truncate to 64 runes.
+// Non-ASCII letters (CJK, accented Latin, ...) map to "-" so branch and
+// worktree directory names never contain them; a task with no ASCII word
+// yields an empty slug (callers treat that as "no task segment").
 func slugify(s string) string {
 	s = strings.ToLower(s)
 	var b strings.Builder
 	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		if isASCIILetterDigit(r) {
 			b.WriteRune(r)
 		} else {
 			b.WriteRune('-')
@@ -4298,6 +4300,12 @@ func slugify(s string) string {
 	}
 	s = strings.Trim(s, "-")
 	return s
+}
+
+// isASCIILetterDigit reports whether r is an ASCII letter or digit.
+// Lowercase input is assumed for letters; callers lowercase first.
+func isASCIILetterDigit(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
 
 // datePattern matches "-YYYY-MM-DD" in branch names for parsing wrk naming conventions.

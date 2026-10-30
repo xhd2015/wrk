@@ -108,16 +108,14 @@ func planDefaultWorktree(projectPath, wrkHome, taskSlug string) (checkoutRoot st
 
 // NormalizeTaskSlug turns free-text task into a path slug.
 // Empty or whitespace-only input yields empty slug (no task segment).
-// Non-empty input that slugifies to empty is an error.
+// Input with no ASCII word (e.g. pure Chinese) also yields empty slug:
+// callers create date-only names instead of erroring, so free-text tasks
+// never produce non-ASCII branch or worktree names.
 func NormalizeTaskSlug(taskDesc string) (string, error) {
 	if strings.TrimSpace(taskDesc) == "" {
 		return "", nil
 	}
-	slug := slugify(taskDesc)
-	if slug == "" {
-		return "", fmt.Errorf("task description %q produces an empty slug", taskDesc)
-	}
-	return slug, nil
+	return slugify(taskDesc), nil
 }
 
 // ResolveWrkHome returns wrkHome when non-empty; otherwise WRK_HOME or ~/.wrk.
