@@ -2,12 +2,12 @@
 
 - Exit code 0.
 - Stdout is the embedded `SKILL.md` (marker + `name: wrk`).
-- Stdout documents `--unwind` (stack pin/ship).
-- Stdout documents `--dep-update` (intentional require bumps).
-- Stdout documents `--projects-dep-graph` (cross-project module dep graph).
+- Stdout documents `--bring`, `--merge-back`, `--projects-dep-graph`,
+  `--dep-replace` as flag tokens.
 - Stdout documents `--pr` as its own flag token.
 - Stdout documents `--title` and `--comment` as **create/attach** companions of `--pr`
   (tokens present); they are **not** framed as always-required for every `--pr` mode.
+- Stdout does **not** document the retired `--unwind` or `--dep-update` commands.
 - Multi-mode PR surface (implementation-owned wording; soft checks):
   - status-with-pr (e.g. `--pr --status` or status under the Pull request section)
   - bare/show `--pr` and/or comment-only / create compose examples remain agent-usable
@@ -36,15 +36,22 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	}
 	// Token-aware whole-flag match (skillDocumentsFlagToken).
 	for _, flag := range []string{
-		"--unwind",
-		"--dep-update",
+		"--bring",
+		"--merge-back",
 		"--projects-dep-graph",
+		"--dep-replace",
 		"--pr",
 		"--title",
 		"--comment",
 	} {
 		if !skillDocumentsFlagToken(resp.Stdout, flag) {
 			t.Fatalf("embedded SKILL.md should document %s as a flag token, stdout:\n%s", flag, resp.Stdout)
+		}
+	}
+	// Retired commands must not creep back into the agent-facing doc.
+	for _, flag := range []string{"--unwind", "--dep-update"} {
+		if skillDocumentsFlagToken(resp.Stdout, flag) {
+			t.Fatalf("embedded SKILL.md must not document retired %s, stdout:\n%s", flag, resp.Stdout)
 		}
 	}
 

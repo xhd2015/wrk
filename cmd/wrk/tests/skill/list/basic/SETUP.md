@@ -1,10 +1,11 @@
 # Scenario
 
-**Feature**: wrk skill --list prints wrk on stdout
+**Feature**: wrk skill --list prints one `name - description` line per hosted skill
 
 ```
-embedded SKILL.md in wrk binary
-workspace/ -> wrk skill --list -> stdout wrk\n
+embedded skills in wrk binary (wrk, wrk-pipeline,
+wrk-pipeline-publish-and-bump, edit-dependency-code)
+workspace/ -> wrk skill --list -> 4 "name - description" lines
 ```
 
 ## Steps

@@ -3,8 +3,9 @@
 **Feature**: wrk skill -l is the short alias for --list
 
 ```
-embedded SKILL.md in wrk binary
-workspace/ -> wrk skill -l -> stdout wrk\n
+embedded skills in wrk binary (wrk, wrk-pipeline,
+wrk-pipeline-publish-and-bump, edit-dependency-code)
+workspace/ -> wrk skill --list -> 4 "name - description" lines
 ```
 
 ## Steps

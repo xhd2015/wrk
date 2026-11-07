@@ -6,7 +6,10 @@ import (
 	"strings"
 
 	"github.com/xhd2015/skills/skillcmd"
+	editdependencycode "github.com/xhd2015/wrk/docs/skills/edit-dependency-code"
 	wrkskill "github.com/xhd2015/wrk/docs/skills/wrk"
+	wrkpipeline "github.com/xhd2015/wrk/docs/skills/wrk-pipeline"
+	wrkpipelinepublishandbump "github.com/xhd2015/wrk/docs/skills/wrk-pipeline-publish-and-bump"
 )
 
 const skillSubcommandName = "wrk"
@@ -18,6 +21,7 @@ var skillLocalFlags = map[string]struct{}{
 	"--list":    {},
 	"--show":    {},
 	"--install": {},
+	"--version": {},
 	"--header":  {},
 	"-h":        {},
 	"--help":    {},
@@ -81,41 +85,75 @@ var wrkModeFlags = map[string]struct{}{
 }
 
 func skillUsage() string {
-	return `wrk skill — embedded wrk agent skill
+	return `wrk skill — embedded agent skills for wrk workflows
 
 Usage:
   wrk skill --list|-l
-  wrk skill --show [--header]
-  wrk skill --install [OPTIONS] [<dir>]
+  wrk skill --show [<name>[/<topic>]] [--header]
+  wrk skill <name> --show [--header]
+  wrk skill --version [<name>]
+  wrk skill --install [<name>[/<topic>]] [OPTIONS] [<dir>]
+  wrk skill update [OPTIONS] [<dir>]
   wrk skill -h|--help
 
 Actions (exactly one):
-  -l, --list       list available skills (prints "wrk")
-  --show           print embedded SKILL.md (full body)
-  --install        install embedded SKILL.md to agent directories
-
-Options:
-  --header         with --show: print YAML frontmatter only
+  -l, --list       list available skills
+  --show           print a skill's SKILL.md
+  --version        print metadata.version of the skill
+  --install        install a skill to agent directories
+  update           refresh already-installed skills
   -h,--help        show this help message
+
+<name> defaults to "wrk" when omitted.
+
+Skills:
+  wrk                             worktrees, ship stages, PR, deps
+  wrk-pipeline                    four-phase lifecycle: bring, PR, publish, cleanup
+  wrk-pipeline-publish-and-bump   publish a depended-upon repo, then bump consumers
+  edit-dependency-code            bring a dependency into ./external and edit it there
+
+Install options:
+  --dry-run --cursor --codex --opencode --general-agents --global
+  --dir <dir> --force --no-override
 
 Examples:
   wrk skill --list
+  wrk skill --show wrk-pipeline
   wrk skill --show --header
-  wrk skill --install --cursor --dry-run
+  wrk skill --install wrk-pipeline --cursor --dry-run
+  wrk skill --install --global
 `
 }
 
-func wrkSingleSkill() *skillcmd.SingleSkill {
-	content := wrkskill.SkillContent
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
+// wrkSkills is the single ordered list of skills hosted by the wrk binary.
+// Order drives `wrk skill --list` and `wrk skill --help`.
+func wrkSkills() []skillcmd.RegisteredSkill {
+	return []skillcmd.RegisteredSkill{
+		{Name: "wrk", Content: ensureTrailingNewline(wrkskill.SkillContent)},
+		{Name: "wrk-pipeline", Content: ensureTrailingNewline(wrkpipeline.SkillContent)},
+		{Name: "wrk-pipeline-publish-and-bump", Content: ensureTrailingNewline(wrkpipelinepublishandbump.SkillContent)},
+		{Name: "edit-dependency-code", Content: ensureTrailingNewline(editdependencycode.SkillContent)},
 	}
-	return &skillcmd.SingleSkill{
-		Name:        skillSubcommandName,
-		RootContent: content,
-		Usage:       "wrk skill --install",
-		Help:        skillUsage(),
+}
+
+func wrkSkillRegistry() *skillcmd.Registry {
+	// wrk has a single `skill` entry point (no `skills` command), so `wrk skill
+	// --help` and `wrk skill` print the same multi-skill usage text.
+	helpText := strings.TrimPrefix(skillUsage(), "\n")
+	return &skillcmd.Registry{
+		Skills:     wrkSkills(),
+		Default:    skillSubcommandName,
+		Usage:      "wrk skill --install",
+		Help:       helpText,
+		SkillsHelp: helpText,
 	}
+}
+
+func ensureTrailingNewline(content string) string {
+	if strings.HasSuffix(content, "\n") {
+		return content
+	}
+	return content + "\n"
 }
 
 func runSkill(origWd string, args []string, wrkHome string) error {
@@ -145,7 +183,7 @@ func runSkill(origWd string, args []string, wrkHome string) error {
 		}
 	}
 
-	return wrkSingleSkill().Handle(args)
+	return wrkSkillRegistry().HandleSkills(args)
 }
 
 // findConflictingWrkModeFlag reports a wrk mode flag present in skill args.

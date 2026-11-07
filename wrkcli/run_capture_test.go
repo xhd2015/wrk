@@ -30,8 +30,10 @@ func TestCaptureSkillList(t *testing.T) {
 	if res.ExitCode != 0 {
 		t.Fatalf("exit %d stderr=%q stdout=%q", res.ExitCode, res.Stderr, res.Stdout)
 	}
-	if res.Stdout != "wrk\n" {
-		t.Fatalf("stdout=%q want wrk\\n", res.Stdout)
+	for _, name := range []string{"wrk", "wrk-pipeline", "wrk-pipeline-publish-and-bump", "edit-dependency-code"} {
+		if !strings.Contains(res.Stdout, name+" - ") {
+			t.Fatalf("stdout missing %q listing, got %q", name, res.Stdout)
+		}
 	}
 }
 

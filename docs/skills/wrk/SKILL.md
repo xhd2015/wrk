@@ -41,16 +41,11 @@ wrk --done --sync --tag-next --push
 wrk --gen-commit-msg --commit --model=MODEL --done --sync --tag-next --push --reinstall-local
 # manual commit + create/attach PR
 wrk --add-all --commit -m '…' --pr --title '…' --comment '…'
-# stack pin/ship (prefer over ad-hoc consumer bumps)
-wrk --unwind --dry-run
-# intentional require bumps across stack consumers
-wrk --dep-update <dir>… --dry-run
 ```
 
 - Pre-stage: source worktree; `--dir` invalid when composed. Clean tree: `--gen-commit-msg --commit` soft-skips with `notice: worktree clean, skip commit` when later stages remain; bare gen-commit still errors. Manual `--commit -m` soft-skips only when the message already matches HEAD (else still errors).
-- Ship apply: `[n/N]` markers for commit → land → ship; all body lines under a marker are kind-aligned (indenting writers); `(tag-next→push | tag-next | push) ‖ sync ‖ reinstall-local` with fail-fast cancel and unwind-style progress (lane label matches enabled flags); sync/tag+push bodies flush after progress; reinstall stays summary-only (full log on failure). Dry-run stays serial ordered `would:`.
-- Stack pin/ship → `--unwind`; intentional require bumps → `--dep-update` (not a compose ship stage).
-- `--dep-update` tidy prefers local git trees for well-known hosts via ephemeral `url.insteadOf` (no separate seed step; `--dep-replace` / `--bring` use plain tidy).
+- Ship apply: `[n/N]` markers for commit → land → ship; all body lines under a marker are kind-aligned (indenting writers); `(tag-next→push | tag-next | push) ‖ sync ‖ reinstall-local` with fail-fast cancel and kind-aligned progress (lane label matches enabled flags); sync/tag+push bodies flush after progress; reinstall stays summary-only (full log on failure). Dry-run stays serial ordered `would:`.
+- `--dep-replace` / `--bring` tidy with plain `go mod tidy`; no remote seeding step.
 - `--json` only for bare `--tag-next` (not with primary).
 - Before land, `--done` / `--merge-back` refresh **main** from its upstream (`fetch` + `rebase` onto `@{u}` or `origin/<branch>`). Skip when no remote exists, or when the worktree HEAD is already included in local main (remove/noop; dirty main is allowed). Otherwise main must be clean.
 - `--push` after `--done` / `--merge-back` publishes main (and tags). If `origin/<worktree-branch>` already exists and its tip is in the local branch, also lease-updates that ref so a standing PR is not left on pre-rebase commits.
@@ -100,8 +95,7 @@ wrk --projects-dep-graph
 wrk --where <basename>
 # nested shell at main repo root
 wrk --main
-# dep worktree(s) under ./external (one or more paths; repeatable);
-# replace+versioned tidy fan out across the unwind stack (same consumers as --dep-replace)
+# dep worktree(s) under ./external (one or more paths; repeatable)
 wrk --bring <path>
 wrk --bring p1 p2
 # create + bring into the new worktree

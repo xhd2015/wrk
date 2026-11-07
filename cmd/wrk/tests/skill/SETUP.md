@@ -1,15 +1,23 @@
 # Scenario
 
-**Feature**: wrk skill --list|--show|--install for the single embedded wrk skill
+**Feature**: wrk skill --list|--show|--install|--version|update for the skills hosted by the wrk binary
 
 ```
 # early dispatch — no git checkout required
-wrk skill <flags> -> embedded SKILL.md (go:embed)
+wrk skill <flags> -> skillcmd.Registry (multi-skill host, //go:embed)
 
-# flag actions (no skill name argument; Shape 1)
-wrk skill --list | -l -> stdout wrk\n
-wrk skill --show [--header] -> embedded SKILL.md or YAML header only
-wrk skill --install [--cursor --dry-run] -> install.HandleInstall
+# skills hosted by this binary (order = --list order)
+wrk                  docs/skills/wrk/SKILL.md
+wrk-pipeline         docs/skills/wrk-pipeline/SKILL.md
+wrk-pipeline-publish-and-bump  docs/skills/wrk-pipeline-publish-and-bump/SKILL.md
+edit-dependency-code docs/skills/edit-dependency-code/SKILL.md
+
+# flag actions; <name> defaults to "wrk"
+wrk skill --list | -l -> one "name - description" line per skill
+wrk skill --show [<name>][--header] -> that skill's SKILL.md or YAML header only
+wrk skill <name> --show -> same, positional form
+wrk skill --install [<name>] [--cursor --dry-run] -> install one whole skill
+wrk skill update [--dry-run] -> refresh already-installed skills
 
 # help / empty
 wrk skill | --help | -h -> skill-level usage (exit 0)
@@ -22,9 +30,10 @@ wrk skill list|show|install (subcommand) -> non-zero exit
 ## Preconditions
 
 - In-process L2 via `wrkcli.Capture` (no product binary rebuild).
-- Embedded skill content lives in `docs/skills/wrk/SKILL.md` (//go:embed via
-  package `wrkskill`); doctest `show/basic` asserts `WRK_SKILL_DOCTEST_MARKER` and
-  `name: wrk` in stdout.
+- Each skill is one flat `docs/skills/<name>/SKILL.md` embedded as raw string by
+  that package (`wrkskill`, `wrkpipeline`, …); there are no topic trees, so
+  `--list` prints no `name/topic` lines.
+- `show/basic` asserts `WRK_SKILL_DOCTEST_MARKER` and `name: wrk` in stdout.
 
 ## Steps
 
@@ -37,8 +46,8 @@ wrk skill list|show|install (subcommand) -> non-zero exit
 - Skill commands do not require a git repository; cwd is a neutral empty dir
   unless a descendant overrides `req.RepoDir`.
 - Only `WRK_HOME` is passed via Capture env; no `WRK_SKILLS_ROOT`.
-- Stdout assertions use `assert.Output` v2 full-match templates where output is
-  bounded; `show/basic` uses substring checks for embedded content.
+- List output is asserted structurally (order + `name - description`), because
+  descriptions are derived from each SKILL.md frontmatter.
 - User-facing help and list/show stdout must end with trailing `\n`.
 - Layer: **L2 in-process CLI** (short path) — not binary e2e.
 
@@ -168,11 +177,11 @@ func assertOutputExact(t *testing.T, stdout, template string) {
 	assert.Output(t, stdout, template)
 }
 
-func cursorSkillInstallDir(workRoot string) string {
-	return filepath.Join(workRoot, ".cursor", "skills", "wrk")
+func cursorSkillInstallDir(workRoot, name string) string {
+	return filepath.Join(workRoot, ".cursor", "skills", name)
 }
 
-func installDryRunCursorStdoutV2(t *testing.T, workRoot string) string {
+func installDryRunCursorStdoutV2(t *testing.T, workRoot, name string) string {
 	t.Helper()
 	absWorkRoot, err := filepath.Abs(workRoot)
 	if err != nil {
@@ -181,11 +190,71 @@ func installDryRunCursorStdoutV2(t *testing.T, workRoot string) string {
 	if resolved, err := filepath.EvalSymlinks(absWorkRoot); err == nil {
 		absWorkRoot = resolved
 	}
-	skillDir := filepath.Join(absWorkRoot, ".cursor", "skills", "wrk")
+	skillDir := filepath.Join(absWorkRoot, ".cursor", "skills", name)
 	skillFile := filepath.Join(skillDir, "SKILL.md")
 	body := fmt.Sprintf("\\[dry-run\\] Installed skill to: %s\n\\[dry-run\\]   create: %s\n",
 		skillDir, skillFile)
 	return v2StdoutTemplate(body)
+}
+
+// skillListingNames is the exact `skill --list` order hosted by the wrk binary.
+var skillListingNames = []string{
+	"wrk",
+	"wrk-pipeline",
+	"wrk-pipeline-publish-and-bump",
+	"edit-dependency-code",
+}
+
+// assertSkillListStdout checks one "name - description" line per hosted skill,
+// in registration order, with a non-empty description on each line.
+func assertSkillListStdout(t *testing.T, stdout, stderr string, exitCode int) {
+	t.Helper()
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0 for skill --list, got %d stderr=%q stdout=%q", exitCode, stderr, stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr should be empty, got %q", stderr)
+	}
+	if !strings.HasSuffix(stdout, "\n") {
+		t.Fatalf("stdout must end with trailing newline, got %q", stdout)
+	}
+	lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")
+	if len(lines) != len(skillListingNames) {
+		t.Fatalf("want %d skill lines, got %d:\n%s", len(skillListingNames), len(lines), stdout)
+	}
+	for i, name := range skillListingNames {
+		prefix := name + " - "
+		if !strings.HasPrefix(lines[i], prefix) {
+			t.Fatalf("line %d should start with %q, got %q", i, prefix, lines[i])
+		}
+		if strings.TrimSpace(strings.TrimPrefix(lines[i], prefix)) == "" {
+			t.Fatalf("line %d should carry a description, got %q", i, lines[i])
+		}
+	}
+}
+
+// assertSkillShowStdout checks a `skill --show <name>` body: YAML frontmatter
+// for that name, non-empty body, trailing newline.
+func assertSkillShowStdout(t *testing.T, stdout, stderr string, exitCode int, name string) {
+	t.Helper()
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0 for skill --show %s, got %d stderr=%q", name, exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr should be empty, got %q", stderr)
+	}
+	if !strings.HasPrefix(stdout, "---\n") {
+		t.Fatalf("%s stdout should start with YAML frontmatter, got:\n%s", name, stdout)
+	}
+	if !strings.Contains(stdout, "\nname: "+name+"\n") {
+		t.Fatalf("%s stdout missing YAML name: %s:\n%s", name, name, stdout)
+	}
+	if !strings.HasSuffix(stdout, "\n") {
+		t.Fatalf("%s stdout should end with trailing newline", name)
+	}
+	if len(strings.Split(stdout, "\n")) < 8 {
+		t.Fatalf("%s stdout looks truncated (no body):\n%s", name, stdout)
+	}
 }
 
 // skillDocumentsFlagToken reports whether flag appears as a whole flag name
@@ -220,6 +289,9 @@ func ensureSkillHelpersUsed() {
 	_ = assertSkillUsageStdout
 	_ = installDryRunCursorStdoutV2
 	_ = cursorSkillInstallDir
+	_ = skillListingNames
+	_ = assertSkillListStdout
+	_ = assertSkillShowStdout
 	_ = skillDocumentsFlagToken
 	_ = wrkcli.RunCapture
 }

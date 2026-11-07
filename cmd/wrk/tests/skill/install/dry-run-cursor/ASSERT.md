@@ -27,10 +27,10 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	if resp.ExitCode != 0 {
 		t.Fatalf("exit code %d stderr=%q stdout=%q", resp.ExitCode, resp.Stderr, resp.Stdout)
 	}
-	assertOutputExact(t, resp.Stdout, installDryRunCursorStdoutV2(t, req.RepoDir))
+	assertOutputExact(t, resp.Stdout, installDryRunCursorStdoutV2(t, req.RepoDir, "wrk"))
 	if resp.Stderr != "" {
 		t.Fatalf("stderr should be empty, got %q", resp.Stderr)
 	}
-	assertFileNotExists(t, cursorSkillInstallDir(req.RepoDir))
+	assertFileNotExists(t, cursorSkillInstallDir(req.RepoDir, "wrk"))
 }
 ```
