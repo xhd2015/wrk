@@ -1,21 +1,26 @@
 ---
 name: edit-dependency-code
 description: >-
-  Before writing code in another project, reuse ./external/ if already brought,
-  otherwise wrk --bring into the primary consumer worktree's external/ (never
-  nested), then edit only that SSOT path. Use when modifying dependency code,
-  sibling/upstream repos, registered wrk projects (e.g. dot-pkgs), go.mod
-  replace targets, or any tree outside the current checkout. Triggers: edit
-  dependency code, other project, upstream package, out-of-tree, registered
-  project, sibling module, wrk --bring, bring into scope. Slash:
-  /edit-dependency-code. Do not use for in-repo-only edits, or version-only
+  Editing another project's source always starts with wrk --bring <repo> from the
+  primary consumer root: it reuses or creates a linked worktree under ./external/,
+  repoints the go.mod replace at it, and prints the one SSOT path. Edit only that
+  path; never the dependency's main worktree (~/Projects/...). Use when modifying
+  dependency code, sibling/upstream repos, registered wrk projects (e.g. dot-pkgs),
+  go.mod replace targets outside ./external/, or any tree outside the current
+  checkout. Triggers: edit dependency code, other project, upstream package,
+  out-of-tree, registered project, sibling module, wrk --bring, bring into scope.
+  Slash: /edit-dependency-code. Do not use for in-repo-only edits, or version-only
   bumps with no source edit in the dependency.
 ---
 
 # Edit dependency code
 
-Change source in another project only after it is in **this** session's scope
-under the primary consumer's `./external/`, as **one** SSOT path.
+Dependency source is edited in exactly one place: the linked worktree that
+`wrk --bring` prints under the primary consumer's `./external/`.
+
+The dependency's **main worktree** (`~/Projects/...`) is read-only for this
+session. An edit there is a lost edit: no worktree branch, no merge-back cascade,
+and it dirties a checkout other sessions share.
 
 ## When to use
 
@@ -23,6 +28,7 @@ under the primary consumer's `./external/`, as **one** SSOT path.
   sibling, upstream, registered wrk project, module outside this tree)
 - Task is "fix / implement / change code in dependency X" or similar
 - Target is a basename (`dot-pkgs`), another git root, or a `go.mod` replace path
+  pointing outside `./external/`
 
 ## When not to use
 
@@ -30,57 +36,77 @@ under the primary consumer's `./external/`, as **one** SSOT path.
 - Pure **read-only** inspection (bring only before a write)
 - Version-only bumps in **this** repo's manifests with no dependency source edit
 - Merge-back / finish worktrees (`wrk --done`, etc.) — not this skill's job
+- Working in a dedicated dep worktree of your own — use **wrk-pipeline**
 
 ## Procedure
 
 1. **Identify** the target: basename, path, or module.
 2. **Primary consumer** = the worktree whose `go.mod` (or ship) you are changing.
-   Run all bring/reuse steps from that root.
-3. **Reuse check** — before any `--bring`:
+   `cd` to its root and run every step from there. If cwd is the dependency
+   itself (its main checkout, or its own worktree), you are in the wrong tree:
+   stop and switch.
+3. **Bring — always, unconditionally:**
 
    ```bash
-   ls external/
-   rg -n 'replace .*external/|external/<basename>' go.mod
+   wrk --bring dot-pkgs        # a registered basename or an absolute path
    ```
 
-   - If `go.mod` already `replace`s to `./external/…` → that path is SSOT.
-   - Else if `./external/<basename>` (or an existing `./external/<basename>-N`)
-     is present → that path is SSOT.
-   - **Do not** run `wrk --bring` when a usable tree already exists.
-4. **Bring only if missing**, from the primary consumer root:
+   Reuse is success — `wrk: warning: dot-pkgs already exists under external/;
+   reusing …` is the expected output when this session already brought it.
+   Repeating a bring never duplicates a live worktree.
+
+   Record `P` = the **absolute path wrk prints**. Never guess it, and never
+   hand-roll `external/<name>` (no clone, no `cp`, no symlink, no bare
+   `git worktree add`).
+4. **Verify `P` before the first write:**
 
    ```bash
-   wrk --bring dot-pkgs
+   test -f "$P/.git"                          # .git is a file in a linked worktree, a dir in a main checkout
+   git -C "$P" rev-parse --abbrev-ref HEAD    # wrk-created branch, not master/main
+   git -C "$P" rev-parse --git-common-dir     # <dep main checkout>/.git
    ```
 
-   Use `--bring` (not `--dep`). Note the path wrk prints under `./external/…`.
+   `go.mod` must now `replace` to `P`; bring rewrites that directive.
 5. **Dep-of-dep** (e.g. consumer needs `agent-pro`, which needs `dot-pkgs`):
    bring both into the **same** consumer `./external/` as siblings. Point any
    nested module's `replace` at that sibling path — never
    `./external/<dep>/external/…`.
-6. **Edit and test only the SSOT path.** If `wrk --bring` fails, stop and
-   report; do not invent a path or fall back to an unregistered main checkout.
+6. **Edit and test only `P`.** If `wrk --bring` fails, stop and report; do not
+   invent a path, and do not fall back to the dependency's main checkout.
+
+`--dep-replace` / `--pin-locals` point a consumer at an existing tree for build
+verification only. They are not an editing entry: dependency source still goes
+through `wrk --bring`.
 
 ## Anti-patterns
 
 ```bash
-# Wrong: bring again when ./external/dot-pkgs already exists
-# → creates ./external/dot-pkgs-1 (brainsplit)
-wrk --bring dot-pkgs
+# Wrong: edit the dependency's main worktree directly
+$EDITOR ~/Projects/xhd2015/dot-pkgs/pkg/x.go
+# even when go.mod replace points there — run `wrk --bring dot-pkgs` and it
+# repoints the replace at ./external/dot-pkgs; edit that path only
+
+# Wrong: hand-roll the tree under external/ (clone / cp / symlink /
+# git worktree add). It is not a linked worktree, so the next --bring
+# silently creates ./external/dot-pkgs-1 (brainsplit)
+
+# Wrong: keep both the old slot and a new -1 slot
 
 # Wrong: bring from inside a nested brought project
 cd external/agent-pro && wrk --bring dot-pkgs
 # → creates external/agent-pro/external/dot-pkgs
 
-# Wrong: edit the dependency's main checkout while replace → ./external/…
-
-# Wrong: edit two trees in one session (e.g. workspace/external/ and
-# consumer/external/)
+# Wrong: edit two trees of the same project in one session
 ```
 
 ## Pitfalls
 
-- Brainsplit = two writable trees of the same project (see **Anti-patterns**).
-- "Already brought this session" is not enough — trust on-disk `./external/`
-  and `go.mod` `replace` first (see **Procedure**).
+- Repeating `wrk --bring` is safe: it warns and reuses the live linked
+  worktree, and refreshes the `replace`. "Skip the bring to avoid a duplicate"
+  is what actually creates duplicates.
+- A `./external/<name>-1` slot means the occupant was not a live linked
+  worktree (plain dir, dead registration, foreign repo). Stop and report;
+  inspect `git -C <dep-main> worktree list` before pruning anything.
+- `git worktree add: exit status 128 … missing but already registered` is a
+  stale registration: stop and report, never force it away.
 - Version bump in this repo ≠ source edit in the dependency.
