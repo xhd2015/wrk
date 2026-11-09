@@ -94,9 +94,7 @@ Pick the row that matches what depends on the repo you are shipping:
 |-----------|---------|
 | **Consumer** (no project imports it) — clean | `wrk --merge-back --sync --reinstall-local` |
 | **Consumer** — dirty | `wrk --add-all --commit -m "<summary>" --merge-back --sync --reinstall-local` |
-| **Depended upon** (some project imports it) | load **`wrk-pipeline-publish-and-bump`**: tag this repo, then bump every consumer |
-
-`wrk --projects-dep-graph` shows the incoming edges; a module with none is a consumer.
+| **Depended upon** (an in-context consumer imports it) | load **`wrk-pipeline-publish-and-bump`**: tag this repo, then bump only those in-context consumers |
 
 | Flag | Role | Needed by |
 |------|------|-----------|
