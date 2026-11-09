@@ -32,6 +32,29 @@ func TestPlanReclaimIdenticalCleanEnabled(t *testing.T) {
 	}
 }
 
+func TestPlanReclaimDirtySkipsNestedMainScan(t *testing.T) {
+	main := reclaimRepo(t)
+	wt := reclaimWorktree(t, main, "topic-nested")
+	if err := os.WriteFile(filepath.Join(wt, "dirty.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(wt, "vendor-main")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runReclaimGit(t, nested, "init", "-b", "main")
+	plan, err := PlanReclaim(context.Background(), wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Visible || plan.Enabled {
+		t.Fatalf("dirty should disable: %+v", plan)
+	}
+	if containsReason(plan.Reasons, "Nested main") {
+		t.Fatalf("dirty plan must not walk cascade: %v", plan.Reasons)
+	}
+}
+
 func TestPlanReclaimDirtyDisabled(t *testing.T) {
 	main := reclaimRepo(t)
 	wt := reclaimWorktree(t, main, "topic-dirty")

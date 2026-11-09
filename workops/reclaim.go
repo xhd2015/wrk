@@ -57,6 +57,10 @@ func PlanReclaim(ctx context.Context, dir string) (ReclaimReport, error) {
 	if err := inspectReclaimTarget(source, "This worktree", &report); err != nil {
 		return report, err
 	}
+	if len(report.Reasons) > 0 {
+		report.Enabled = false
+		return report, nil
+	}
 	cascade, err := ListCascadeLinkedWorktrees(ctx, source, source)
 	if err != nil {
 		report.Reasons = append(report.Reasons, err.Error())
@@ -133,7 +137,6 @@ func ListCascadeLinkedWorktrees(ctx context.Context, consumerTop, checkoutRoot s
 	result, err := scan_repo.Scan(ctx, scan_repo.Options{
 		Roots:         []string{consumerTop},
 		ListWorktrees: true,
-		NoCache:       true,
 	})
 	if err != nil {
 		return nil, err
