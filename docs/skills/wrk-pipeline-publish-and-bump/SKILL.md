@@ -108,12 +108,17 @@ worktree the user did not ask to land.
 
 ## 3. Cleanup
 
-**cwd = the worktree you just landed.** Only after merge-back looks good and the
+**cwd = that repo's main checkout.** Only after merge-back looks good and the
 user agrees.
 
 ```bash
-wrk --done
+wrk --done <worktree-dir>     # from main: merge + remove that worktree
 ```
+
+`--done` deletes the worktree directory immediately (auto-yes unless `--confirm`),
+so running it from inside interrupts the caller — a shell gets a follow-up `cd`,
+a running agent does not. Never run it inside the worktree it removes, and only
+when the user explicitly allows.
 
 Removes the worktree and branch; main is the source of truth after merge-back.
 Clean up worktrees created for in-context bumps. Do not `--done` the session
