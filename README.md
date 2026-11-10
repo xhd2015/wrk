@@ -17,7 +17,8 @@ Requires [Go](https://go.dev/) 1.25+ and `git` on `PATH`.
 ```sh
 wrk                              # create worktree from cwd
 wrk -t 'fix login bug'           # append task slug to branch/dir names
-wrk --done                       # merge back and remove worktree
+wrk --done <dir>                 # from main: merge that worktree back and remove it
+                                 # (never from inside it — it deletes the cwd, killing a running agent)
 ```
 
 ## Common commands

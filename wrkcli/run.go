@@ -1748,6 +1748,10 @@ Flags:
   --done [--gen-commit-msg --commit … | --commit -m MSG] [--sync] [--tag-next] [--push] [--reinstall-local] [--dry-run] [--confirm] [--confirm-from-stdin]
                                   merge worktree branch back and remove it (default auto-yes)
                                   (optional pre: gen or manual --commit -m; ship: (tag-next→push) ‖ sync ‖ reinstall-local)
+                                  DANGER: removal deletes that worktree directory immediately (auto-yes
+                                  unless --confirm), so a shell or a running agent whose cwd is inside
+                                  it is interrupted. From the main checkout pass the path:
+                                  wrk --done <dir>. Run it only when the user explicitly allows.
   --merge-back [--gen-commit-msg --commit … | --commit -m MSG] [--sync] [--tag-next] [--push] [--reinstall-local] [--dry-run] [--confirm] [--confirm-from-stdin]
                                   merge worktree branch back WITHOUT removing it (default auto-yes)
                                   (optional pre: gen or manual --commit -m; ship: (tag-next→push) ‖ sync ‖ reinstall-local)

@@ -33,7 +33,7 @@ work on a wrk worktree is verified.
 | **1 Prepare** | Before out-of-tree writes | `wrk --bring <name-or-path>` |
 | **2 PR** | Verified; user wants remote/review PR | see **PR Phase** |
 | **3 Publish** | User wants land on main (after PR **or** skip PR) | see **Publish Phase** |
-| **4 Cleanup** | After land confirmed | `wrk --done` |
+| **4 Cleanup** | After land confirmed; cwd = main checkout | `wrk --done <worktree-dir>` |
 
 **Skip PR:** if the user does not need a PR → jump **1 → work → 3 → 4**.
 
@@ -50,6 +50,7 @@ work on a wrk worktree is verified.
 | Work → **Publish** | Checks green; user **skips PR** (jump to 3) |
 | PR → Publish | Not automatic — run land only when user asks |
 | Publish → Cleanup | Ship exit 0; user confirms (or already ordered land **and** done) |
+| Cleanup | `--done` deletes the worktree dir immediately and interrupts any agent whose cwd is inside it — run it from the main checkout with the path, and only when the user explicitly allows |
 | Never | `wrk --done` before land if that would drop unmerged work still only on the worktree |
 
 ## 1. Prepare Phase
@@ -110,18 +111,20 @@ Pick the row that matches what depends on the repo you are shipping:
 
 ## 4. Cleanup Phase
 
-**cwd = brought worktree.** Only after **Publish** looks good (and user OK, unless they already ordered full land+done). Not the default after PR-only.
+**cwd = main checkout.** Only after **Publish** looks good (and user OK, unless they already ordered full land+done). Not the default after PR-only.
 
 ```bash
-wrk --done
+wrk --done <worktree-dir>     # from main: merge + remove that worktree
 ```
+
+`--done` deletes the worktree directory immediately (auto-yes unless `--confirm`), so running it with the shell — or a running agent, this one included — inside that directory interrupts the caller: interactive bash only gets a follow-up `cd`, an agent does not. Never run it from inside the worktree, and only when the user explicitly allows. Inside the worktree use `wrk --merge-back` to land without removing.
 
 Removes the worktree (and branch per wrk). Source of truth is **main** after merge-back.
 
 ## Pitfalls
 
 - Editing the dependency **main** checkout instead of the brought `external/…` path
-- PR / Publish / `--done` from the **wrong cwd** (not the worktree)
+- PR / Publish from the **wrong cwd** (not the worktree); `--done` from **inside** the worktree it removes
 - Shipping or opening PR before verify (`--add-all` will commit whatever is dirty)
 - Empty `--title` / `--comment` on PR
 - Auto-chaining PR → Publish → Cleanup without the user asking

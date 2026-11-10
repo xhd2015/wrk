@@ -17,7 +17,7 @@ Flow: **dashboard** or create → work → `--done` / `--merge-back` → optiona
 |--------|---------|
 | Dashboard (no create) | `wrk` |
 | Create | `wrk --new` · `wrk <basename> [-t 'task']` |
-| Finish | `wrk --done` (merge + remove) · `wrk --merge-back` (merge only) |
+| Finish | `wrk --merge-back` (merge only) · `wrk --done <dir>` from the main checkout (merge + remove; see **Gotchas**) |
 
 `--new` is explicit create; create also runs with create-selecting args (`<dir>`, `-t` / `--task`). Bare `wrk` alone is **dashboard**, not create. `-t` / `--task` slugs branch/dir names. With create agent launch enabled, `--agent-runner codex|codex-tty|grok|grok-tty|dsh-web` overrides that launch for one invocation (`codex` and `grok` resolve to their `-tty` runners); it errors if the effective create UX does not open an agent. `--here` clears window/terminal UX and, when agent launch is on, prefers shell follow-up `cd` + `agent-run` in the current terminal (else nested shell like `--main`/`--cd` fallback). With create+`--bring`, `--here` or `--no-new-terminal` suppresses bring plan / soft SKIP / external path lines (create path still prints) and ignores `-v` / `--verbose`.
 
@@ -111,6 +111,7 @@ wrk --dep-replace --undo <dir>…
 
 # Gotchas
 
+- **`--done` deletes the worktree you may be standing in**: landing removes that directory (auto-yes unless `--confirm`), so a shell or a running agent (this one) whose cwd is inside it is interrupted mid-task. From the main checkout pass the path (`wrk --done <dir>`); run it only when the user explicitly allows. Inside the worktree prefer `wrk --merge-back` (merge, keep).
 - **Replace guard**: `--done` may refuse local `replace` in `go.mod`; `--no-in-module-replace` for strict block.
 - **Basename fallback**: `wrk myrepo` uses registered projects when no local `./myrepo`.
 
