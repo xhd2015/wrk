@@ -1,19 +1,21 @@
 ---
 name: wrk-pipeline-publish-and-bump
 description: >-
-  Publish a depended-upon repo (merge-back, tag-next, push, sync, reinstall),
-  bump only in-context consumers to the new tag with a dep: commit, then merge
-  back and clean up. Use when this session's consumer(s) import the repo you are
-  shipping. Triggers: publish and bump, dependent repo release, bump consumers,
-  dep: module vA -> vB. Not for a repo nothing in context imports (plain
-  merge-back is enough).
+  Publish a depended-upon repo (merge-back, tag-next, push, sync, reinstall)
+  and bump only in-context consumers to the new tag with a dep: commit, then
+  merge those consumers back. Worktree removal (`wrk --done`) is a separate
+  step the user must ask for. Use when this session's consumer(s) import the
+  repo you are shipping. Triggers: publish and bump, dependent repo release,
+  bump consumers, dep: module vA -> vB. Not for a repo nothing in context
+  imports (plain merge-back is enough).
 ---
 
 # Publish and bump
 
 Ship a repo that **this session's consumer(s) import**: land it, publish its
-next tag, then bump **only those in-context consumers**. Ends with merge-back
-and worktree cleanup. Do not scan the wrk project registry for other importers.
+next tag, then bump **only those in-context consumers** and merge them back.
+Ends at merge-back; worktree removal is a separate, user-requested step (see
+§3). Do not scan the wrk project registry for other importers.
 
 ## When to use
 
@@ -108,8 +110,10 @@ worktree the user did not ask to land.
 
 ## 3. Cleanup
 
-**cwd = that repo's main checkout.** Only after merge-back looks good and the
-user agrees.
+**cwd = that repo's main checkout.** Only when the user's own message asks to
+remove that worktree — never as a "finish the job" step after the publish line
+above, and never in the same turn as merge-back/tag/push/reinstall. Leaving the
+worktree in place is a valid end state; stop and report instead.
 
 ```bash
 wrk --done <worktree-dir>     # from main: merge + remove that worktree
@@ -121,8 +125,8 @@ a running agent does not. Never run it inside the worktree it removes, and only
 when the user explicitly allows.
 
 Removes the worktree and branch; main is the source of truth after merge-back.
-Clean up worktrees created for in-context bumps. Do not `--done` the session
-checkout.
+Worktrees created for in-context bumps stay in place unless the user asks to
+remove them. Do not `--done` the session checkout.
 
 Report: published tag, per in-context consumer old → new version, commit SHAs,
 any in-context consumer that needed no change.
@@ -135,3 +139,4 @@ any in-context consumer that needed no change.
 - Forgetting `go mod tidy`, leaving `go.sum` stale
 - Bumping a consumer in its main checkout while a worktree holds the real branch
 - `--done` before merge-back, dropping commits that only exist on the worktree
+- Chaining Cleanup onto the publish line, or reading "publish / land / bump done" as permission to remove the worktree

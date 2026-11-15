@@ -1,23 +1,26 @@
 ---
 name: wrk-pipeline
 description: >-
-  Four-phase wrk lifecycle (PR optional): prepare (bring), PR (commit + open
-  PR), publish (merge-back + tag/push/sync/reinstall), cleanup (done). Skip PR
-  and jump to publish when no review PR is needed. Triggers: wrk pipeline, ship
-  worktree, wrk --pr, merge-back reinstall, wrk --bring then --done,
+  Three-phase wrk lifecycle (PR optional): prepare (bring), PR (commit + open
+  PR), publish (merge-back + tag/push/sync/reinstall). Removing the worktree
+  (`wrk --done`) is a separate fourth step the user must ask for — never part
+  of the default plan. Skip PR and jump to publish when no review PR is needed.
+  Triggers: wrk pipeline, ship worktree, wrk --pr, merge-back reinstall,
   /wrk-pipeline. Not for in-tree-only edits without a wrk worktree, or
   multi-agent fan-out (use orchestrate-agent-runners).
 ---
 
 # wrk pipeline
 
-Canonical **bring → (optional PR) → land → remove worktree** lifecycle after
-work on a wrk worktree is verified.
+Canonical **bring → (optional PR) → land** lifecycle after work on a wrk
+worktree is verified. Removing the worktree is **not** the finish line of this
+lifecycle: `--done` is a separate, explicitly user-requested action (see §4).
 
 ## When to use
 
-- Ship or finish a **brought / feature worktree** (commit, PR, merge-back, tag, reinstall, done)
-- User asks for the wrk ship line, `wrk --pr`, merge-back + tag-next, or `wrk --done`
+- Ship or finish a **brought / feature worktree** (commit, PR, merge-back, tag, reinstall)
+- User asks for the wrk ship line, `wrk --pr`, or merge-back + tag-next
+- User **explicitly** asks to remove/delete/clean up a worktree (`wrk --done`) — see §4
 - Out-of-tree dependency work that already used (or will use) `wrk --bring`
 
 ## When not to use
@@ -33,9 +36,10 @@ work on a wrk worktree is verified.
 | **1 Prepare** | Before out-of-tree writes | `wrk --bring <name-or-path>` |
 | **2 PR** | Verified; user wants remote/review PR | see **PR Phase** |
 | **3 Publish** | User wants land on main (after PR **or** skip PR) | see **Publish Phase** |
-| **4 Cleanup** | After land confirmed; cwd = main checkout | `wrk --done <worktree-dir>` |
+| **4 Cleanup** (never automatic) | Only when a user message asks to remove that worktree; cwd = main checkout | `wrk --done <worktree-dir>` |
 
-**Skip PR:** if the user does not need a PR → jump **1 → work → 3 → 4**.
+**Skip PR:** if the user does not need a PR → jump **1 → work → 3**. Stop there:
+phase 4 is not part of the default path and must not be appended to a plan.
 
 **Between Prepare and PR/Publish:** implement and verify on the brought tree. This skill does not own that work.
 
@@ -49,8 +53,8 @@ work on a wrk worktree is verified.
 | Work → **PR** | Checks green; user wants PR |
 | Work → **Publish** | Checks green; user **skips PR** (jump to 3) |
 | PR → Publish | Not automatic — run land only when user asks |
-| Publish → Cleanup | Ship exit 0; user confirms (or already ordered land **and** done) |
-| Cleanup | `--done` deletes the worktree dir immediately and interrupts any agent whose cwd is inside it — run it from the main checkout with the path, and only when the user explicitly allows |
+| Publish → Cleanup | Ship exit 0 **and** a user message explicitly asks to remove/delete that worktree. "Merge", "ship", "land", "install", "finish" are **not** removal orders |
+| Cleanup | `--done` deletes the worktree dir immediately and interrupts any agent whose cwd is inside it — run it from the main checkout with the path, and only when the user explicitly allows. Never add it to a todo list or chain it in the same turn as Publish |
 | Never | `wrk --done` before land if that would drop unmerged work still only on the worktree |
 
 ## 1. Prepare Phase
@@ -109,9 +113,13 @@ Pick the row that matches what depends on the repo you are shipping:
 - Optional: `--dry-run` first if the user is unsure, then re-run without it.
 - Report: commit SHA, merge-back result, new tag(s) if any, reinstall summary.
 
-## 4. Cleanup Phase
+## 4. Cleanup Phase (explicit user request only)
 
-**cwd = main checkout.** Only after **Publish** looks good (and user OK, unless they already ordered full land+done). Not the default after PR-only.
+**cwd = main checkout.** Never part of an agent's plan or todo list, and never
+chained in the same turn as Publish/reinstall. Run it only when the user's own
+message asks to remove that worktree (done / cleanup / delete / 收尾). After
+Publish, **stop and report**: leaving the worktree in place is the correct end
+state, not unfinished work.
 
 ```bash
 wrk --done <worktree-dir>     # from main: merge + remove that worktree
@@ -127,7 +135,9 @@ Removes the worktree (and branch per wrk). Source of truth is **main** after mer
 - PR / Publish from the **wrong cwd** (not the worktree); `--done` from **inside** the worktree it removes
 - Shipping or opening PR before verify (`--add-all` will commit whatever is dirty)
 - Empty `--title` / `--comment` on PR
-- Auto-chaining PR → Publish → Cleanup without the user asking
+- Auto-chaining Publish → Cleanup without the user asking
+- Treating Cleanup as the pipeline's default last step, adding it to a todo list, or running `--done` because the code work is "finished"
+- Reading "merge / ship / land / install" as permission to remove the worktree
 - Tagging or pushing a **consumer** that nothing imports (it needs merge-back only)
 - `--done` after PR-only while land was still intended, or before merge-back with unmerged work only on the worktree
 - Editing dependency source anywhere other than the brought `external/…` path

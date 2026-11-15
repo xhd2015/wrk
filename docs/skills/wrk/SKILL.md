@@ -9,7 +9,8 @@ description: >-
 # When to use
 
 Isolated git worktree without disturbing the main checkout.
-Flow: **dashboard** or create → work → `--done` / `--merge-back` → optional PR.
+Flow: **dashboard** or create → work → `--merge-back` (land, keep) → optional PR.
+`--done` (merge + remove) is a separate removal that the user must ask for.
 
 # Lifecycle
 
@@ -17,7 +18,8 @@ Flow: **dashboard** or create → work → `--done` / `--merge-back` → optiona
 |--------|---------|
 | Dashboard (no create) | `wrk` |
 | Create | `wrk --new` · `wrk <basename> [-t 'task']` |
-| Finish | `wrk --merge-back` (merge only) · `wrk --done <dir>` from the main checkout (merge + remove; see **Gotchas**) |
+| Finish (land, keep) | `wrk --merge-back` |
+| Remove worktree (explicit user order only) | `wrk --done <dir>` from the main checkout (merge + remove; see **Gotchas**) |
 
 `--new` is explicit create; create also runs with create-selecting args (`<dir>`, `-t` / `--task`). Bare `wrk` alone is **dashboard**, not create. `-t` / `--task` slugs branch/dir names. With create agent launch enabled, `--agent-runner codex|codex-tty|grok|grok-tty|dsh-web` overrides that launch for one invocation (`codex` and `grok` resolve to their `-tty` runners); it errors if the effective create UX does not open an agent. `--here` clears window/terminal UX and, when agent launch is on, prefers shell follow-up `cd` + `agent-run` in the current terminal (else nested shell like `--main`/`--cd` fallback). With create+`--bring`, `--here` or `--no-new-terminal` suppresses bring plan / soft SKIP / external path lines (create path still prints) and ignores `-v` / `--verbose`.
 
@@ -29,16 +31,18 @@ Flag order free; apply ship stages run concurrently:
 
 ```text
 # [pre]  --gen-commit-msg --commit [--model …]   # --commit required with primary
-# [main] --done | --merge-back
+# [main] --merge-back (land, keep) | --done (land, remove — explicit user order only)
 # [ship] (tag-next→push | tag-next | push) ‖ sync ‖ reinstall-local   # lane name = enabled flags; dry-run serial
 # [tail] --exec
 ```
 
 ```sh
-# finish, sync, tag, push main (+ origin/<worktree-branch> when that ref exists)
-wrk --done --sync --tag-next --push
+# land, sync, tag, push main (keep the worktree)
+wrk --merge-back --sync --tag-next --push
 # full pre→ship
-wrk --gen-commit-msg --commit --model=MODEL --done --sync --tag-next --push --reinstall-local
+wrk --gen-commit-msg --commit --model=MODEL --merge-back --sync --tag-next --push --reinstall-local
+# removal is separate and only on an explicit user request (see Gotchas)
+# wrk --done <worktree-dir>   # from the main checkout
 # manual commit + create/attach PR
 wrk --add-all --commit -m '…' --pr --title '…' --comment '…'
 ```
@@ -111,7 +115,8 @@ wrk --dep-replace --undo <dir>…
 
 # Gotchas
 
-- **`--done` deletes the worktree you may be standing in**: landing removes that directory (auto-yes unless `--confirm`), so a shell or a running agent (this one) whose cwd is inside it is interrupted mid-task. From the main checkout pass the path (`wrk --done <dir>`); run it only when the user explicitly allows. Inside the worktree prefer `wrk --merge-back` (merge, keep).
+- **Never run `--done` to "finish" a task.** Finishing means `--merge-back` (land, keep the worktree). `--done` removes the directory and needs the user's own removal instruction — do **not** infer it from "merge", "ship", "install", "verified", or "done with the code", and never chain it in the same turn as a land.
+- **`--done` deletes the worktree you may be standing in**: landing removes that directory (auto-yes unless `--confirm`), so a shell or a running agent (this one) whose cwd is inside it is interrupted mid-task. From the main checkout pass the path (`wrk --done <dir>`); inside the worktree prefer `wrk --merge-back`.
 - **Replace guard**: `--done` may refuse local `replace` in `go.mod`; `--no-in-module-replace` for strict block.
 - **Basename fallback**: `wrk myrepo` uses registered projects when no local `./myrepo`.
 

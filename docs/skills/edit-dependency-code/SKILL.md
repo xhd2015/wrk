@@ -35,7 +35,7 @@ and it dirties a checkout other sessions share.
 - All writes stay inside the **current** worktree / repo
 - Pure **read-only** inspection (bring only before a write)
 - Version-only bumps in **this** repo's manifests with no dependency source edit
-- Merge-back / finish worktrees (`wrk --done`, etc.) — not this skill's job
+- Merge-back / finish worktrees (`wrk --merge-back`; `wrk --done` only on an explicit user request) — not this skill's job
 - Working in a dedicated dep worktree of your own — use **wrk-pipeline**
 
 ## Procedure

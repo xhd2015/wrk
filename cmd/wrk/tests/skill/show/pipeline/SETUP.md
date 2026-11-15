@@ -1,6 +1,6 @@
 # Scenario
 
-**Feature**: embedded wrk-pipeline SKILL.md (four phases)
+**Feature**: embedded wrk-pipeline SKILL.md (three phases + opt-in cleanup)
 
 ```
 workspace/ -> wrk skill --show wrk-pipeline -> stdout that skill's SKILL.md
