@@ -108,7 +108,7 @@ Actions (exactly one):
 
 Skills:
   wrk                             worktrees, ship stages, PR, deps
-  wrk-pipeline                    four-phase lifecycle: bring, PR, publish, cleanup
+  wrk-pipeline                    three-phase lifecycle (bring, PR, publish); cleanup is opt-in
   wrk-pipeline-publish-and-bump   publish a depended-upon repo, then bump in-context consumers
   edit-dependency-code            bring a dependency into ./external and edit it there
 
