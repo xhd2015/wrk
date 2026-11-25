@@ -4,7 +4,7 @@
 
 ```
 # exclusive multi+exec reject does not apply (one bring path)
-src cwd -> wrk --new --no-config --bring <d1> --exec pwd
+src -> wrk <src> --new --no-config --bring <d1> --exec pwd
   -> stdout contains create path, external path, and pwd == project WT (not external)
 ```
 
@@ -20,6 +20,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	src := initCreateBringSrc(t, req.WorkRoot, createBringDep1Module)
 	dep1 := initCreateBringDep(t, req.WorkRoot, "mydep1", createBringDep1Module)
 
+	req.TargetDir = src
 	req.RepoDir = src
 	req.MainRepo = src
 	req.DepPath = dep1

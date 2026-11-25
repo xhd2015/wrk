@@ -3,7 +3,7 @@
 **Feature**: create + `--bring --no-dep` materializes external without replace
 
 ```
-src cwd -> wrk --new --no-config --bring <d1> --no-dep
+src -> wrk <src> --new --no-config --bring <d1> --no-dep
   -> new WT + external; new WT go.mod unchanged (no replace)
 ```
 
@@ -21,6 +21,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	dep1 := initCreateBringDep(t, req.WorkRoot, "mydep1", createBringDep1Module)
 
 	createBringSnapshotGoMod(t, req, src)
+	req.TargetDir = src
 	req.RepoDir = src
 	req.MainRepo = src
 	req.DepPath = dep1

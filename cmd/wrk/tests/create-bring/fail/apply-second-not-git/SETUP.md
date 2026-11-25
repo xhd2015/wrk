@@ -4,7 +4,7 @@
 
 ```
 # first dep valid git; second path exists but is not a git repo
-src cwd -> wrk --new --no-config --bring <d1> <not-git>
+src -> wrk <src> --new --no-config --bring <d1> <not-git>
   -> non-zero
   -> create path exists; first external may exist
   -> do not require rollback
@@ -33,6 +33,7 @@ func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	}
 	writeFile(t, filepath.Join(notGit, "readme.txt"), "not a git repo\n")
 
+	req.TargetDir = src
 	req.RepoDir = src
 	req.MainRepo = src
 	req.DepPath = dep1

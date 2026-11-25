@@ -81,6 +81,39 @@ func (f createUXFlags) any() bool {
 		f.browser != nil || f.noBrowser
 }
 
+// createSelectorFlags names every CLI flag that selects create mode, in flag
+// registration order, so a rejection can point at the exact tokens the user
+// typed. Bring-only create selection is opt-in: `wrk --bring d` alone stays
+// exclusive bring (consumer=cwd), while any of these without a <project>
+// positional is an error instead of a silent create.
+//
+// taskFlagToken is the raw token used for --task ("-t" or "--task") or "" when
+// the task flag is absent. f carries the create UX flags; its noBrowser arm is
+// unreachable from the CLI (--no-browser is a --set-config flag) but kept so a
+// future create flag cannot silently escape this list.
+func createSelectorFlags(newFlag bool, taskFlagToken string, f createUXFlags) []string {
+	var sel []string
+	add := func(on bool, name string) {
+		if on {
+			sel = append(sel, name)
+		}
+	}
+	add(newFlag, "--new")
+	add(taskFlagToken != "", taskFlagToken)
+	add(f.newWindow, "--new-window")
+	add(f.noNewWindow, "--no-new-window")
+	add(f.newTerminal, "--new-terminal")
+	add(f.reuseTerminal, "--reuse-terminal")
+	add(f.smartTerminal, "--smart-terminal")
+	add(f.noNewTerminal, "--no-new-terminal")
+	add(f.here, "--here")
+	add(f.openInAgent, "--open-in-agent")
+	add(f.noOpenInAgent, "--no-open-in-agent")
+	add(f.agentRunner != nil, "--agent-runner")
+	add(f.browser != nil, "--browser")
+	return sel
+}
+
 func (f createUXFlags) validate() error {
 	nTerm := 0
 	if f.newTerminal {

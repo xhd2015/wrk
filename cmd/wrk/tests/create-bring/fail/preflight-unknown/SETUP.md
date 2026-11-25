@@ -3,7 +3,7 @@
 **Feature**: unresolvable `--bring` basename fails before create
 
 ```
-src cwd -> wrk --new --no-config --bring no-such-basename
+src -> wrk <src> --new --no-config --bring no-such-basename
   -> non-zero before create
   -> no new WT under WRK_HOME/worktrees
 ```
@@ -11,13 +11,14 @@ src cwd -> wrk --new --no-config --bring no-such-basename
 ## Steps
 
 1. Create `src` (git Go module).
-2. Run `--new --bring no-such-basename` from `src`.
+2. Run `<src> --new --bring no-such-basename` (project positional required for create+bring).
 
 ```go
 func Setup(t *testing.T, d *session.Doctest, req *Request) error {
 	_ = d
 	req.InProcess = true
 	src := initCreateBringSrc(t, req.WorkRoot, createBringDep1Module)
+	req.TargetDir = src
 	req.RepoDir = src
 	req.MainRepo = src
 	req.Args = []string{"--new", "--no-config", "--bring", "no-such-basename"}

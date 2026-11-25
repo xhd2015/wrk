@@ -486,10 +486,27 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 		agentRunner:   agentRunner,
 		browser:       browserName,
 	}
-	// Exclusive bring: cwd consumer. Compose: --new / -t / leftover positionals /
-	// create UX flags. --no-config / --exec / --no-cd alone are not compose signals.
-	createCompose := bringMode && (newFlag || taskFlagSet || len(remaining) > 0 || uxFlags.any())
-	exclusiveBring := bringMode && !createCompose
+	// Create+bring compose is keyed on an explicit <project> positional only:
+	// `wrk <project> --bring d` (project may be "."). Create-selecting flags do
+	// not upgrade a bare `wrk --bring d` into create; that stays exclusive bring
+	// with the cwd as consumer, and selectors without a project are rejected
+	// below instead of silently creating a worktree.
+	// --no-config / --exec / --no-cd alone are not create selectors.
+	projectPositional := len(remaining) > 0
+	createCompose := bringMode && projectPositional
+	exclusiveBring := bringMode && !projectPositional
+	// Raw --task token ("-t" or "--task") for selector naming in rejections.
+	taskFlagToken := ""
+	if taskFlagSet {
+		taskFlagToken = "--task"
+		for _, a := range args {
+			if a == "-t" || a == "--task" {
+				taskFlagToken = a
+				break
+			}
+		}
+	}
+	bringSelectors := createSelectorFlags(newFlag, taskFlagToken, uxFlags)
 
 	if webFlag {
 		ctx.command = "web"
@@ -813,7 +830,7 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	if err := uxFlags.validate(); err != nil {
 		return err
 	}
-	if uxFlags.any() && !createMode {
+	if uxFlags.any() && !createMode && !bringMode {
 		return fmt.Errorf("wrk: create UX flags are only valid with create mode")
 	}
 	dirHint := &DirHintOptions{
@@ -1078,6 +1095,14 @@ func run(origWd string, args []string, ctx *invocationContext, opts RunOpts) err
 	}
 	if bringMode && (done || list || mergeBack || tagNext || syncFlag || cd || mainFlag || installMode || reinstallLocal || unwind) {
 		return fmt.Errorf("wrk: --bring is mutually exclusive with --done, --merge-back and --list")
+	}
+	// Create selectors without a <project> positional: reject before any work.
+	// Otherwise `wrk --bring d --no-new-terminal` silently turned into a create
+	// (worktree printed and persisted) and only failed later at agent launch.
+	// Kept after the mutual-exclusion block so `--done --bring` keeps its wording.
+	if bringMode && !createCompose && len(bringSelectors) > 0 {
+		return fmt.Errorf("wrk: %s with --bring requires a <project> argument; create+bring is wrk <project> --bring <dep> (use . for the current checkout)",
+			strings.Join(bringSelectors, ", "))
 	}
 	// --install is an exclusive named-install mode: --main (scan the main repo),
 	// --dry-run, --color/--no-color, and -v are its only partners. It forces the
@@ -1806,6 +1831,8 @@ Flags:
                                    with --install / --reinstall-local: scan main repo modules;
                                    with pipeline stages: run activeRoot as main, no nested shell)
   --bring p1 p2                   spawn one or more dep worktrees under ./external (repeatable); with create, apply inside the new worktree
+                                  (create+bring requires a <project> positional: wrk <project> --bring <dep>, . accepted;
+                                   bare --bring stays cwd-only and rejects create flags instead of creating)
                                   (with --here / --no-new-terminal: suppress bring plan, SKIP, and external path lines)
   --no-dep                        with --bring: worktree only; skip replace and tidy
   --install name... [--dry-run]   install named local module binaries resolved from this checkout:
@@ -1861,11 +1888,11 @@ Flags:
   --browser NAME                  with create agent launch (dsh-web): browser passed to
                                   dsh web open (e.g. brave, firefox)
   --no-new-window                 disable window UX for this run
-  --no-new-terminal               disable terminal UX for this run; with --bring, suppress bring
-                                  plan/SKIP/external path lines; ignore -v/--verbose
+  --no-new-terminal               disable terminal UX for this run; with create+bring,
+                                  suppress bring plan/SKIP/external path lines; ignore -v/--verbose
   --here                          create: no new window/terminal; with agent, prefer shell
                                   follow-up cd + agent-run in this terminal (else nested shell);
-                                  with --bring, suppress bring plan/SKIP/external path lines;
+                                  with create+bring, suppress bring plan/SKIP/external path lines;
                                   ignore -v/--verbose
   --no-open-in-agent              disable agent UX for this run
   --no-config                     do not read $WRK_HOME/config.json for this run
