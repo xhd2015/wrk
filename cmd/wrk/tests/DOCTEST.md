@@ -1216,7 +1216,7 @@ wrk tests
 | CB7 | create-bring/fail/apply-second-not-git | first ok, second not git → keep WT; no rollback |
 | CB8 | create-bring/still-exclusive/with-done | `wrk --done --bring d1` stays mutually exclusive |
 | CB9 | create-bring/reject/ux-flag-without-project | `wrk --bring d1 --no-new-terminal` → non-zero, zero side effects |
-| CB10 | create-bring/reject/here-without-project | `wrk --bring d1 --here` → non-zero, zero side effects |
+| CB10 | create-bring/reject/ux-here-without-project | `wrk --bring d1 --here` → non-zero, zero side effects |
 | CB11 | create-bring/reject/new-without-project | `wrk --new --bring d1` → non-zero, zero side effects |
 
 ## How to Run

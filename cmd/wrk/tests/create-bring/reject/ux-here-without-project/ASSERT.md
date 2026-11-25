@@ -37,7 +37,7 @@ func Assert(t *testing.T, d *session.Doctest, req *Request, resp *Response, err 
 	}
 	assertFileNotExists(t, createBringDefaultWT(req))
 	assertFileNotExists(t, filepath.Join(req.MainRepo, "external"))
-	assertBranchNotExists(t, req.MainRepo, branchName("master", wrkDate, 0))
+	assertBranchNotExists(t, req.MainRepo, branchName("main", wrkDate, 0))
 	if names := createBringListHomeWTs(t, req); len(names) != 0 {
 		t.Fatalf("rejection must not create worktrees; found %v", names)
 	}
