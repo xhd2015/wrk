@@ -112,6 +112,12 @@ Pick the row that matches what depends on the repo you are shipping:
 
 - Optional: `--dry-run` first if the user is unsure, then re-run without it.
 - Report: commit SHA, merge-back result, new tag(s) if any, reinstall summary.
+- A diverged branch lands by rebasing onto main. When that rebase conflicts, the
+  landing repository's `script/git/hooks/rebase/on-conflict` resolver runs (shell
+  or Go, committed in the repository) and the rebase continues if it clears every
+  conflict; a conflict it leaves stops the land with `rebase conflict:` as before.
+  The result line then says `(N conflicted path(s) resolved by the repository's
+  on-conflict hook)`. Report that sentence rather than "merged cleanly".
 
 ## 4. Cleanup Phase (explicit user request only)
 
